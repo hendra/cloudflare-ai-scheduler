@@ -186,7 +186,7 @@ async function executeJob(env: Env, message: JobMessage): Promise<void> {
   const job = await env.DB.prepare("SELECT * FROM schedulers WHERE id = ?")
     .bind(message.schedulerId).first<SchedulerRow>();
 
-  if (!job || !job.enabled) {
+  if (!job || (!job.enabled && !message.force)) {
     await env.DB.prepare(`
       UPDATE scheduler_executions SET status = 'skipped', finished_at = ? WHERE id = ?
     `).bind(new Date().toISOString(), message.executionId).run();
@@ -267,6 +267,93 @@ export default {
 
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    if (url.pathname === "/api/run" && request.method === "POST") {
+      // Protect manual execution with a secret token.
+      const token = env.MANUAL_RUN_TOKEN;
+
+      if (
+        !token ||
+        request.headers.get("authorization") !== `Bearer ${token}`
+      ) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+
+      let body: { schedulerId?: string };
+
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: "Invalid JSON body" }, 400);
+      }
+
+      const schedulerId = String(body.schedulerId || "").trim();
+
+      if (!schedulerId) {
+        return json({ error: "schedulerId is required" }, 400);
+      }
+
+      const job = await env.DB.prepare(
+        "SELECT * FROM schedulers WHERE id = ?"
+      )
+        .bind(schedulerId)
+        .first<SchedulerRow>();
+
+      if (!job) {
+        return json({ error: "Scheduler not found" }, 404);
+      }
+
+      const executionId = crypto.randomUUID();
+      const scheduledFor = new Date().toISOString();
+
+      await env.DB.prepare(`
+        INSERT INTO scheduler_executions
+        (id, scheduler_id, scheduled_for, started_at, status, attempt)
+        VALUES (?, ?, ?, ?, 'queued', 1)
+      `)
+        .bind(
+          executionId,
+          schedulerId,
+          scheduledFor,
+          scheduledFor
+        )
+        .run();
+
+      try {
+        await env.JOB_QUEUE.send({
+          executionId,
+          schedulerId,
+          scheduledFor,
+          attempt: 1,
+          force: true
+        });
+
+        return json({
+          success: true,
+          message: "Scheduler queued for immediate execution",
+          schedulerId,
+          schedulerName: job.name,
+          executionId,
+          status: "queued"
+        }, 202);
+
+      } catch (error) {
+        await env.DB.prepare(`
+          UPDATE scheduler_executions
+          SET status = 'failed',
+              finished_at = ?,
+              error_text = ?
+          WHERE id = ?
+        `)
+          .bind(new Date().toISOString(), String(error), executionId)
+          .run();
+
+        return json({
+          error: "Failed to queue scheduler",
+          details: String(error)
+        }, 500);
+      }
+    }
 
     if (url.pathname === "/health") {
       return json({ ok: true, service: "cloudflare-ai-scheduler", timestamp: new Date().toISOString() });
