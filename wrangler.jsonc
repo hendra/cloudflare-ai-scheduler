@@ -1,0 +1,49 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cloudflare-ai-scheduler",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-09",
+  "compatibility_flags": [],
+  "observability": {
+    "enabled": true
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "scheduler-db",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "JOB_QUEUE",
+        "queue": "scheduler-jobs"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "scheduler-jobs",
+        "max_batch_size": 5,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "scheduler-jobs-dlq"
+      }
+    ]
+  },
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "vars": {
+    "DEFAULT_TIMEZONE": "Asia/Jakarta",
+    "DEFAULT_AI_MODEL": "@cf/google/gemma-4-26b-a4b-it",
+    "MAX_AI_RUNS_PER_DAY": "30",
+    "QUALITY_AI_MODEL": "",
+    "MAX_JOBS_PER_DISPATCH": "10",
+    "AI_OUTPUT_TOKEN_LIMIT": "1200"
+  }
+}
