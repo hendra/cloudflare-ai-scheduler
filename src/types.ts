@@ -7,6 +7,7 @@ export interface Env {
   MAX_AI_RUNS_PER_DAY: string;
   MAX_JOBS_PER_DISPATCH: string;
   AI_OUTPUT_TOKEN_LIMIT: string;
+  MANUAL_RUN_TOKEN?: string;
 }
 
 export interface SchedulerRow {
@@ -30,6 +31,7 @@ export interface JobMessage {
   schedulerId: string;
   scheduledFor: string;
   attempt: number;
+  force?: boolean;
 }
 
 export interface AiTextResponse {

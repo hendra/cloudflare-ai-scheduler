@@ -14,7 +14,7 @@
     {
       "binding": "DB",
       "database_name": "scheduler-db",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "b06cf04d-c7e8-469d-9905-77f913756a97",
       "migrations_dir": "migrations"
     }
   ],
