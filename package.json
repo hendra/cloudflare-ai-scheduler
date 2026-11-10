@@ -4,13 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "gen:config": "node scripts/gen-config.mjs",
+    "predev": "npm run gen:config",
     "dev": "wrangler dev",
+    "predeploy": "npm run gen:config",
     "deploy": "wrangler deploy",
     "db:create": "wrangler d1 create scheduler-db",
+    "predb:migrate:local": "npm run gen:config",
     "db:migrate:local": "wrangler d1 migrations apply scheduler-db --local",
+    "predb:migrate:remote": "npm run gen:config",
     "db:migrate:remote": "wrangler d1 migrations apply scheduler-db --remote",
-    "db:seed:local": "wrangler d1 execute scheduler-db --local --file=./migrations/0002_seed.sql",
-    "db:seed:remote": "wrangler d1 execute scheduler-db --remote --file=./migrations/0002_seed.sql",
     "typecheck": "tsc --noEmit",
     "setup": "bash scripts/setup.sh"
   },

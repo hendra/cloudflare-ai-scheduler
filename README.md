@@ -12,7 +12,7 @@ A dashboard-free, TypeScript scheduler platform for up to 10 initial mixed-frequ
 - Workers AI is inference, not a search engine. For current research, supply RSS feeds, public API data, or source material. Do not expect the model to browse the web by itself.
 - GitHub and Slack integrations are not included in this first runnable starter. They can be added later using their APIs and securely stored credentials; they are not AI providers.
 - The model selector starts with a lightweight model. The starter records model name and character counts, not actual Neurons. Check actual Neuron consumption in the Cloudflare dashboard.
-- The seeded jobs are disabled and contain example placeholders. Review prompts and inputs before enabling them.
+- Jobs are disabled until you explicitly enable them; review prompts and inputs before first run.
 - This starter intentionally does not auto-publish content, merge PRs, or send Slack messages. Add explicit destination configuration and validation before enabling side effects.
 
 ## Architecture
@@ -51,7 +51,10 @@ npm run setup
 npx wrangler d1 create scheduler-db
 ```
 
-Copy the returned `database_id` into `wrangler.jsonc` (replace `REPLACE_WITH_YOUR_D1_DATABASE_ID`).
+Copy the returned `database_id` into `.dev.vars` as `D1_DATABASE_ID` (see `.dev.vars.example`).
+`wrangler.jsonc` is generated from `wrangler.template.jsonc` by `npm run gen:config`, which reads
+`.dev.vars` — it runs automatically before `dev`, `deploy` and the migration commands, and
+`wrangler.jsonc` is gitignored. Do not edit `wrangler.jsonc` by hand; edit `wrangler.template.jsonc` instead.
 
 ### 3. Create queues
 
@@ -64,17 +67,15 @@ npx wrangler queues create scheduler-jobs-dlq
 
 ```bash
 npm run db:migrate:local
-npm run db:seed:local
 ```
 
 For production:
 
 ```bash
 npm run db:migrate:remote
-npm run db:seed:remote
 ```
 
-The seed jobs are disabled. The `next_run_at` values are placeholders far in the future. The included seed file is a template; update the schedule and next-run timestamp for each job before enabling it.
+The starter seed rows were removed (`migrations/0006_remove_seed_jobs.sql`); jobs you want to schedule are added as their own migration files with `enabled=0` and a far-future `next_run_at` until verified.
 
 ### Optional: Configure GitHub Actions trigger
 
@@ -92,7 +93,7 @@ The job's `input_json` must include `owner`, `repo`, `workflow`, and optionally 
 
 ### 5. Configure model
 
-The default model is set in `wrangler.jsonc`:
+The default model is set in `wrangler.template.jsonc`:
 
 ```json
 "DEFAULT_AI_MODEL": "@cf/google/gemma-4-26b-a4b-it"
@@ -117,7 +118,7 @@ curl http://localhost:8787/api/executions
 curl http://localhost:8787/api/usage
 ```
 
-Run migrations and seed locally before testing. For a quick manual dispatch test, temporarily set one scheduler's `next_run_at` to a past UTC timestamp and enable it. Use Wrangler's scheduled-event testing support or wait for the next minute tick.
+Run migrations locally before testing. For a quick manual dispatch test, temporarily set one scheduler's `next_run_at` to a past UTC timestamp and enable it. Use Wrangler's scheduled-event testing support or wait for the next minute tick.
 
 ### 7. Deploy
 
@@ -202,7 +203,7 @@ curl -X GET "https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev/api/executions/EXECU
 
 ## Scheduling and timezone notes
 
-Cron expressions use five fields: minute, hour, day-of-month, month, day-of-week. The scheduler stores `next_run_at` in UTC. The current starter includes a small cron parser. It evaluates cron matches in UTC; convert each desired local schedule to UTC before storing the expression. The `timezone` column is retained for configuration/documentation but is not yet used for timezone conversion by the parser. The example seed expressions are converted from Asia/Jakarta to UTC.
+Cron expressions use five fields: minute, hour, day-of-month, month, day-of-week. The scheduler stores `next_run_at` in UTC. The current starter includes a small cron parser. It evaluates cron matches in UTC; convert each desired local schedule to UTC before storing the expression. The `timezone` column is retained for configuration/documentation but is not yet used for timezone conversion by the parser.
 
 For Asia/Jakarta (UTC+7), examples:
 - 07:50 WIB -> `50 0 * * *` UTC
@@ -232,7 +233,7 @@ Do not use a local-time cron expression directly unless you add timezone-aware c
 ## Known starter limitations to address before production
 
 1. The basic cron parser evaluates UTC only. It does not implement full timezone/DST semantics.
-2. The starter seeds are examples and disabled. Replace placeholder URLs, inputs and prompts.
+2. Job definitions are added as migrations and are disabled until verified. Review URLs, inputs and prompts before enabling.
 3. The lightweight model name is configurable; verify current availability and free eligibility.
 4. Character counts are not Neuron counts. Monitor Neurons in Cloudflare.
 5. The scheduler uses D1 uniqueness to reduce duplicate dispatches, but queue delivery is at-least-once. Make every job handler idempotent before adding side effects.
