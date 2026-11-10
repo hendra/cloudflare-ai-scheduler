@@ -8,6 +8,7 @@ export interface Env {
   MAX_JOBS_PER_DISPATCH: string;
   AI_OUTPUT_TOKEN_LIMIT: string;
   MANUAL_RUN_TOKEN?: string;
+  GITHUB_PAT?: string;
 }
 
 export interface SchedulerRow {

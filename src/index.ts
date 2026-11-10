@@ -182,6 +182,40 @@ async function runAi(env: Env, job: SchedulerRow, input: Record<string, unknown>
   return { model, text: output?.response || JSON.stringify(output) };
 }
 
+async function runGitHubActionsTrigger(env: Env, input: Record<string, unknown>): Promise<string> {
+  const token = env.GITHUB_PAT;
+  if (!token) throw new Error("GITHUB_PAT is not configured");
+
+  const owner = typeof input.owner === "string" ? input.owner.trim() : "";
+  const repo = typeof input.repo === "string" ? input.repo.trim() : "";
+  const workflow = typeof input.workflow === "string" ? input.workflow.trim() : "";
+  const ref = typeof input.ref === "string" && input.ref.trim() ? input.ref.trim() : "main";
+  const inputs = input.inputs && typeof input.inputs === "object" && !Array.isArray(input.inputs)
+    ? (input.inputs as Record<string, unknown>)
+    : {};
+
+  if (!owner || !repo || !workflow) throw new Error("owner, repo, and workflow are required");
+
+  const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows/${encodeURIComponent(workflow)}/dispatches`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${token}`,
+      "Accept": "application/vnd.github+json",
+      "User-Agent": "CloudflareAIScheduler",
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    body: JSON.stringify({ ref, inputs })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`GitHub Actions dispatch failed: ${response.status} ${text}`.slice(0, 500));
+  }
+
+  return `Dispatched workflow ${workflow} on ${owner}/${repo}@${ref}`;
+}
+
 async function executeJob(env: Env, message: JobMessage): Promise<void> {
   const job = await env.DB.prepare("SELECT * FROM schedulers WHERE id = ?")
     .bind(message.schedulerId).first<SchedulerRow>();
@@ -207,6 +241,8 @@ async function executeJob(env: Env, message: JobMessage): Promise<void> {
 
     if (job.job_type === "http_check") {
       resultText = await runHttpCheck(input);
+    } else if (job.job_type === "github_actions_trigger") {
+      resultText = await runGitHubActionsTrigger(env, input);
     } else {
       let sourceMaterial = "";
       if (job.job_type === "rss_ai_digest") sourceMaterial = await fetchRssItems(input);
