@@ -5,3 +5,5 @@ node_modules
 __pycache__/
 *.pyc
 wrangler.jsonc
+ig-reel-kit/
+.ig-reel-out/

@@ -19,3 +19,13 @@ OLLAMA_BASE_URL=http://localhost:11434/v1
 OLLAMA_MODEL=gemma4:e2b
 INASOFT_PAT=
 SLACK_INASOFT_CHANNEL_ID=
+BUFFER_ACCESS_TOKEN=
+BUFFER_CHANNEL_ID=
+BUFFER_ORG_ID=
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+
+# IG Reel note: CF_ACCOUNT_ID / CF_API_TOKEN above are used automatically —
+# scripts/ig_reel_daily.py maps them to the CF_ACCOUNT/CF_TOKEN names cf_image.py expects.
+# Only set CF_ACCOUNT / CF_TOKEN if you need a separate account for the Reel pipeline.
