@@ -43,8 +43,8 @@ const PROVIDERS = {
   openrouter: { name: "openrouter", baseURL: () => "https://openrouter.ai/api/v1", key: () => process.env.OPENROUTER_API_KEY || "", model: () => process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free" },
   mistral:    { name: "mistral",    baseURL: () => "https://api.mistral.ai/v1", key: () => process.env.MISTRAL_API_KEY || "", model: () => process.env.MISTRAL_MODEL || "mistral-small-latest", jsonMode: true },
 };
-const AI_PROVIDER = (process.env.AI_PROVIDER || "cloudflare").toLowerCase();
-const AI_FALLBACKS = (process.env.AI_FALLBACKS || "groq,gemini,cerebras,openrouter,mistral").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
+const AI_PROVIDER = (process.env.AI_PROVIDER || "groq").toLowerCase();
+const AI_FALLBACKS = (process.env.AI_FALLBACKS || "cloudflare,gemini,cerebras,openrouter,mistral").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
 const CHAIN = [AI_PROVIDER, ...AI_FALLBACKS.filter((p) => p !== AI_PROVIDER)];
 const CATEGORIES = ["AI/LLM","Agents/MCP","Dev Tools","Web/Frontend","Backend","Infra/DevOps","Data","Security","Other"];
 const now = new Date();
