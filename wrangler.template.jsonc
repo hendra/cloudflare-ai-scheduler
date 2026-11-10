@@ -35,8 +35,10 @@
       }
     ]
   },
+  // Tick every 5 minutes: due rows are dispatched once a tick; keeping job
+  // cron expressions on the 5-minute grid avoids up-to-4-minute lag.
   "triggers": {
-    "crons": ["* * * * *"]
+    "crons": ["*/5 * * * *"]
   },
   "vars": {
     "DEFAULT_TIMEZONE": "Asia/Jakarta",
