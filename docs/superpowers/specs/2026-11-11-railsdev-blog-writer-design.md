@@ -23,7 +23,7 @@ Non-goals (v1):
 
 Central workflow in `cloudflare-ai-scheduler` (same `workflow_dispatch` pattern as the digests): job checks out `hendra/railsdev-site` (shallow, `fetch-depth: 1`) using `RAILSDEV_PAT`, runs the pipeline, opens a PR. One workflow, one script, one place to maintain.
 
-**Steps (single script `scripts/rails-blog-writer.mjs`, zero deps):**
+**Steps (single script `scripts/railsdev-blog-writer.mjs`, zero deps):**
 
 1. **Signals (parallel, all tolerant):** Hacker News top stories (Algolia, ~30), GitHub Trending page (reuse the pilot's parser, top ~15), plus the Rails 8 release changelog page (fetch; failures skipped). Normalize to `{title, url, source, signals}`.
 2. **Existing corpus:** fetch the list of current posts via the GitHub contents API (title + slug from frontmatter) — used to block duplicates.
@@ -46,14 +46,14 @@ Central workflow in `cloudflare-ai-scheduler` (same `workflow_dispatch` pattern 
 
 ## Files
 
-- `.github/workflows/rails-blog-writer.yml` (workflow_dispatch only in v1)
-- `scripts/rails-blog-writer.mjs`
+- `.github/workflows/railsdev-blog-writer.yml` (workflow_dispatch only in v1)
+- `scripts/railsdev-blog-writer.mjs`
 - reuses `scripts/github-trending-parser` logic inline (copy, not import)
-- migration `0008_rails_blog_writer.sql`: `schedulers` row `rails-blog-writer`, `enabled=0`, cron placeholder `0 1 * * *` (manual use only in v1)
+- migration `0008_rails_blog_writer.sql`: `schedulers` row `railsdev-blog-writer`, `enabled=0`, cron placeholder `0 1 * * *` (manual use only in v1)
 
 ## Verification plan
 
-1. Local `node scripts/rails-blog-writer.mjs` with `DRY_RUN=true` (+ `AI_STUB=true` offline) — signals fetched, topic picked, article validated against fixtures, cover rendered, message printed.
+1. Local `node scripts/railsdev-blog-writer.mjs` with `DRY_RUN=true` (+ `AI_STUB=true` offline) — signals fetched, topic picked, article validated against fixtures, cover rendered, message printed.
 2. Workflow dispatch with `dry_run=true` — full run except git push/PR; build must pass; Slack note suppressed.
 3. Live dispatch → PR opened, #railsdev notified; owner reviews/merges manually.
 4. After ≥ 3 good merges, revisit enabling a schedule.

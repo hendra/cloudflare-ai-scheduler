@@ -1,6 +1,6 @@
 # Production status — Cloudflare AI Scheduler
 
-**Last updated:** 2026-11-11 (rails-blog-writer enabled via migration 0009) (all local dates Asia/Jakarta; cron fields UTC)
+**Last updated:** 2026-11-11 (railsdev-blog-writer enabled via migration 0009) (all local dates Asia/Jakarta; cron fields UTC)
 **Scope:** what is running, where secrets live, and the non-obvious fixes that make it work.
 If you change something here, update this file.
 
@@ -10,7 +10,7 @@ If you change something here, update this file.
 |---|---|---|---|---|---|
 | `github-trending-daily` | 1 | `50 23 * * *` | 06:50 | 2026-11-10T23:50:00.000Z | #news |
 | `rails-job-search-daily` | 1 | `50 0 * * *` | 07:50 | 2026-11-11T00:50:00.000Z | #jobs |
-| `rails-blog-writer` | 1 | `0 1 * * *` | 08:00 | 2026-11-11T01:00:00.000Z | railsdev-site PR |
+| `railsdev-blog-writer` | 1 | `0 1 * * *` | 08:00 | 2026-11-11T01:00:00.000Z | railsdev-site PR |
 | `ig-reel-daily` | 0 | `15 10 * * *` | manual | 2099-… | ig-reel GHA workflow |
 
 Apply pending migrations: `npm run db:migrate:remote`. **The remote DB required `0007` to be applied manually — local migrations do not propagate.**
@@ -30,7 +30,7 @@ npx wrangler d1 execute scheduler-db --remote --command \
 | `ci` | `.github/workflows/ci.yml` | typecheck on push/PR |
 | `github-trending` | `.github/workflows/github-trending.yml` | daily top-10 → #news; deterministic pipeline |
 | `rails-job-search` | `.github/workflows/rails-job-search.yml` | daily jobs digest → #jobs |
-| `rails-blog-writer` | `.github/workflows/rails-blog-writer.yml` | draft PR on railsdev-site |
+| `railsdev-blog-writer` | `.github/workflows/railsdev-blog-writer.yml` | draft PR on railsdev-site |
 | `ig-reel` | `.github/workflows/ig-reel.yml` | IG Reel pipeline (Python Pillow/ffmpeg) |
 | `github-trending` is `workflow_dispatch` + dispatched by `github_actions_trigger` job type in the Worker. |
 
@@ -95,5 +95,5 @@ npx wrangler d1 execute scheduler-db --remote --command \
 - Providers: `cloudflare`, `groq`, `openrouter`, `gemini`, `cerebras`, `mistral`, `ollama`.
 - Default provider (production): `openrouter` with preset `@preset/ai-scheduler`.
 - Default fallbacks (production): `openrouter,groq,cloudflare`.
-- Local development: `AI_PROVIDER=ollama` with `qwen3.5:4b` (very verbose; use longer `maxTokens`).
+- Local development: `AI_PROVIDER=ollama` with `gemma4:e2b` (fast enough for interactive dev).
 - Never commit API keys; `.dev.vars` is gitignored. Production keys live in GitHub Actions secrets (`OPENROUTER_API_KEY`, `GROQ_API_KEY`, `CF_*`).
