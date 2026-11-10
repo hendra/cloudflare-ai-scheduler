@@ -1,0 +1,66 @@
+name: fullstackweb-blog-writer
+
+# FullstackWeb.dev blog writer (pilot, PR-ONLY — never auto-merges)
+# v1: manual dispatch only. Spec: prompts/fullstackweb-blog.md
+# Generates one draft article per run, opens a PR on the site repo,
+# notifies #fullstackwebdev, and leaves merge to a human.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Generate and validate the article but do NOT push a branch or open a PR'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fullstackweb-blog-writer
+  cancel-in-progress: false
+
+jobs:
+  write:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PUBLIC_FORMSPREE_FORM_ID: ${{ vars.PUBLIC_FORMSPREE_FORM_ID }}
+      FULLSTACKWEB_PAT: ${{ secrets.FULLSTACKWEB_PAT }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      AI_PROVIDER: ${{ vars.AI_PROVIDER }}
+      AI_FALLBACKS: ${{ vars.AI_FALLBACKS }}
+      AI_MODEL: ${{ vars.AI_MODEL }}
+      GROQ_MODEL: ${{ vars.GROQ_MODEL }}
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_FULLSTACKWEBDEV_CHANNEL_ID: ${{ secrets.SLACK_FULLSTACKWEBDEV_CHANNEL_ID }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      SITE_DIR: ../site
+    steps:
+      - name: Checkout scheduler repo
+        uses: actions/checkout@v4
+        with:
+          path: scheduler
+
+      - name: Checkout fullstackweb-site
+        uses: actions/checkout@v4
+        with:
+          repository: hendra/fullstackwebdev-site
+          token: ${{ secrets.FULLSTACKWEB_PAT }}
+          path: site
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install site dependencies
+        working-directory: site
+        run: pnpm install --frozen-lockfile
+
+      - name: Run blog writer
+        working-directory: scheduler
+        run: node scripts/fullstackweb-blog-writer.mjs
