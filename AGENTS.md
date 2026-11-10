@@ -18,7 +18,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 - Entrypoints: `src/index.ts` (Worker `fetch`/`scheduled`/`queue` handlers), `src/cron.ts` (cron parser), `src/types.ts`.
 - Bindings (see `wrangler.jsonc`): `DB` (D1), `AI` (Workers AI), `JOB_QUEUE` (Queue). Vars in `wrangler.jsonc` `vars`; secrets via Wrangler.
 - Flow: Cron `* * * * *` -> `dispatchDueJobs` (D1 due rows) -> Queue -> `executeJob` (AI/RSS/HTTP check) -> D1 history.
-- Job types: `ai_prompt`, `rss_ai_digest`, `http_check`.
+- Job types: `ai_prompt`, `rss_ai_digest`, `http_check`, `github_actions_trigger` (dispatches a GitHub Actions workflow; requires `GITHUB_PAT` secret).
 - Queue: max batch 5, 3 retries, dead-letter `scheduler-jobs-dlq`. `scheduled` handler wraps dispatch in `ctx.waitUntil`.
 
 ## Non-obvious gotchas
