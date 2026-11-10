@@ -1,6 +1,6 @@
 // Shared AI provider configuration for all scripts in this repo.
 // Production uses OpenRouter (preset `@preset/ai-scheduler`) with Groq and CF as fallbacks.
-// Local development uses Ollama (`qwen3.5:4b` by default; override with OLLAMA_MODEL).
+// Local development uses Ollama (`gemma4:e2b` by default; override with OLLAMA_MODEL).
 // Never commit API keys — pass them via environment variables or .dev.vars (gitignored).
 
 export const PROVIDERS = {
@@ -10,7 +10,7 @@ export const PROVIDERS = {
   gemini:     { name: "gemini",     baseURL: () => "https://generativelanguage.googleapis.com/v1beta/openai", key: () => process.env.GEMINI_API_KEY || "", model: () => process.env.GEMINI_MODEL || "gemini-2.5-flash", jsonMode: true },
   cerebras:   { name: "cerebras",   baseURL: () => "https://api.cerebras.ai/v1", key: () => process.env.CEREBRAS_API_KEY || "", model: () => process.env.CEREBRAS_MODEL || "llama-3.3-70b", jsonMode: true },
   mistral:    { name: "mistral",    baseURL: () => "https://api.mistral.ai/v1", key: () => process.env.MISTRAL_API_KEY || "", model: () => process.env.MISTRAL_MODEL || "mistral-small-latest", jsonMode: true },
-  ollama:     { name: "ollama",     baseURL: () => process.env.OLLAMA_BASE_URL || "http://localhost:11434/v1", key: () => process.env.OLLAMA_API_KEY || "ollama", model: () => process.env.OLLAMA_MODEL || "qwen3.5:4b", think: false },
+  ollama:     { name: "ollama",     baseURL: () => process.env.OLLAMA_BASE_URL || "http://localhost:11434/v1", key: () => process.env.OLLAMA_API_KEY || "ollama", model: () => process.env.OLLAMA_MODEL || "gemma4:e2b", think: false },
 };
 
 export const AI_PROVIDER = (process.env.AI_PROVIDER || "groq").toLowerCase();
