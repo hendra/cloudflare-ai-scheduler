@@ -150,6 +150,35 @@ npx wrangler d1 execute scheduler-db --remote --command \
 "SELECT * FROM daily_usage ORDER BY usage_date DESC LIMIT 14"
 ```
 
+## Manual API endpoints
+
+All manual endpoints require `Authorization: Bearer $MANUAL_RUN_TOKEN`.
+
+Queue a single scheduler:
+
+```bash
+curl -X POST "https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev/api/run" \\
+  -H "Authorization: Bearer YOUR_MANUAL_RUN_TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{"schedulerId":"rails-trends"}'
+```
+
+Queue every enabled scheduler:
+
+```bash
+curl -X POST "https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev/api/run-all" \\
+  -H "Authorization: Bearer YOUR_MANUAL_RUN_TOKEN"
+```
+
+Retrieve execution details:
+
+```bash
+curl -X GET "https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev/api/executions/EXECUTION_ID" \\
+  -H "Authorization: Bearer YOUR_MANUAL_RUN_TOKEN"
+```
+
+`POST /api/run-all` returns `202 Accepted` when at least one scheduler is queued, `200 OK` when there are no enabled schedulers, and `500` if all queue submissions fail. `GET /api/executions/:id` returns `404 Not Found` for unknown execution IDs.
+
 ## Scheduling and timezone notes
 
 Cron expressions use five fields: minute, hour, day-of-month, month, day-of-week. The scheduler stores `next_run_at` in UTC. The current starter includes a small cron parser. It evaluates cron matches in UTC; convert each desired local schedule to UTC before storing the expression. The `timezone` column is retained for configuration/documentation but is not yet used for timezone conversion by the parser. The example seed expressions are converted from Asia/Jakarta to UTC.
