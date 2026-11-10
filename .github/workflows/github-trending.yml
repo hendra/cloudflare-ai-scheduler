@@ -50,7 +50,7 @@ jobs:
         run: node scripts/github-trending-digest.mjs
 
       - name: "Notify failure to Slack #news"
-        if: failure() && !hashFiles('failure-posted')
+        if: failure() && env.DRY_RUN != 'true' && !hashFiles('failure-posted')
         run: |
           curl -sS -X POST https://slack.com/api/chat.postMessage \
             -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
