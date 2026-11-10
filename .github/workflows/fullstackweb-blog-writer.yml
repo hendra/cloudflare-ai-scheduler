@@ -66,6 +66,9 @@ jobs:
         working-directory: site
         run: pnpm install --frozen-lockfile
 
+      - name: Install Pillow (for cover generation)
+        run: pip3 install Pillow
+
       - name: Run blog writer
         working-directory: scheduler
         run: node scripts/fullstackweb-blog-writer.mjs
