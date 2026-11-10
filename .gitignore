@@ -2,3 +2,5 @@ node_modules
 .wrangler/tmp
 .wrangler/state
 .dev.vars
+__pycache__/
+*.pyc
