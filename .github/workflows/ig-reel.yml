@@ -20,6 +20,11 @@ on:
         description: 'Optional topic hint (prioritised when relevant)'
         required: false
         default: ''
+      placeholder_images:
+        description: 'Dev only: flat-colour illustrations instead of Cloudflare images (proves render/upload path when CF quota is exhausted)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -35,6 +40,7 @@ jobs:
     env:
       DRY_RUN: ${{ inputs.dry_run }}
       TOPIC: ${{ inputs.topic }}
+      PLACEHOLDER_IMAGES: ${{ inputs.placeholder_images }}
       # scripts/ig_reel_daily.py maps CF_ACCOUNT_ID/CF_API_TOKEN → CF_ACCOUNT/CF_TOKEN automatically
       CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
