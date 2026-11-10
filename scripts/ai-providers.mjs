@@ -1,0 +1,87 @@
+// Shared AI provider configuration for all scripts in this repo.
+// Production uses OpenRouter (preset `@preset/ai-scheduler`) with Groq and CF as fallbacks.
+// Local development uses Ollama (`qwen3.5:4b` by default; override with OLLAMA_MODEL).
+// Never commit API keys — pass them via environment variables or .dev.vars (gitignored).
+
+export const PROVIDERS = {
+  cloudflare: { name: "cloudflare", baseURL: () => `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID || ""}/ai/v1`, key: () => process.env.CF_API_TOKEN || "", model: () => process.env.CLOUDFLARE_MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast" },
+  groq:       { name: "groq",       baseURL: () => "https://api.groq.com/openai/v1", key: () => process.env.GROQ_API_KEY || "", model: () => process.env.GROQ_MODEL || "openai/gpt-oss-20b", jsonMode: true },
+  openrouter: { name: "openrouter", baseURL: () => "https://openrouter.ai/api/v1",  key: () => process.env.OPENROUTER_API_KEY    || "", model: () => process.env.OPENROUTER_MODEL  || "@preset/ai-scheduler", jsonMode: false },
+  gemini:     { name: "gemini",     baseURL: () => "https://generativelanguage.googleapis.com/v1beta/openai", key: () => process.env.GEMINI_API_KEY || "", model: () => process.env.GEMINI_MODEL || "gemini-2.5-flash", jsonMode: true },
+  cerebras:   { name: "cerebras",   baseURL: () => "https://api.cerebras.ai/v1", key: () => process.env.CEREBRAS_API_KEY || "", model: () => process.env.CEREBRAS_MODEL || "llama-3.3-70b", jsonMode: true },
+  mistral:    { name: "mistral",    baseURL: () => "https://api.mistral.ai/v1", key: () => process.env.MISTRAL_API_KEY || "", model: () => process.env.MISTRAL_MODEL || "mistral-small-latest", jsonMode: true },
+  ollama:     { name: "ollama",     baseURL: () => process.env.OLLAMA_BASE_URL || "http://localhost:11434/v1", key: () => process.env.OLLAMA_API_KEY || "ollama", model: () => process.env.OLLAMA_MODEL || "qwen3.5:4b", think: false },
+};
+
+export const AI_PROVIDER = (process.env.AI_PROVIDER || "groq").toLowerCase();
+export const AI_MODEL = process.env.AI_MODEL || "";
+export const AI_FALLBACKS = (process.env.AI_FALLBACKS || "")
+  .toLowerCase()
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+export function providerChain() {
+  const chain = [AI_PROVIDER];
+  for (const p of AI_FALLBACKS) {
+    if (p !== AI_PROVIDER && PROVIDERS[p] && !chain.includes(p)) chain.push(p);
+  }
+  return chain;
+}
+
+export async function callModel(promptOrOpts, opts = {}) {
+  let messages, maxTokens = 2800, temperature = 0.4, expectJSON = true, forceNoJsonMode = false;
+  if (typeof promptOrOpts === "string") {
+    messages = [{ role: "user", content: promptOrOpts }];
+    ({ maxTokens = 2800, temperature = 0.4, expectJSON = true, forceNoJsonMode = false } = opts);
+  } else if (Array.isArray(promptOrOpts)) {
+    messages = promptOrOpts;
+    ({ maxTokens = 2800, temperature = 0.4, expectJSON = true, forceNoJsonMode = false } = opts);
+  } else {
+    messages = promptOrOpts.messages;
+    ({ maxTokens = 2800, temperature = 0.4, expectJSON = true, forceNoJsonMode = false } = promptOrOpts);
+  }
+
+  const chain = providerChain();
+  const errors = [];
+  for (const name of chain) {
+    const p = PROVIDERS[name];
+    if (!p) { errors.push(`${name}: unknown provider`); continue; }
+    const key = p.key();
+    if (!key && name !== "ollama") { console.log(`ai: skip ${name} (no credentials)`); continue; }
+    const model = AI_MODEL || p.model();
+    try {
+      const payload = { model, messages, max_tokens: maxTokens, temperature, ...(p.think !== undefined ? { think: p.think } : {}), ...(p.jsonMode && expectJSON && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}) };
+      const doFetch = (body) => fetch(`${p.baseURL()}/chat/completions`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${p.key()}`, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      let res = await doFetch(payload);
+      if (!res.ok) {
+        const errText = (await res.text()).slice(0, 400);
+        if (p.jsonMode && expectJSON && !forceNoJsonMode && errText.includes("json_validate_failed")) {
+          console.log(`ai: ${name} rejected JSON validation; retrying without response_format`);
+          res = await doFetch({ ...payload, response_format: undefined });
+          if (res.ok) {
+            const j2 = await res.json();
+            const c2 = j2?.choices?.[0]?.message?.content || "";
+            if (c2) { console.log(`ai: ${name} ok (no json mode)`); return c2; }
+          }
+          errors.push(`${name}: retry without response_format also failed`);
+          continue;
+        }
+        errors.push(`${name}: HTTP ${res.status} ${errText}`);
+        continue;
+      }
+      const j = await res.json();
+      const content = j?.choices?.[0]?.message?.content || "";
+      if (!content) { errors.push(`${name}: empty completion`); continue; }
+      console.log(`ai: ${name} ok`);
+      return content;
+    } catch (e) {
+      errors.push(`${name}: ${String(e).slice(0, 300)}`);
+    }
+  }
+  throw new Error(`all AI providers failed: ${errors.join(" | ")}`);
+}

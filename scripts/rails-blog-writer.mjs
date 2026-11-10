@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { PROVIDERS, providerChain, callModel } from "./ai-providers.mjs";
 // RailsDev blog writer (pilot, PR-only) — deterministic, zero dependencies.
 //
 // Flow: fetch signals (HN front page + GitHub Trending) → load existing corpus
@@ -30,19 +31,8 @@ const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
 const SLACK_CHANNEL = process.env.SLACK_RAILSDEV_CHANNEL_ID || "";
 const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || "";
 const CF_API_TOKEN = process.env.CF_API_TOKEN || "";
-const AI_PROVIDER = (process.env.AI_PROVIDER || "groq").toLowerCase();
 const AI_MODEL = process.env.AI_MODEL || "";
 
-const PROVIDERS = {
-  cloudflare: { name: "cloudflare", baseURL: () => `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai/v1`, key: () => CF_API_TOKEN, model: () => process.env.CLOUDFLARE_MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast" },
-  groq:       { name: "groq",       baseURL: () => "https://api.groq.com/openai/v1", key: () => process.env.GROQ_API_KEY || "", model: () => process.env.GROQ_MODEL || "openai/gpt-oss-20b", jsonMode: true },
-  cerebras:   { name: "cerebras",   baseURL: () => "https://api.cerebras.ai/v1", key: () => process.env.CEREBRAS_API_KEY || "", model: () => process.env.CEREBRAS_MODEL || "llama-3.3-70b", jsonMode: true },
-  gemini:     { name: "gemini",     baseURL: () => "https://generativelanguage.googleapis.com/v1beta/openai", key: () => process.env.GEMINI_API_KEY || "", model: () => process.env.GEMINI_MODEL || "gemini-2.5-flash", jsonMode: true },
-  openrouter: { name: "openrouter", baseURL: () => "https://openrouter.ai/api/v1", key: () => process.env.OPENROUTER_API_KEY || "", model: () => process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free" },
-  mistral:    { name: "mistral",    baseURL: () => "https://api.mistral.ai/v1", key: () => process.env.MISTRAL_API_KEY || "", model: () => process.env.MISTRAL_MODEL || "mistral-small-latest", jsonMode: true },
-};
-const AI_FALLBACKS = (process.env.AI_FALLBACKS || "gemini,cerebras,openrouter,cloudflare,mistral").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
-const CHAIN = [AI_PROVIDER, ...AI_FALLBACKS.filter((p) => p !== AI_PROVIDER)];
 const SERVICE_VALUES = ["MVP Build", "Rails Upgrade", "Custom Module", "AI Integration", "Code Audit"];
 const wib = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const strip = (s) => String(s || "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
@@ -85,63 +75,6 @@ async function postToSlack(messages) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const AI_CALL_SPACING_MS = 5000;
 
-async function callCompletion(prompt, { forceNoJsonMode = false, maxTokens = 2800, expectJSON = true } = {}) {
-  await sleep(AI_CALL_SPACING_MS);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      return await _callCompletionOnce(prompt, { forceNoJsonMode, maxTokens, expectJSON });
-    } catch (e) {
-      if (String(e).includes("429") || String(e).includes("rate_limit_exceeded")) {
-        const wait = (attempt + 1) * 4000;
-        console.log(`ai: 429 — sleeping ${wait}ms (attempt ${attempt + 1}/3)`);
-        await sleep(wait);
-        continue;
-      }
-      throw e;
-    }
-  }
-  return _callCompletionOnce(prompt, { forceNoJsonMode, maxTokens, expectJSON });
-}
-
-async function _callCompletionOnce(prompt, { forceNoJsonMode = false, maxTokens = 2800, expectJSON = true } = {}) {
-  const errors = [];
-  for (const name of CHAIN) {
-    const p = PROVIDERS[name]; if (!p) { errors.push(`${name}: unknown`); continue; }
-    const key = p.key(); if (!key) { console.log(`ai: skip ${name} (no creds)`); continue; }
-    const model = AI_MODEL || p.model();
-    try {
-      const body = { model, messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature: 0.4, ...(p.jsonMode && expectJSON && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}) };
-      const doFetch = (payload) => fetch(`${p.baseURL()}/chat/completions`, {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      let res = await doFetch(body);
-      if (!res.ok) {
-        const errText = (await res.text()).slice(0, 400);
-        if (p.jsonMode && !forceNoJsonMode && errText.includes("json_validate_failed")) {
-          console.log(`ai: ${name} rejected JSON validation; retrying without response_format`);
-          res = await doFetch({ ...body, response_format: undefined });
-          if (res.ok) {
-            const data2 = await res.json();
-            const raw2 = data2?.choices?.[0]?.message?.content || "";
-            if (raw2) { console.log(`ai: ${name} ok (no json mode)`); return raw2; }
-          }
-          errors.push(`${name}: fallback without response_format also failed`);
-          continue;
-        }
-        errors.push(`${name}: HTTP ${res.status} ${errText}`);
-        continue;
-      }
-      const data = await res.json();
-      const raw = data?.choices?.[0]?.message?.content || "";
-      if (!raw) { errors.push(`${name}: empty completion`); continue; }
-      console.log(`ai: ${name} ok`);
-      return raw;
-    } catch (e) { errors.push(`${name}: ${String(e).slice(0, 300)}`); }
-  }
-  throw new Error(`all AI providers failed: ${errors.join(" | ")}`);
-}
 function parseJSONObject(raw) { const m = String(raw).match(/\{[\s\S]*\}/); if (!m) return null; try { return JSON.parse(m[0]); } catch { return null; } }
 
 // ---------- signals ----------
@@ -245,7 +178,7 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
   let topic = AI_STUB ? { topic: "Rails migration testing strategy", keyword: "rails migration testing", angle: "practical guide", rationale: "stub", title: "Rails Migration Testing: A Practical Guide", seoTitle: "Rails Migration Testing: A Practical Guide", description: "Practical guide to writing and verifying Rails migrations in large apps: PostgreSQL pitfalls, Active Record internals and zero-downtime deploy testing.", slug: "rails-migration-testing-guide", service: "Rails Upgrade", coverAlt: "Diagram of a Rails migration being tested against a PostgreSQL database" } : null;
   if (!topic) {
     for (let attempt = 1; attempt <= 3 && !topic; attempt++) {
-      try { topic = parseJSONObject(await callCompletion(topicPrompt + (attempt > 1 ? "\n\nPrevious reply invalid; reply with ONLY the JSON object." : ""), { maxTokens: 1100 })); }
+      try { topic = parseJSONObject(await callModel(topicPrompt + (attempt > 1 ? "\n\nPrevious reply invalid; reply with ONLY the JSON object." : ""), { maxTokens: 4096 })); }
       catch (e) { console.error(`topic attempt ${attempt}:`, e.message); }
     }
     if (!topic) await fail("topic selection failed after 3 attempts");
@@ -270,7 +203,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   const body = AI_STUB ? stubArticle().body : await (async () => {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const text = await callCompletion(bodyPrompt + (attempt > 1 ? "\n\nYour previous attempt failed. Return ONLY the markdown body." : ""), { maxTokens: 8000, expectJSON: false });
+        const text = await callModel(bodyPrompt + (attempt > 1 ? "\n\nYour previous attempt failed. Return ONLY the markdown body." : ""), { maxTokens: 8000, expectJSON: false });
         if (text && text.length > 1500) return text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
         console.error(`body attempt ${attempt}: too short (${text?.length} chars)`);
       } catch (e) { console.error(`body attempt ${attempt}:`, e.message); }
@@ -289,7 +222,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
       for (let attempt = 1; attempt <= 2; attempt++) {
         try {
           const prompt = bodyPrompt + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues. Return ONLY the body.`;
-          const text = await callCompletion(prompt, { maxTokens: 8000, expectJSON: false });
+          const text = await callModel(prompt, { maxTokens: 8000, expectJSON: false });
           if (text && text.length > 1500) return text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
           console.error(`retry body attempt ${attempt}: too short`);
         } catch (e) { console.error(`retry body attempt ${attempt}:`, e.message); }

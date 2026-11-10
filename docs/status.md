@@ -89,3 +89,11 @@ npx wrangler d1 execute scheduler-db --remote --command \
 - `GITHUB_PAT` has `repo` scope on this repo only (dispatch of `workflow_dispatch`).
 - `RAILSDEV_PAT` is scoped to `hendra/railsdev-site` (Contents RW + PR RW).
 - `PUBLIC_FORMSPREE_FORM_ID` (Actions **variable**, not secret) — public value read from railsdev.io homepage.
+
+## AI provider chain (2026-11-11)
+- Shared module: `scripts/ai-providers.mjs`.
+- Providers: `cloudflare`, `groq`, `openrouter`, `gemini`, `cerebras`, `mistral`, `ollama`.
+- Default provider (production): `openrouter` with preset `@preset/ai-scheduler`.
+- Default fallbacks (production): `openrouter,groq,cloudflare`.
+- Local development: `AI_PROVIDER=ollama` with `qwen3.5:4b` (very verbose; use longer `maxTokens`).
+- Never commit API keys; `.dev.vars` is gitignored. Production keys live in GitHub Actions secrets (`OPENROUTER_API_KEY`, `GROQ_API_KEY`, `CF_*`).
