@@ -19,3 +19,13 @@ OLLAMA_BASE_URL=http://localhost:11434/v1
 OLLAMA_MODEL=gemma4:e2b
 INASOFT_PAT=
 SLACK_INASOFT_CHANNEL_ID=
+# IG Reel pipeline (GitHub Actions: Cloudflare Workers AI + Cloudinary hosting + Buffer publish)
+# Maps onto CF_ACCOUNT_ID / CF_API_TOKEN in the workflow; CF_ACCOUNT/CF_TOKEN are for local runs.
+BUFFER_ACCESS_TOKEN=
+BUFFER_CHANNEL_ID=
+BUFFER_ORG_ID=
+CLOUDINARY_CLOUD_NAME=
+CLOUDINARY_API_KEY=
+CLOUDINARY_API_SECRET=
+CF_ACCOUNT=
+CF_TOKEN=

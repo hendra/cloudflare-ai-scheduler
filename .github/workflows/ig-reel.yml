@@ -1,42 +1,86 @@
 name: ig-reel
 
+# IG Reel — Interesting Facts & Knowledge → Instagram @kaliajatau.id (via Buffer)
+# Prompt 1 (prompts/ig-reel-daily.md) in executable form: deterministic RSS fetch
+# → Buffer 7-day dedup → AI picks 4–5 grounded findings (Bahasa Indonesia) →
+# HTML scenes (headless Chrome) → reel assembled from synthesised original music →
+# Cloudinary hosting → Buffer createPost (reel, shareNow, isAiGenerated).
+# DRY_RUN=true composes everything but skips the upload and post.
+# Images: Cloudflare Workers AI via cf_image.py only (never Cloudinary generation).
+
 on:
   workflow_dispatch:
     inputs:
-      topic:
-        description: "Optional topic hint"
+      dry_run:
+        description: 'Compose the Reel but do NOT upload to Cloudinary or post to Buffer'
         required: false
-        default: ""
+        default: true
+        type: boolean
+      topic:
+        description: 'Optional topic hint (prioritised when relevant)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ig-reel-daily
+  cancel-in-progress: false
 
 jobs:
-  build-and-post:
+  reel:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      CF_ACCOUNT: ${{ secrets.CF_ACCOUNT }}
-      CF_TOKEN: ${{ secrets.CF_TOKEN }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      TOPIC: ${{ inputs.topic }}
+      CF_ACCOUNT: ${{ secrets.CF_ACCOUNT_ID }}
+      CF_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
       CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
       CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
       BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
-      BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
+      BUFFER_CHANNEL_ID: ${{ vars.BUFFER_CHANNEL_ID }}
+      BUFFER_ORG_ID: ${{ vars.BUFFER_ORG_ID }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_NEWS_CHANNEL_ID: ${{ secrets.SLACK_NEWS_CHANNEL_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
-      - name: Install dependencies
+      - name: Install system deps
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-inter fonts-dejavu-core
+
+      - name: Install Python deps
+        run: |
           python -m pip install --upgrade pip
-          pip install requests pillow
+          pip install pillow numpy scipy playwright
 
-      - name: Run pipeline
-        env:
-          TOPIC: ${{ github.event.inputs.topic }}
+      - name: Ensure a Chrome binary for render_html.py
         run: |
-          python scripts/run_pipeline.py
+          if ! command -v google-chrome; then
+            python -m playwright install --with-deps chromium
+            CHROME=$(python -c "import glob,os; p=glob.glob(os.path.expanduser('~/.cache/ms-playwright/chromium-*/chrome-linux/chrome')); print(p[0] if p else '')")
+            if [ -n "$CHROME" ] && [ ! -e /usr/bin/google-chrome ]; then sudo ln -s "$CHROME" /usr/bin/google-chrome; fi
+          fi
+          command -v google-chrome && google-chrome --version
+
+      - name: Run IG Reel pipeline
+        run: python scripts/ig_reel_daily.py
+
+      - name: "Notify failure to Slack #news"
+        if: failure() && env.DRY_RUN != 'true'
+        run: |
+          curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{\"channel\": \"${SLACK_NEWS_CHANNEL_ID}\", \"text\": \"⚠️ IG Reel pipeline failed — see https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
