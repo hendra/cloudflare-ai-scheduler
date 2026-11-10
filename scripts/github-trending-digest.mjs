@@ -33,8 +33,8 @@ const SLACK_NEWS_CHANNEL_ID = process.env.SLACK_NEWS_CHANNEL_ID || "";
 const AI_MODEL = process.env.AI_MODEL || ""; // overrides the primary provider's model
 // Provider chain: AI_PROVIDER (default cloudflare) then AI_FALLBACKS in order;
 // providers without credentials are skipped. Per-provider model overrides:
-// CLOUDFLARE_MODEL, GITHUB_MODEL, GROQ_MODEL, CEREBRAS_MODEL, GEMINI_MODEL,
-// OPENROUTER_MODEL, MISTRAL_MODEL.
+// Provider model overrides: CLOUDFLARE_MODEL, GROQ_MODEL, CEREBRAS_MODEL,
+// GEMINI_MODEL, OPENROUTER_MODEL, MISTRAL_MODEL.
 const PROVIDERS = {
   cloudflare: { name: "cloudflare", baseURL: () => `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai/v1`, key: () => CF_API_TOKEN, model: () => process.env.CLOUDFLARE_MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast" },
   groq:       { name: "groq",       baseURL: () => "https://api.groq.com/openai/v1", key: () => process.env.GROQ_API_KEY || "", model: () => process.env.GROQ_MODEL || "openai/gpt-oss-120b" },
