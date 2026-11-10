@@ -61,6 +61,9 @@ jobs:
         working-directory: site
         run: npm ci --no-audit --no-fund
 
+      - name: Install Pillow (for cover generation)
+        run: pip3 install Pillow
+
       - name: Run blog writer
         working-directory: scheduler
         run: node scripts/rails-blog-writer.mjs
