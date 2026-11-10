@@ -31,22 +31,12 @@ jobs:
 
       - name: Install dependencies
         run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
           python -m pip install --upgrade pip
           pip install requests pillow
 
-      - name: Fetch playbook and scripts
-        run: |
-          mkdir -p ig-kit
-          curl -fsSL https://res.cloudinary.com/opqimovw/raw/upload/ig-kit/ig-playbook.md -o ig-kit/ig-playbook.md || true
-          for f in render_html.py cf_image.py build_reel.py; do
-            curl -fsSL "https://res.cloudinary.com/opqimovw/raw/upload/ig-kit/$f" -o "ig-kit/$f" || true
-          done
-          ls -la ig-kit
-
-      # TODO: implement the full pipeline (research, render, upload, post) here.
-      # See ig-kit/ig-playbook.md for the authoritative steps.
       - name: Run pipeline
+        env:
+          TOPIC: ${{ github.event.inputs.topic }}
         run: |
-          echo "Pipeline not implemented yet."
-          echo "Topic: ${{ github.event.inputs.topic }}"
-          # python ig-kit/run_pipeline.py
+          python scripts/run_pipeline.py
