@@ -156,10 +156,8 @@ async function callCompletion(prompt, { forceNoJsonMode = false } = {}) {
   throw new Error(`all AI providers failed: ${errors.join(" | ")}`);
 }
 
-const PROFILE = `Candidate profile (condensed):
-Senior Full-Stack Developer — Ruby on Rails & React, 12+ years. Backend: Rails, Ruby, Node.js, Python, NestJS, GraphQL, REST. Frontend: React, TypeScript, Next.js, Tailwind. DB: PostgreSQL, MySQL, MongoDB, Redis, Elasticsearch, Supabase. Cloud/DevOps: AWS, GCP, DigitalOcean, Docker, Kubernetes, Vercel. AI: LLM integration, RAG, AI agents, Claude. Testing: RSpec. Based in Indonesia; prefers fully-remote worldwide/international roles that accept applicants from Indonesia; EU/APAC/NA companies welcome; country-restricted roles are lower priority.
-Scoring rubric (0-100): Rails/Ruby requirement 25%, seniority 20%, remote eligibility from Indonesia 20%, full-stack/React 10%, backend architecture 10%, stack compatibility 5%, salary attractiveness 5%, company credibility 5%.
-Eligibility classes: worldwide (open to Indonesia) > international (accepts outside company country, note restrictions) > country-restricted (work auth required) > regional/timezone-limited.`;
+const PROFILE = `Senior Full-Stack Developer — Ruby on Rails & React, 12+ years, based in Indonesia. Prefers fully-remote worldwide/international roles open to Indonesian applicants; EU/APAC/NA welcome; country-restricted roles downranked.
+Scoring weights: Rails 25, seniority 20, remote-from-Indonesia 20, full-stack/React 10, backend architecture 10, stack 5, salary 5, company credibility 5.`;
 
 async function score(candidates) {
   if (AI_STUB) return { jobs: candidates.map((_, index) => ({ index, score: 75, tier: "Good", eligibility: "international", restricts: "", why: "Stubbed scoring (AI_STUB)." })), summary: "Stubbed analysis (AI_STUB=true)." };
