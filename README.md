@@ -21,6 +21,8 @@ A dashboard-free, TypeScript scheduler platform for up to 10 initial mixed-frequ
 
 The Queue consumer is configured for small batches and retries. Failed messages go to a dead-letter queue.
 
+Supported job types: `ai_prompt`, `rss_ai_digest`, `http_check`, and `github_actions_trigger` (dispatches a GitHub Actions workflow via the REST API; requires the `GITHUB_PAT` secret).
+
 ## Prerequisites
 
 - Cloudflare account with Workers, D1, Queues and Workers AI enabled.
@@ -68,6 +70,20 @@ npm run db:seed:remote
 ```
 
 The seed jobs are disabled. The `next_run_at` values are placeholders far in the future. The included seed file is a template; update the schedule and next-run timestamp for each job before enabling it.
+
+### Optional: Configure GitHub Actions trigger
+
+For `github_actions_trigger` jobs, store a GitHub PAT with `repo`/`workflow` scope:
+
+```bash
+npx wrangler secret put GITHUB_PAT
+```
+
+The job's `input_json` must include `owner`, `repo`, `workflow`, and optionally `ref` and `inputs`:
+
+```json
+{"owner":"your-org","repo":"ig-reel-pipeline","workflow":"reel.yml","ref":"main","inputs":{"topic":"interesting facts"}}
+```
 
 ### 5. Configure model
 
