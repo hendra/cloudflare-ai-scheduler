@@ -359,6 +359,143 @@ def render(png_name, html):
     return GEN / (png_name + ".png")
 
 
+# ---------- 5. Illustration providers (chain; Cloudflare primary, then best free) ----------
+def gen_image_cf(prompt, out_path):
+    account = (os.environ.get("CF_ACCOUNT", "") or os.environ.get("CF_ACCOUNT_ID", "")).strip()
+    token = (os.environ.get("CF_TOKEN", "") or os.environ.get("CF_API_TOKEN", "")).strip()
+    if not account or not token:
+        raise RuntimeError("no CF credentials")
+    proc = subprocess.run([sys.executable, str(KIT / "cf_image.py"),
+                           prompt, str(out_path), "--size", "768x1360", "--fit", "1080x1920"],
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        fail_lines = [l for l in (proc.stderr or proc.stdout or "").splitlines() if l.strip()]
+        fail_reason = fail_lines[-1][:200] if fail_lines else f"cf_image exit {proc.returncode}"
+        raise RuntimeError(fail_reason or f"cf_image exit {proc.returncode}")
+    if not out_path.exists() or out_path.stat().st_size < 1000:
+        raise RuntimeError("cf_image produced no image")
+
+
+def _find_b64_image(node):
+    if isinstance(node, dict):
+        data = node.get("data")
+        mime = str(node.get("mime_type") or node.get("mimeType") or "")
+        if isinstance(data, str) and data and ("image" in mime or node.get("type") == "image"):
+            return data
+        for v in node.values():
+            found = _find_b64_image(v)
+            if found:
+                return found
+    elif isinstance(node, list):
+        for v in node:
+            found = _find_b64_image(v)
+            if found:
+                return found
+    return None
+
+
+def gen_image_google(prompt, out_path):
+    """Google AI Studio — Nano Banana (Gemini image generation), free tier with key."""
+    key = os.environ.get("GOOGLE_API_KEY", "").strip()
+    if not key:
+        raise RuntimeError("no GOOGLE_API_KEY")
+    model = os.environ.get("GOOGLE_IMAGE_MODEL", "gemini-nano-banana-2.1")
+    body = {
+        "model": model,
+        "input": prompt,
+        "response_format": {"type": "image", "mime_type": "image/jpeg",
+                            "aspect_ratio": "9:16", "image_size": "1K"},
+    }
+    j = http_json("https://generativelanguage.googleapis.com/v1beta/interactions",
+                  body, headers={"x-goog-api-key": key, "Api-Revision": "2026-05-20"}, timeout=180)
+    data = _find_b64_image(j)
+    if not data:
+        raise RuntimeError("no image in response: " + json.dumps(j)[:200])
+    out_path.write_bytes(base64.b64decode(data))
+
+
+def gen_image_hf(prompt, out_path):
+    """Hugging Face serverless Inference — FLUX.1-schnell by default (open weights)."""
+    token = os.environ.get("HF_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError("no HF_TOKEN")
+    model = os.environ.get("HF_IMAGE_MODEL", "black-forest-labs/FLUX.1-schnell")
+    req = urllib.request.Request(
+        f"https://router.huggingface.co/hf-inference/models/{model}",
+        data=json.dumps({"inputs": prompt}).encode(),
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json", "Accept": "image/png"},
+        method="POST")
+    with urllib.request.urlopen(req, timeout=240) as r:
+        blob = r.read()
+    if len(blob) < 1000 or blob[:8] in (b'{"error":',):
+        raise RuntimeError("unexpected HF response: " + blob[:200].decode("utf-8", "replace"))
+    out_path.write_bytes(blob)
+
+
+_POLLINATION_LAST = [0.0]
+
+def gen_image_pollinations(prompt, out_path):
+    """Pollinations.ai — no key required; free tier = 1 image / 45 s per IP."""
+    import urllib.error
+    import urllib.parse
+    wait = _POLLINATION_LAST[0] + 46 - time.time()
+    if wait > 0:
+        log(f"  pollinations: waiting {wait:.0f}s (free tier 1 image / 45s)")
+        time.sleep(wait)
+    q = urllib.parse.quote(prompt)
+    url = f"https://image.pollinations.ai/prompt/{q}?width=768&height=1360&nologo=true&model=flux"
+    for attempt in range(1, 4):
+        _POLLINATION_LAST[0] = time.time()
+        try:
+            blob = http(url, timeout=240)
+        except urllib.error.HTTPError as e:
+            try:
+                raw = e.read().decode("utf-8", "replace")
+            except Exception:
+                raw = str(e)
+            msg = raw[:200]
+            if e.code in (402, 429, 500, 503):
+                m = re.search(r"Retry after (\d+)s", raw)
+                delay = int(m.group(1)) + 2 if m else 45 * attempt
+                log(f"  pollinations: HTTP {e.code} — {msg[:120]} — retrying in {delay}s")
+                time.sleep(delay)
+                continue
+            raise RuntimeError(f"HTTP {e.code} {msg}")
+        if blob[:2] == b"\xff\xd8" or blob[:8] == b"\x89PNG\r\n\x1a\n":
+            out_path.write_bytes(blob)
+            return
+        raise RuntimeError("non-image response: " + blob[:150].decode("utf-8", "replace"))
+    raise RuntimeError("pollinations rate-limited after 3 attempts")
+
+
+IMAGE_PROVIDERS = [
+    ("cloudflare", gen_image_cf),
+    ("google", gen_image_google),
+    ("huggingface", gen_image_hf),
+    ("pollinations", gen_image_pollinations),
+]
+_PROVIDER_ORDER = os.environ.get("IMAGE_ORDER", ",".join(name for name, _ in IMAGE_PROVIDERS)).split(",")
+
+
+def gen_image(prompt, out_path):
+    errors = []
+    by_name = dict(IMAGE_PROVIDERS)
+    for name in _PROVIDER_ORDER:
+        name = name.strip()
+        fn = by_name.get(name)
+        if not fn:
+            log(f"  image provider {name}: unknown — skipped")
+            continue
+        try:
+            fn(prompt, out_path)
+            log(f"  image via {name} ✓")
+            return name
+        except Exception as e:
+            log(f"  image provider {name} failed: {str(e)[:200]}")
+            errors.append(f"{name}: {str(e)[:120]}")
+    raise RuntimeError("all image providers failed: " + " | ".join(errors))
+
+
 # ---------- 6. Cloudinary + Buffer ----------
 def cloudinary_upload(path, public_id):
     ts = int(time.time())
@@ -452,6 +589,7 @@ def main():
     full_caption = f"{caption}\n\n{hashtags}"
 
     scenes_meta = [{"kind": "hook", "png": GEN / "scene_00.png", "dur": 3.0}]
+    image_providers = []
 
     # hook scene (HTML-only)
     render("scene_00", hook_scene(hook, hook_sub, NOW.strftime("%Y-%m-%d")))
@@ -460,26 +598,15 @@ def main():
     for i, f in enumerate(facts, start=1):
         log(f"fact {i}/{total}: {f.get('title')}")
         img = GEN / f"img_{i}.jpg"
-        if MOCK_IMAGES or (not CF_ACCOUNT or not CF_TOKEN):
-            if DRY_RUN:
-                log("  CF creds missing — placeholder illustration (dry run only)")
-                make_placeholder(img, str(i), i)
-            else:
-                fail("CF_ACCOUNT / CF_TOKEN required for a real run")
+        if MOCK_IMAGES:
+            log("  PLACEHOLDER_IMAGES=true — placeholder illustration (dev only)")
+            make_placeholder(img, str(i), i)
+            provider = "placeholder"
         else:
-            attempt = 0
-            while True:
-                attempt += 1
-                try:
-                    subprocess.run([sys.executable, str(KIT / "cf_image.py"),
-                                    f"{f['image_prompt']}, no text, no letters, no logos, vertical 9:16",
-                                    str(img), "--size", "768x1360", "--fit", "1080x1920"], check=True)
-                    break
-                except subprocess.CalledProcessError:
-                    if attempt >= 3:
-                        fail(f"cf_image.py failed after {attempt} attempts for fact {i} (Cloudflare quota or capacity?)")
-                    log(f"  cf_image attempt {attempt} failed; retrying in {20 * attempt}s…")
-                    time.sleep(20 * attempt)
+            provider = gen_image(
+                f"{f.get('image_prompt', '')}, no text, no letters, no logos, vertical 9:16",
+                img)
+        image_providers.append(provider)
         bg = data_uri_image(img)
         html = make_scene_html(
             "fact", f"{i:02d}", f.get("title", ""), f.get("fact", ""),
@@ -500,13 +627,15 @@ def main():
     log(f"reel: built {reel} ({reel.stat().st_size / 1e6:.1f} MB)")
 
     sources = [f"{f.get('source', '?')} — {f.get('title', '')[:60]} ({f.get('date', '')}) [{f.get('link', '')}]" for f in facts]
+    log(f"images via: {image_providers}")
 
     if DRY_RUN:
         log("=== DRY RUN — would upload to Cloudinary and post to Buffer ===")
         log(f"caption:\n{full_caption}")
         log(f"scenes: {len(scenes_meta)} | duration ≈ {sum(s['dur'] for s in scenes_meta):.1f}s")
         log("REPORT " + json.dumps({"status": "dry-run", "topic": hook, "path": str(reel),
-                                    "posted": False, "sources": sources}))
+                                    "posted": False, "images": image_providers,
+                                    "sources": sources}))
         return
 
     missing = [k for k, v in (("CLOUDINARY_API_KEY", CLOUD_KEY), ("CLOUDINARY_API_SECRET", CLOUD_SECRET),
@@ -521,7 +650,8 @@ def main():
     log(f"cloudinary: uploaded {url}")
     post_id, link = buffer_create_and_confirm(url, full_caption)
     log("REPORT " + json.dumps({"status": "sent", "topic": hook, "post_id": post_id,
-                                "reel": link, "posted": True, "sources": sources}))
+                                "reel": link, "posted": True, "images": image_providers,
+                                "sources": sources}))
 
 
 if __name__ == "__main__":

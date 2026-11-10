@@ -19,6 +19,14 @@ OLLAMA_BASE_URL=http://localhost:11434/v1
 OLLAMA_MODEL=gemma4:e2b
 INASOFT_PAT=
 SLACK_INASOFT_CHANNEL_ID=
+# IG Reel pipeline (GitHub Actions: image gen chain — CF → Google AI Studio → HF → Pollinations)
+# CF_ACCOUNT_ID / CF_API_TOKEN above are used automatically (mapped to CF_ACCOUNT/CF_TOKEN).
+# Optional fallbacks: free tiers with key (skipped silently when unset).
+# Pollinations needs no key and is always the last resort (1 image per 45 s per IP).
+GOOGLE_API_KEY=
+GOOGLE_IMAGE_MODEL=gemini-nano-banana-2.1
+HF_TOKEN=
+HF_IMAGE_MODEL=black-forest-labs/FLUX.1-schnell
 BUFFER_ACCESS_TOKEN=
 BUFFER_CHANNEL_ID=
 BUFFER_ORG_ID=

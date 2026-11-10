@@ -1,6 +1,6 @@
 # Production status — Cloudflare AI Scheduler
 
-**Last updated:** 2026-11-11 — `github-trending-weekly` enabled (Mon 07:10 WIB); OpenRouter reasoning-model fix documented (gotcha 17)
+**Last updated:** 2026-11-11 — `github-trending-weekly` enabled (Mon 07:10 WIB); IG Reel image fallback chain added (owner override of CF-only); OpenRouter reasoning-model fix documented
 **Purpose:** what is running, where secrets live, and the non-obvious fixes that make it work.
 If you change something here, update this file.
 
@@ -68,6 +68,7 @@ npx wrangler d1 execute scheduler-db --remote --command \
 15. **`INASOFT_PAT` was initially mismatched** (name vs value for public token); re-check secrets are repo-correct after copying values.
 16. **ruff-style commit message discipline matters**: refer to actual file/migration/row names (GHA workflow names are case-sensitive).
 17. **OpenRouter `@preset/ai-scheduler` routes to a reasoning model** (`nemotron-3.5-lightning:free` as of 2026-11-11) that returns `content: null` when the reasoning budget eats `max_tokens` — every call was "empty completion" and the chain silently fell back to Groq. All OpenRouter calls now send `reasoning.effort: "none"` (override via `OPENROUTER_REASONING_EFFORT`). If the preset is ever re-pointed to another reasoning model, keep this or set `OPENROUTER_MODEL` explicitly (pick a non-reasoning free model).
+18. **IG Reel image chain (owner override of playbook "CF-only")**: images go Cloudflare Workers AI → Google AI Studio (`GOOGLE_API_KEY`, default model `gemini-nano-banana-2.1`) → Hugging Face serverless (`HF_TOKEN`, default `black-forest-labs/FLUX.1-schnell`) → Pollinations.ai (no key; free tier = **1 image / 45 s per IP**, sequential waits built in; per-IP rate can 402 and the service itself can 503 in bursts — the chain retries 3×). Google/HF silently skip when their keys are unset; Pollinations is the no-key safety net. All images count as AI-generated (never switches to Cloudinary generation). Best free quality today: Google > HF ≈ CF klein > Pollinations.
 
 ## Slack destinations
 
