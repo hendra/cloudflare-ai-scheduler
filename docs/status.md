@@ -10,12 +10,22 @@ If you change something here, update this file.
 |---|---|---|---|---|---|
 | `github-trending-daily` | 1 | `50 23 * * *` | 06:50 | `2026-11-10T23:50:00.000Z` | #news |
 | `github-trending-weekly` | 1 | `10 0 * * 1` | Mon 07:10 | `2026-11-16T00:10:00.000Z` | #news |
-| `rails-job-search-daily` | 1 | `50 0 * * *` | 07:50 | `2026-11-11T00:50:00.000Z` | #jobs |
-| `railsdev-blog-writer` | 1 | `0 1 * * *` | 08:00 | `2026-11-11T01:00:00.000Z` | railsdev-site PR |
-| `fullstackweb-blog-writer` | 1 | `30 1 * * *` | 08:30 | `2026-11-11T01:30:00.000Z` | fullstackwebdev-site PR |
-| `inasoft-blog-writer` | 1 | `0 2 * * *` | 09:00 | `2026-11-11T02:00:00.000Z` | inasoft-site PR |
+| `rails-job-search-daily` | 1 | `45 23 * * *` | 06:45 | `2026-11-10T23:45:00.000Z` | #jobs |
+| `rails-job-search-daily-2000` | 1 | `0 13 * * *` | 20:00 | `2026-11-11T13:00:00.000Z` | #jobs |
+| `railsdev-blog-writer` | 1 | `45 0 * * *` | 07:45 | `2026-11-11T00:45:00.000Z` | railsdev-site PR |
+| `railsdev-blog-writer-1130` | 1 | `30 4 * * *` | 11:30 | `2026-11-11T04:30:00.000Z` | railsdev-site PR |
+| `railsdev-blog-writer-1620` | 1 | `20 9 * * *` | 16:20 | `2026-11-11T09:20:00.000Z` | railsdev-site PR |
+| `fullstackweb-blog-writer` | 1 | `45 0 * * *` | 07:45 | `2026-11-11T00:45:00.000Z` | fullstackwebdev-site PR |
+| `fullstackweb-blog-writer-1130` | 1 | `30 4 * * *` | 11:30 | `2026-11-11T04:30:00.000Z` | fullstackwebdev-site PR |
+| `fullstackweb-blog-writer-1620` | 1 | `20 9 * * *` | 16:20 | `2026-11-11T09:20:00.000Z` | fullstackwebdev-site PR |
+| `inasoft-blog-writer` | 1 | `45 0 * * *` | 07:45 | `2026-11-11T00:45:00.000Z` | inasoft-site PR |
+| `inasoft-blog-writer-1130` | 1 | `30 4 * * *` | 11:30 | `2026-11-11T04:30:00.000Z` | inasoft-site PR |
+| `inasoft-blog-writer-1620` | 1 | `20 9 * * *` | 16:20 | `2026-11-11T09:20:00.000Z` | inasoft-site PR |
 | `inasoft-news-digest` | 1 | `30 2 * * *` | 09:30 | `2026-11-11T02:30:00.000Z` | #news |
-| `ig-reel-daily` | 1 | `15 10 * * *` | 17:15 | `2026-11-12T10:15:00.000Z` | ig-reel GHA workflow → Instagram |
+| `ig-reel-daily` | 1 | `15 1 * * *` | 08:15 | `2026-11-11T01:15:00.000Z` | ig-reel GHA workflow → Instagram |
+| `ig-reel-daily-1145` | 1 | `45 4 * * *` | 11:45 | `2026-11-11T04:45:00.000Z` | ig-reel → Instagram |
+| `ig-reel-daily-1635` | 1 | `35 9 * * *` | 16:35 | `2026-11-11T09:35:00.000Z` | ig-reel → Instagram |
+| `ig-reel-daily-1930` | 1 | `30 12 * * *` | 19:30 | `2026-11-11T12:30:00.000Z` | ig-reel → Instagram |
 
 Apply pending migrations: `npm run db:migrate:remote`. Remote migrations required manual fixes historically (e.g. 0007); always run it after adding a migration.
 
