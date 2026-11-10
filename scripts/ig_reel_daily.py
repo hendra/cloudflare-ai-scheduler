@@ -42,8 +42,11 @@ DRY_RUN = os.environ.get("DRY_RUN", "true").lower() != "false"
 MOCK_IMAGES = os.environ.get("PLACEHOLDER_IMAGES", "false").lower() == "true"
 TOPIC_HINT = os.environ.get("TOPIC", "").strip()
 
-CF_ACCOUNT = os.environ.get("CF_ACCOUNT", "").strip()
-CF_TOKEN = os.environ.get("CF_TOKEN", "").strip()
+# cf_image.py (the playbook tool) hard-requires CF_ACCOUNT / CF_TOKEN names;
+# fall back to the repo's canonical CF_ACCOUNT_ID / CF_API_TOKEN.
+CF_ACCOUNT = (os.environ.get("CF_ACCOUNT", "") or os.environ.get("CF_ACCOUNT_ID", "")).strip()
+CF_TOKEN = (os.environ.get("CF_TOKEN", "") or os.environ.get("CF_API_TOKEN", "")).strip()
+os.environ["CF_ACCOUNT"], os.environ["CF_TOKEN"] = CF_ACCOUNT, CF_TOKEN
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME", "opqimovw").strip()
