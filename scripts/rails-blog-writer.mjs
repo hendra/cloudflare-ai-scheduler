@@ -131,8 +131,10 @@ function validateArticle(a, corpusSlugs) {
   const bodyNoFences = String(a.body || "").split(/```/).filter((_, i) => i % 2 === 0).join("\n");
   req(!/lorem(?:\s|_)ipsum|\{placeholder\}|\[insert/i.test(bodyNoFences), "placeholder token in body");
   const kw = a.keyword || "";
-  const kwWords = kw.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
-  req(kwWords.every((w) => (a.title + " " + a.description + " " + bodyNoFences.slice(0, 2000)).toLowerCase().includes(w)), "keyword words missing from title/description/intro");
+  const norm = (t) => String(t || "").toLowerCase().replace(/[\u2010\u2011\u2012\u2013\u2014-]/g, " ").replace(/\s+/g, " ").trim();
+  const kwWords = norm(kw).split(/\s+/).filter((w) => w.length > 2);
+  const hay = norm((a.title || "") + " " + (a.description || "") + " " + bodyNoFences.slice(0, 2000));
+  req(kwWords.every((w) => hay.includes(w)), "keyword words missing from title/description/intro");
   req(/verification note/i.test(a.body), "no verification note");
   const links = a.body.match(/\]\((https?:\/\/[^)\s]+)\)/g) || [];
   return { ok: errs.length === 0, errs, wordCount: words, links: [...new Set(links.map((l) => l.slice(2, -1)))].slice(0, 15) };
