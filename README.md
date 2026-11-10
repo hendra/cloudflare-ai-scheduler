@@ -12,7 +12,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler — and, since late 2026
 | RailsDev.io blog writer (`railsdev-blog-writer`) | `0 1 * * *` (08:00 WIB) | PR on `hendra/railsdev-site` | **enabled** |
 | FullstackWeb.dev blog writer (`fullstackweb-blog-writer`) | `30 1 * * *` (08:30 WIB) | PR on `hendra/fullstackwebdev-site` | **enabled** |
 | INASOFT blog writer (`inasoft-blog-writer`) | `0 2 * * *` (09:00 WIB) | PR on `hendra/inasoft-site` | **enabled** |
-| IG Reel pipeline (`ig-reel-daily`) | manual / future | Buffer | disabled |
+| IG Reel pipeline (`ig-reel-daily`) | `15 10 * * *` (17:15 WIB) | Instagram @kaliajatau.id via Buffer | **enabled** |
 
 All pipelines are deterministic, zero-dependency Node 20 scripts (one file each, plus `scripts/ai-providers.mjs` / `scripts/make-cover.py`). No agent tool-calling; 1–2 LLM completions per run.
 
@@ -93,4 +93,4 @@ npx wrangler d1 execute scheduler-db --remote --command \
 | 6 | INASOFT blog → PR | ✅ live (first PR `inasoft-site#64`) |
 | 7 | INASOFT news digest → #news | ✅ live |
 | 8 | GitHub Trending weekly → #news | ✅ live |
-| 1 | IG Reel pipeline | ⏳ deferred, workflow scaffold exists |
+| 1 | IG Reel pipeline → Instagram @kaliajatau.id | ✅ live (first Reel 2026-11-11, confirmed `sent` via Buffer) |
