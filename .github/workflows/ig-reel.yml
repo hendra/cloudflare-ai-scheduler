@@ -1,0 +1,52 @@
+name: ig-reel
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: "Optional topic hint"
+        required: false
+        default: ""
+
+jobs:
+  build-and-post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CF_ACCOUNT: ${{ secrets.CF_ACCOUNT }}
+      CF_TOKEN: ${{ secrets.CF_TOKEN }}
+      CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+      CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+      CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+      BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
+      BUFFER_CHANNEL_ID: ${{ secrets.BUFFER_CHANNEL_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pillow
+
+      - name: Fetch playbook and scripts
+        run: |
+          mkdir -p ig-kit
+          curl -fsSL https://res.cloudinary.com/opqimovw/raw/upload/ig-kit/ig-playbook.md -o ig-kit/ig-playbook.md || true
+          for f in render_html.py cf_image.py build_reel.py; do
+            curl -fsSL "https://res.cloudinary.com/opqimovw/raw/upload/ig-kit/$f" -o "ig-kit/$f" || true
+          done
+          ls -la ig-kit
+
+      # TODO: implement the full pipeline (research, render, upload, post) here.
+      # See ig-kit/ig-playbook.md for the authoritative steps.
+      - name: Run pipeline
+        run: |
+          echo "Pipeline not implemented yet."
+          echo "Topic: ${{ github.event.inputs.topic }}"
+          # python ig-kit/run_pipeline.py
