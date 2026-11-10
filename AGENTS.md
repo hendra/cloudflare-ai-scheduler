@@ -30,6 +30,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 - **Cron is UTC-only** in `src/cron.ts`; `timezone` column is cosmetic. Convert local schedules before storing `cron_expression`.
 - **DOM/DOW semantics are non-standard**: if either is `*`, both must match; otherwise OR.
 - **`nextCronOccurrence` scans minute-by-minute** (~1 year worst case). Fine for 5-field cron.
+- **Worker tick = every 5 minutes** (`crons: ["*/5 * * * *"]` in the wrangler template). Keep all `cron_expression` rows on the 5-minute grid or accept ≤5 min lag on dispatch.
 - **Queue is at-least-once**; `scheduler_executions UNIQUE(scheduler_id, scheduled_for)` dedups; handlers must stay idempotent.
 - **Migrations apply every `.sql` file in `migrations/`**; adding one creates a pending migration. Seeds were removed (0002 empty, 0006 deletes old rows). Apply migrations to remote yourself: `npm run db:migrate:remote`.
 - **`wrangler.template.jsonc`** holds binding config; generated `wrangler.jsonc` is gitignored.
