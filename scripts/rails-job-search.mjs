@@ -69,7 +69,7 @@ async function fromRemotive() {
   const jobs = (JSON.parse(text).jobs) || [];
   return jobs.filter((j) => (j.publication_date || "") >= new Date(cutoff).toISOString().slice(0, 10))
     .filter((j) => /ruby|rails/i.test(JSON.stringify(j)))
-    .map((j) => ({ source: "remotive", company: j.company_name || "Unknown", title: j.title || "Unknown", url: j.url || "", postedAt: (j.publication_date || "").slice(0, 10), location: j.candidate_required_location || "Remote", salary: j.salary || "", description: strip(j.description).slice(0, 300) }));
+    .map((j) => ({ source: "remotive", company: j.company_name || "Unknown", title: j.title || "Unknown", url: j.url || "", postedAt: (j.publication_date || "").slice(0, 10), location: j.candidate_required_location || "Remote", salary: j.salary || "", description: strip(j.description).slice(0, 250) }));
 }
 async function fromRemoteOk() {
   const { text } = await fetchText("https://remoteok.com/api?tag=ruby");
@@ -77,7 +77,7 @@ async function fromRemoteOk() {
   return items.filter((j) => j && typeof j === "object" && j.position)
     .filter((j) => FRESH(j.date))
     .filter((j) => /ruby|rails/i.test(JSON.stringify(j)))
-    .map((j) => ({ source: "remoteok", company: (j.company || "Unknown").trim(), title: (j.position || "Unknown").trim(), url: j.url || "", postedAt: (j.date || "").slice(0, 10), location: (j.location || "Remote").trim(), salary: (j.salary || "").trim(), description: strip(j.description).slice(0, 300) }));
+    .map((j) => ({ source: "remoteok", company: (j.company || "Unknown").trim(), title: (j.position || "Unknown").trim(), url: j.url || "", postedAt: (j.date || "").slice(0, 10), location: (j.location || "Remote").trim(), salary: (j.salary || "").trim(), description: strip(j.description).slice(0, 250) }));
 }
 async function fromWwr() { // Cloudflare-gated; kept for completeness, expected to fail
   const { text } = await fetchText("https://weworkremotely.com/categories/remote-ruby-on-rails-jobs.rss", { timeout: 15000 });
@@ -130,7 +130,7 @@ const SOURCES = [
 const statuses = [];
 
 // ---------- AI ----------
-async function callCompletion(prompt) {
+async function callCompletion(prompt, { forceNoJsonMode = false } = {}) {
   const errors = [];
   for (const name of CHAIN) {
     const p = PROVIDERS[name];
@@ -143,7 +143,7 @@ async function callCompletion(prompt) {
       const res = await fetch(`${p.baseURL()}/chat/completions`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 2200, temperature: 0.2, ...(p.jsonMode ? { response_format: { type: "json_object" } } : {}) }),
+        body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 2200, temperature: 0.2, ...(p.jsonMode && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}) }),
       });
       if (!res.ok) { errors.push(`${name}: HTTP ${res.status} ${(await res.text()).slice(0, 900)}`); continue; }
       const data = await res.json();
@@ -175,8 +175,9 @@ Score EACH job below. Reply with ONLY a JSON object:
 Jobs:
 ${lines}`;
   let parsed = null;
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const raw = await callCompletion(prompt + (attempt > 1 ? "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON object." : ""));
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const forceNoJsonMode = attempt === 3;
+    const raw = await callCompletion(prompt + (attempt > 1 ? "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON object." : ""), { forceNoJsonMode });
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) { console.error(`ai: attempt ${attempt}: no JSON object`); continue; }
     try {
