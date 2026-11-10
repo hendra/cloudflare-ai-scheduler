@@ -1,6 +1,6 @@
 # Cloudflare AI Scheduler
 
-Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashboard — and, since late 2026, the home of three **zero-spend content automations** delivered straight to Slack (trending digests, a Rails jobs digest) and to a GitHub PR (RailsDev blog writer).
+Cloudflare Workers + D1 + Queues + Workers AI scheduler — and, since late 2026, the host of several **zero-spend content automations** delivered to Slack and to GitHub PRs.
 
 ## What this repo runs today
 
@@ -8,19 +8,23 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 |---|---|---|---|
 | GitHub Trending Top 10 (`github-trending-daily`) | `50 23 * * *` (06:50 WIB) | Slack `#news` | **enabled** |
 | Rails remote job search (`rails-job-search-daily`) | `50 0 * * *` (07:50 WIB) | Slack `#jobs` | **enabled** |
-| RailsDev blog writer (`railsdev-blog-writer`, `enabled=0`) | manual dispatch | PR on `hendra/railsdev-site` | manual only |
-| IG Reel pipeline (`ig-reel-daily`, `enabled=0`) | manual / future | Buffer | disabled |
+| RailsDev.io blog writer (`railsdev-blog-writer`) | `0 1 * * *` (08:00 WIB) | PR on `hendra/railsdev-site` | **enabled** |
+| FullstackWeb.dev blog writer (`fullstackweb-blog-writer`) | `30 1 * * *` (08:30 WIB) | PR on `hendra/fullstackwebdev-site` | **enabled** |
+| INASOFT blog writer (`inasoft-blog-writer`) | `0 2 * * *` (09:00 WIB) | PR on `hendra/inasoft-site` | **enabled** |
+| IG Reel pipeline (`ig-reel-daily`) | manual / future | Buffer | disabled |
 
-Backing model: **Groq `openai/gpt-oss-20b`** (default in all pipelines) with fallback to Cloudflare Workers AI (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`). Zero spend is a hard constraint; free tiers are shared and rate-limited, so pipelines degrade to a ⚠️ Slack note rather than a fake digest.
+All pipelines are deterministic, zero-dependency Node 20 scripts (one file each, plus `scripts/ai-providers.mjs` / `scripts/make-cover.py`). No agent tool-calling; 1–2 LLM completions per run.
+
+**Production default model: OpenRouter `@preset/ai-scheduler`** with fallbacks `openrouter,groq,cloudflare`. Local development: **Ollama `gemma4:e2b`** (configurable via `OLLAMA_*`).
 
 ## Architecture
 
-Two dispatch paths coexist:
+Two dispatch paths share the D1 `schedulers` table:
 
-1. **Worker dispatcher** (this repo, `src/index.ts`): cron → D1 due rows → Queue → `executeJob` → Workers AI / RSS / HTTP / `github_actions_trigger` → D1 history. `github_actions_trigger` jobs POST to a workflow dispatch endpoint on any GitHub repo (used for `ig-reel-daily`).
-2. **GitHub Actions pipelines** (`scripts/*.mjs`, one workflow each): triggered by `github_actions_trigger` or `workflow_dispatch`. Deterministic, zero-npm-dependency Node scripts (or, for the blog writer, more steps) run headless OpenCode only where agentic tool-calling is justified — which, as of Nov 2026, is nowhere; all pipelines use a fixed pipeline with one or two LLM completions.
+1. **Worker dispatcher** (this repo, `src/index.ts`): cron → D1 due rows → Queue → `executeJob` → Workers AI / RSS / HTTP / `github_actions_trigger` → D1 history.
+2. **GitHub Actions pipelines** (`scripts/*.mjs` called from `.github/workflows/*.yml`): triggered by cron (independent of the Worker) or `workflow_dispatch`. They are **not** routed through the Worker's queue.
 
-AI provider chain (same in all pipelines): `AI_PROVIDER` (default `groq`) → `AI_FALLBACKS` (`cloudflare,gemini,cerebras,openrouter,mistral`) → skip providers without credentials; retry without `response_format` on `json_validate_failed`.
+AI provider chain (all pipelines): `AI_PROVIDER` (default `openrouter`) → `AI_FALLBACKS` (`openrouter,groq,cloudflare`) → skip providers without credentials; retry without `response_format` on Groq `json_validate_failed`.
 
 ## Setup
 
@@ -38,7 +42,7 @@ npm run db:migrate:local
 npx wrangler secret put GITHUB_PAT            # classic PAT with `repo` scope
 
 # 3. .dev.vars (gitignored; see .dev.vars.example)
-#    D1_DATABASE_ID and MANUAL_RUN_TOKEN are required; provider keys optional.
+#    D1_DATABASE_ID and MANUAL_RUN_TOKEN are required; provider keys and PAT scopes are documented there.
 
 npm run dev                              # dev server
 curl http://localhost:8787/health
@@ -49,13 +53,13 @@ curl http://localhost:8787/health
 Production:
 
 ```bash
-npm run db:migrate:remote          # apply pending migrations (e.g. 0007)
+npm run db:migrate:remote          # apply pending migrations
 npm run typecheck && npm run deploy
 ```
 
 ## Managing jobs
 
-All admin is via D1 SQL through Wrangler or `/api/*` with `Authorization: Bearer $MANUAL_RUN_TOKEN`. See `docs/status.md` for the live-row dump, enable/disable commands, and the secrets inventory.
+All admin is via D1 SQL through Wrangler or `/api/*` with `Authorization: Bearer $MANUAL_RUN_TOKEN`. See `docs/status.md`.
 
 ```bash
 npx wrangler d1 execute scheduler-db --remote --command \
@@ -64,27 +68,28 @@ npx wrangler d1 execute scheduler-db --remote --command \
 
 ## Documentation
 
-- `docs/status.md` — production state, live rows, secrets inventory, operational gotchas, prompt-migration scorecard.
-- `docs/superpowers/specs/` · `docs/superpowers/plans/` — approved designs and implementation plans (trending digest, rails jobs, railsdev blog writer).
-- `AGENTS.md` — commands, runtime gotchas, PR conventions.
-- `prompts/` — the original Claude Scheduler prompts (goals retained, execution rewritten for CI).
+- `docs/status.md` — production state, live rows, secrets inventory, operational gotchas.
+- `docs/superpowers/specs/` · `docs/superpowers/plans/` — approved designs and implementation plans.
+- `AGENTS.md` — runtime conventions and PRs.
+- `prompts/` — original Claude Scheduler prompts (goals retained, execution rewritten for CI).
 
 ## Security
 
 - Never commit `.dev.vars` or real tokens. `gen:config` writes only local files.
-- **`prompts/1.md` originally contained a plaintext Cloudflare API token.** It was scrubbed and never committed to Git history, but the token must be treated as compromised — rotate/revoke it.
-- `GITHUB_PAT` used for dispatch only; site repos use `RAILSDEV_PAT` scoped to contents+PRs of that repo only.
-- Slack tokens are bot tokens (`xoxb-…`) with `chat:write`; failure with `not_allowed_token_type` means the wrong token type was set, or the bot isn't installed / lacks the scope.
-- RSS and API payloads are untrusted input; scripts only pass through verified fields.
+- **`prompts/1.md` originally contained a plaintext Cloudflare API token.** It was scrubbed before any commit; treat the token as compromised — rotate it if you haven't already.
+- `GITHUB_PAT` is used for workflow dispatch; site repos use `RAILSDEV_PAT` / `FULLSTACKWEB_PAT` / `INASOFT_PAT` scoped to contents+PRs of those repos only.
+- Slack tokens are bot tokens (`xoxb-…`) with `chat:write`; `not_allowed_token_type` means wrong token type / scope / missing invite.
+- Production OpenRouter key (`@preset/ai-scheduler`) lives only in GitHub Actions secrets and local `.dev.vars`.
 
-## Status of the Claude Scheduler migration
+## Migration status map
 
 | Prompt | Automation | State |
 |---|---|---|
-| 2 | GitHub Trending daily → #news | ✅ live, enabled 06:50 WIB |
-| 3 | Rails remote jobs → #jobs | ✅ live, enabled 07:50 WIB |
-| 4 | RailsDev.io blog → PR | ✅ PR open `hendra/railsdev-site#28`; writer built & verified; manual only |
-| 5, 6 | FullstackWeb.dev / INASOFT blog writers | ⏳ not started (same pattern as #4) |
+| 2 | GitHub Trending daily → #news | ✅ live (PR #19/#20-era pipeline) |
+| 3 | Rails remote jobs → #jobs | ✅ live |
+| 4 | RailsDev.io blog → PR | ✅ live |
+| 5 | FullstackWeb.dev blog → PR | ✅ live (first PR 2026-11-10 via #36) |
+| 6 | INASOFT blog → PR | ✅ live (first PR `inasoft-site#64`) |
 | 7 | INASOFT news digest → #news | ⏳ not started |
-| 8 | GitHub Trending weekly → #news | ⏳ not started (same pipeline, `since=weekly`) |
-| 1 | IG Reel pipeline | ⏳ deferred; workflow exists but untested end-to-end |
+| 8 | GitHub Trending weekly → #news | ⏳ not started |
+| 1 | IG Reel pipeline | ⏳ deferred, workflow scaffold exists |
