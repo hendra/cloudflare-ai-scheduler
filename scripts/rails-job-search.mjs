@@ -177,7 +177,10 @@ ${lines}`;
   let parsed = null;
   for (let attempt = 1; attempt <= 3; attempt++) {
     const forceNoJsonMode = attempt === 3;
-    const raw = await callCompletion(prompt + (attempt > 1 ? "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON object." : ""), { forceNoJsonMode });
+    let raw;
+    try {
+      raw = await callCompletion(prompt + (attempt > 1 ? "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON object." : ""), { forceNoJsonMode });
+    } catch (e) { console.error(`ai: attempt ${attempt}: ${String(e).slice(0, 600)}`); continue; }
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) { console.error(`ai: attempt ${attempt}: no JSON object`); continue; }
     try {
