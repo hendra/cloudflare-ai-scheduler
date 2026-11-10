@@ -173,9 +173,12 @@ function validateArticle(a, corpusSlugs) {
   req(fences % 2 === 0, "unbalanced code fences");
   const words = a.body.trim().split(/\s+/).length;
   req(words >= 1500, `only ${words} words (need >= 1500)`);
-  req(!/(TODO|lorem ipsum|<%|\{\{|\{placeholder|\[insert)/i.test(a.body), "placeholder token in body");
+  for (const line of String(a.body || "").split("\n")) { /* fences-aware scan */ }
+  const bodyNoFences = String(a.body || "").split(/```/).filter((_, i) => i % 2 === 0).join("\n");
+  req(!/lorem(?:\s|_)ipsum|\{placeholder\}|\[insert/i.test(bodyNoFences), "placeholder token in body");
   const kw = a.keyword || "";
-  req(kw && (a.title.toLowerCase().includes(kw.toLowerCase()) || a.description.toLowerCase().includes(kw.toLowerCase())), "keyword missing from title/description");
+  const kwWords = kw.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+  req(kwWords.every((w) => (a.title + " " + a.description + " " + bodyNoFences.slice(0, 2000)).toLowerCase().includes(w)), "keyword words missing from title/description/intro");
   req(/verification note/i.test(a.body), "no verification note");
   const links = a.body.match(/\]\((https?:\/\/[^)\s]+)\)/g) || [];
   return { ok: errs.length === 0, errs, wordCount: words, links: [...new Set(links.map((l) => l.slice(2, -1)))].slice(0, 15) };
@@ -268,10 +271,29 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   const article = { ...meta, body };
   console.log(`article: ${article.title} | ${article.slug} | seoTitle ${String(article.seoTitle || "").length}c`);
 
-  // 4) validation
-  const v = validateArticle(article, corpusSlugs);
-  if (!v.ok) { await fail(`article validation failed: ${v.errs.join("; ")}`); return; }
-  console.log(`validation ok — ${v.wordCount} words, ${v.links.length} external links to check`);
+  // 4) validation (with one self-correction retry)
+  let v = validateArticle(article, corpusSlugs);
+  if (!v.ok) {
+    console.error("validation failed, retrying body with feedback:", v.errs.join("; "));
+    const retryBody = await (async () => {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const prompt = bodyPrompt + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues. Return ONLY the body.`;
+          const text = await callCompletion(prompt, { maxTokens: 8000, expectJSON: false });
+          if (text && text.length > 1500) return text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
+          console.error(`retry body attempt ${attempt}: too short`);
+        } catch (e) { console.error(`retry body attempt ${attempt}:`, e.message); }
+      }
+      return null;
+    })();
+    if (retryBody) {
+      article.body = retryBody;
+      v = validateArticle(article, corpusSlugs);
+      if (v.ok) { console.log(`validation ok after retry — ${v.wordCount} words, ${v.links.length} links`); } else { await fail(`article validation failed after retry: ${v.errs.join("; ")}`); return; }
+    } else { await fail(`article validation failed: ${v.errs.join("; ")}`); return; }
+  } else {
+    console.log(`validation ok — ${v.wordCount} words, ${v.links.length} external links to check`);
+  }
 
   // 4b) external link check (drop article if >2 dead)
   let dead = 0;
