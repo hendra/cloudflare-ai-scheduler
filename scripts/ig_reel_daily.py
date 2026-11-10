@@ -435,19 +435,34 @@ def gen_image_hf(prompt, out_path):
 _POLLINATION_LAST = [0.0]
 
 def gen_image_pollinations(prompt, out_path):
-    """Pollinations.ai — no key required; free tier = 1 image / 45 s per IP."""
+    """Pollinations.ai.
+
+    With POLLINATIONS_SECRET_KEY (sk_…): modern endpoint gen.pollinations.ai/image,
+    Bearer auth, no per-IP pacing, no watermark.
+    Without: classic endpoint image.pollinations.ai/prompt — free tier = 1 image / 45 s per IP.
+    """
     import urllib.error
     import urllib.parse
-    wait = _POLLINATION_LAST[0] + 46 - time.time()
-    if wait > 0:
-        log(f"  pollinations: waiting {wait:.0f}s (free tier 1 image / 45s)")
-        time.sleep(wait)
+    secret = os.environ.get("POLLINATIONS_SECRET_KEY", "").strip()
     q = urllib.parse.quote(prompt)
-    url = f"https://image.pollinations.ai/prompt/{q}?width=768&height=1360&nologo=true&model=flux"
+
+    if secret:
+        authed = True
+        url = f"https://gen.pollinations.ai/image/{q}?width=768&height=1360&nologo=true"
+        headers = {"Authorization": f"Bearer {secret}", "User-Agent": UA}
+    else:
+        authed = False
+        wait = _POLLINATION_LAST[0] + 46 - time.time()
+        if wait > 0:
+            log(f"  pollinations: waiting {wait:.0f}s (free tier 1 image / 45s)")
+            time.sleep(wait)
+        url = f"https://image.pollinations.ai/prompt/{q}?width=768&height=1360&nologo=true&model=flux"
+        headers = None
+
     for attempt in range(1, 4):
         _POLLINATION_LAST[0] = time.time()
         try:
-            blob = http(url, timeout=240)
+            blob = http(url, headers=headers, timeout=240)
         except urllib.error.HTTPError as e:
             try:
                 raw = e.read().decode("utf-8", "replace")
