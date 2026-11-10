@@ -51,7 +51,7 @@ export async function callModel(promptOrOpts, opts = {}) {
     if (!key && name !== "ollama") { console.log(`ai: skip ${name} (no credentials)`); continue; }
     const model = AI_MODEL || p.model();
     try {
-      const payload = { model, messages, max_tokens: maxTokens, temperature, ...(p.think !== undefined ? { think: p.think } : {}), ...(p.jsonMode && expectJSON && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}) };
+      const payload = { model, messages, max_tokens: maxTokens, temperature, ...(p.think !== undefined ? { think: p.think } : {}), ...(p.jsonMode && expectJSON && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}), ...(name === "openrouter" ? { reasoning: { effort: process.env.OPENROUTER_REASONING_EFFORT || "none" } } : {}) };
       const doFetch = (body) => fetch(`${p.baseURL()}/chat/completions`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${p.key()}`, "Content-Type": "application/json" },
