@@ -1,19 +1,33 @@
 #!/usr/bin/env python3
-"""Render a 1200x630 text-on-brand cover PNG for a RailsDev blog post.
+"""Render a 1200x630 text-on-brand cover PNG for a blog post.
 
 Usage: python3 scripts/make-cover.py '<title>' <out.png>
-Layout: dark background (#090d16), title centered (wrapped), emerald→indigo
-rule under it, 'railsdev.io' footer-left, 'RAILSDEV' footer-right.
+
+Defaults are for RailsDev.io. Override with SITE_LABEL, SITE_BADGE, BG_RGB,
+STOP_1_RGB, STOP_2_RGB (comma-separated "r,g,b") to brand other sites.
 Requires DejaVu Sans Bold (present on most Linux distros and on
 ubuntu-latest GitHub runners) and Pillow.
 """
+import os
 import sys
 from PIL import Image, ImageDraw, ImageFont
 
 W, H = 1200, 630
-BG = (9, 13, 22)
-EMERALD = (16, 185, 129)
-INDIGO = (99, 102, 241)
+
+
+def rgb(s, default):
+    try:
+        parts = [int(x.strip()) for x in s.split(",")]
+        return tuple(parts[:3])
+    except Exception:
+        return default
+
+
+BG = rgb(os.environ.get("BG_RGB", "9,13,22"), (9, 13, 22))
+STOP_1 = rgb(os.environ.get("STOP_1_RGB", "16,185,129"), (16, 185, 129))
+STOP_2 = rgb(os.environ.get("STOP_2_RGB", "99,102,241"), (99, 102, 241))
+SITE_LABEL = os.environ.get("SITE_LABEL", "railsdev.io")
+SITE_BADGE = os.environ.get("SITE_BADGE", "RAILSDEV")
 WHITE = (255, 255, 255)
 GREY = (156, 163, 175)
 FONT_BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -43,7 +57,7 @@ def main():
     # gradient rule
     for x in range(W):
         t = x / (W - 1)
-        c = tuple(int(EMERALD[i] + (INDIGO[i] - EMERALD[i]) * t) for i in range(3))
+        c = tuple(int(STOP_1[i] + (STOP_2[i] - STOP_1[i]) * t) for i in range(3))
         draw.line([(x, 470), (x, 494)], fill=c)
     # title (shrink to fit up to 4 lines)
     size = 72
@@ -64,8 +78,8 @@ def main():
     # footers
     f_small = ImageFont.truetype(FONT_BOLD, 26)
     f_tiny = ImageFont.truetype(FONT_REG, 18)
-    draw.text((80, H - 82), "railsdev.io", font=f_small, fill=EMERALD)
-    draw.text((W - 80, H - 78), "RAILSDEV", font=f_tiny, fill=GREY, anchor="ra")
+    draw.text((80, H - 82), SITE_LABEL, font=f_small, fill=STOP_1)
+    draw.text((W - 80, H - 78), SITE_BADGE, font=f_tiny, fill=GREY, anchor="ra")
     img.save(out)
     print("cover written:", out)
 

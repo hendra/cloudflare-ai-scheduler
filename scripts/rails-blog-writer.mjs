@@ -82,7 +82,28 @@ async function postToSlack(messages) {
 }
 
 // ---------- AI ----------
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const AI_CALL_SPACING_MS = 5000;
+
 async function callCompletion(prompt, { forceNoJsonMode = false, maxTokens = 2800, expectJSON = true } = {}) {
+  await sleep(AI_CALL_SPACING_MS);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await _callCompletionOnce(prompt, { forceNoJsonMode, maxTokens, expectJSON });
+    } catch (e) {
+      if (String(e).includes("429") || String(e).includes("rate_limit_exceeded")) {
+        const wait = (attempt + 1) * 4000;
+        console.log(`ai: 429 — sleeping ${wait}ms (attempt ${attempt + 1}/3)`);
+        await sleep(wait);
+        continue;
+      }
+      throw e;
+    }
+  }
+  return _callCompletionOnce(prompt, { forceNoJsonMode, maxTokens, expectJSON });
+}
+
+async function _callCompletionOnce(prompt, { forceNoJsonMode = false, maxTokens = 2800, expectJSON = true } = {}) {
   const errors = [];
   for (const name of CHAIN) {
     const p = PROVIDERS[name]; if (!p) { errors.push(`${name}: unknown`); continue; }
