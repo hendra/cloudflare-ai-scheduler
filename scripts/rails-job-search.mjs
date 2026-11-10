@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { PROVIDERS, providerChain, callModel } from "./ai-providers.mjs";
 // Rails — Remote Job Search → Slack #jobs (deterministic, zero dependencies)
 //
 // Flow: fetch Remotive API + Remote OK API + HN "Who is hiring?" thread
@@ -22,19 +23,8 @@ const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || "";
 const CF_API_TOKEN = process.env.CF_API_TOKEN || "";
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
 const SLACK_JOBS_CHANNEL_ID = process.env.SLACK_JOBS_CHANNEL_ID || "";
-const AI_PROVIDER = (process.env.AI_PROVIDER || "groq").toLowerCase();
 const AI_MODEL = process.env.AI_MODEL || "";
 
-const PROVIDERS = {
-  cloudflare: { name: "cloudflare", baseURL: () => `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai/v1`, key: () => CF_API_TOKEN, model: () => process.env.CLOUDFLARE_MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast", jsonMode: true },
-  groq:       { name: "groq",       baseURL: () => "https://api.groq.com/openai/v1", key: () => process.env.GROQ_API_KEY || "", model: () => process.env.GROQ_MODEL || "openai/gpt-oss-20b", jsonMode: true },
-  cerebras:   { name: "cerebras",   baseURL: () => "https://api.cerebras.ai/v1", key: () => process.env.CEREBRAS_API_KEY || "", model: () => process.env.CEREBRAS_MODEL || "llama-3.3-70b", jsonMode: true },
-  gemini:     { name: "gemini",     baseURL: () => "https://generativelanguage.googleapis.com/v1beta/openai", key: () => process.env.GEMINI_API_KEY || "", model: () => process.env.GEMINI_MODEL || "gemini-2.5-flash", jsonMode: true },
-  openrouter: { name: "openrouter", baseURL: () => "https://openrouter.ai/api/v1", key: () => process.env.OPENROUTER_API_KEY || "", model: () => process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free" },
-  mistral:    { name: "mistral",    baseURL: () => "https://api.mistral.ai/v1", key: () => process.env.MISTRAL_API_KEY || "", model: () => process.env.MISTRAL_MODEL || "mistral-small-latest", jsonMode: true },
-};
-const AI_FALLBACKS = (process.env.AI_FALLBACKS || "cloudflare,gemini,cerebras,openrouter,mistral").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
-const CHAIN = [AI_PROVIDER, ...AI_FALLBACKS.filter((p) => p !== AI_PROVIDER)];
 
 const TIERS = ["Excellent", "Strong", "Good", "Moderate", "Low"];
 const ELIGIBILITY = ["worldwide", "international", "country-restricted", "regional/timezone"];
@@ -130,32 +120,6 @@ const SOURCES = [
 const statuses = [];
 
 // ---------- AI ----------
-async function callCompletion(prompt, { forceNoJsonMode = false } = {}) {
-  const errors = [];
-  for (const name of CHAIN) {
-    const p = PROVIDERS[name];
-    if (!p) { errors.push(`${name}: unknown provider`); continue; }
-    const key = p.key();
-    if (!key) { console.log(`ai: skipping ${name} (no credentials)`); continue; }
-    const model = AI_MODEL || p.model();
-    console.log(`ai: trying ${name} (model ${model})`);
-    try {
-      const res = await fetch(`${p.baseURL()}/chat/completions`, {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 4096, temperature: 0.2, ...(p.jsonMode && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}) }),
-      });
-      if (!res.ok) { errors.push(`${name}: HTTP ${res.status} ${(await res.text()).slice(0, 900)}`); continue; }
-      const data = await res.json();
-      const raw = data?.choices?.[0]?.message?.content || "";
-      if (!raw) { errors.push(`${name}: empty completion`); continue; }
-      console.log(`ai: ${name} succeeded`);
-      return raw;
-    } catch (e) { errors.push(`${name}: ${String(e).slice(0, 200)}`); }
-  }
-  throw new Error(`all AI providers failed: ${errors.join(" | ")}`);
-}
-
 const PROFILE = `Senior Full-Stack Developer — Ruby on Rails & React, 12+ years, based in Indonesia. Prefers fully-remote worldwide/international roles open to Indonesian applicants; EU/APAC/NA welcome; country-restricted roles downranked.
 Scoring weights: Rails 25, seniority 20, remote-from-Indonesia 20, full-stack/React 10, backend architecture 10, stack 5, salary 5, company credibility 5.`;
 
@@ -175,7 +139,7 @@ ${lines}`;
     const forceNoJsonMode = attempt === 3;
     let raw;
     try {
-      raw = await callCompletion(prompt + (attempt > 1 ? "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON object." : ""), { forceNoJsonMode });
+      raw = await callModel(prompt + (attempt > 1 ? "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON object." : ""), { forceNoJsonMode });
     } catch (e) { console.error(`ai: attempt ${attempt}: ${String(e).slice(0, 600)}`); continue; }
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) { console.error(`ai: attempt ${attempt}: no JSON object`); continue; }
@@ -219,7 +183,7 @@ async function postToSlack(messages) {
 
 (async () => {
   if (!DRY_RUN && (!SLACK_BOT_TOKEN || !SLACK_JOBS_CHANNEL_ID)) { console.error("FATAL: SLACK_BOT_TOKEN and SLACK_JOBS_CHANNEL_ID required (or DRY_RUN=true)"); process.exit(1); }
-  if (!CF_ACCOUNT_ID && !CHAIN.some((n) => PROVIDERS[n]?.key()) && !AI_STUB) { console.error("FATAL: no AI provider credentials found"); process.exit(1); }
+  if (!CF_ACCOUNT_ID && !providerChain().some((n) => PROVIDERS[n]?.key()) && !AI_STUB) { console.error("FATAL: no AI provider credentials found"); process.exit(1); }
   const all = [];
   for (const [name, fn] of SOURCES) {
     try { const jobs = await fn(); all.push(...jobs); statuses.push([name, true, jobs.length]); console.log(`source ${name}: ${jobs.length} fresh jobs`); }
