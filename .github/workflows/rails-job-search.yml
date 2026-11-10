@@ -39,6 +39,7 @@ jobs:
       AI_PROVIDER: ${{ vars.AI_PROVIDER }}
       AI_FALLBACKS: ${{ vars.AI_FALLBACKS }}
       AI_MODEL: ${{ vars.AI_MODEL }}
+      GROQ_MODEL: ${{ vars.GROQ_MODEL }}
       SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
       SLACK_JOBS_CHANNEL_ID: ${{ secrets.SLACK_JOBS_CHANNEL_ID }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
