@@ -50,6 +50,8 @@ jobs:
       HF_TOKEN: ${{ secrets.HF_TOKEN }}
       HF_IMAGE_MODEL: black-forest-labs/FLUX.1-schnell
       IMAGE_ORDER: cloudflare,google,huggingface,pollinations
+      # Pollinations secret key (sk_…) — unlimited image API at gen.pollinations.ai (no watermark)
+      POLLINATIONS_SECRET_KEY: ${{ secrets.POLLINATIONS_SECRET_KEY }}
       CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
       CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
       CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
