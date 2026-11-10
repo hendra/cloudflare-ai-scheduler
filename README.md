@@ -40,13 +40,18 @@ npm install
 npx wrangler login
 ```
 
+Or run the interactive setup helper:
+```bash
+npm run setup
+```
+
 ### 2. Create D1 database
 
 ```bash
 npx wrangler d1 create scheduler-db
 ```
 
-Copy the returned `database_id` into `wrangler.jsonc`.
+Copy the returned `database_id` into `wrangler.jsonc` (replace `REPLACE_WITH_YOUR_D1_DATABASE_ID`).
 
 ### 3. Create queues
 
