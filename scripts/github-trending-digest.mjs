@@ -36,12 +36,12 @@ const AI_MODEL = process.env.AI_MODEL || ""; // overrides the primary provider's
 // Provider model overrides: CLOUDFLARE_MODEL, GROQ_MODEL, CEREBRAS_MODEL,
 // GEMINI_MODEL, OPENROUTER_MODEL, MISTRAL_MODEL.
 const PROVIDERS = {
-  cloudflare: { name: "cloudflare", baseURL: () => `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai/v1`, key: () => CF_API_TOKEN, model: () => process.env.CLOUDFLARE_MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast" },
-  groq:       { name: "groq",       baseURL: () => "https://api.groq.com/openai/v1", key: () => process.env.GROQ_API_KEY || "", model: () => process.env.GROQ_MODEL || "openai/gpt-oss-120b" },
-  cerebras:   { name: "cerebras",   baseURL: () => "https://api.cerebras.ai/v1", key: () => process.env.CEREBRAS_API_KEY || "", model: () => process.env.CEREBRAS_MODEL || "llama-3.3-70b" },
-  gemini:     { name: "gemini",     baseURL: () => "https://generativelanguage.googleapis.com/v1beta/openai", key: () => process.env.GEMINI_API_KEY || "", model: () => process.env.GEMINI_MODEL || "gemini-2.5-flash" },
+  cloudflare: { name: "cloudflare", baseURL: () => `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai/v1`, key: () => CF_API_TOKEN, model: () => process.env.CLOUDFLARE_MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast", jsonMode: true },
+  groq:       { name: "groq",       baseURL: () => "https://api.groq.com/openai/v1", key: () => process.env.GROQ_API_KEY || "", model: () => process.env.GROQ_MODEL || "openai/gpt-oss-120b", jsonMode: true },
+  cerebras:   { name: "cerebras",   baseURL: () => "https://api.cerebras.ai/v1", key: () => process.env.CEREBRAS_API_KEY || "", model: () => process.env.CEREBRAS_MODEL || "llama-3.3-70b", jsonMode: true },
+  gemini:     { name: "gemini",     baseURL: () => "https://generativelanguage.googleapis.com/v1beta/openai", key: () => process.env.GEMINI_API_KEY || "", model: () => process.env.GEMINI_MODEL || "gemini-2.5-flash", jsonMode: true },
   openrouter: { name: "openrouter", baseURL: () => "https://openrouter.ai/api/v1", key: () => process.env.OPENROUTER_API_KEY || "", model: () => process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free" },
-  mistral:    { name: "mistral",    baseURL: () => "https://api.mistral.ai/v1", key: () => process.env.MISTRAL_API_KEY || "", model: () => process.env.MISTRAL_MODEL || "mistral-small-latest" },
+  mistral:    { name: "mistral",    baseURL: () => "https://api.mistral.ai/v1", key: () => process.env.MISTRAL_API_KEY || "", model: () => process.env.MISTRAL_MODEL || "mistral-small-latest", jsonMode: true },
 };
 const AI_PROVIDER = (process.env.AI_PROVIDER || "cloudflare").toLowerCase();
 const AI_FALLBACKS = (process.env.AI_FALLBACKS || "groq,gemini,cerebras,openrouter,mistral").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
@@ -149,7 +149,7 @@ async function callCompletion(prompt) {
       const res = await fetch(`${p.baseURL()}/chat/completions`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 2200, temperature: 0.4 }),
+        body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 2200, temperature: 0.4, ...(p.jsonMode ? { response_format: { type: "json_object" } } : {}) }),
       });
       if (!res.ok) {
         const text = (await res.text()).slice(0, 300);
@@ -184,10 +184,14 @@ Then write "trend": 2-3 sentences noting patterns across the 10 (dominant langua
 Reply with ONLY a JSON object, no prose: {"repos":[{"name":"owner/name","what":"...","why":"...","category":"..."}], "trend":"..."} — repos array must be in the same order as the input, exactly 10 items.
 Repositories:
 ${lines}`;
-  const raw = await callCompletion(prompt);
-  const m = raw.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error("Workers AI returned no JSON object");
-  const parsed = JSON.parse(m[0]);
+  let parsed = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const raw = await callCompletion(prompt + (attempt > 1 ? "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON object." : ""));
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) { console.error(`ai: attempt ${attempt}: no JSON object found`); continue; }
+    try { parsed = JSON.parse(m[0]); break; } catch (e) { console.error(`ai: attempt ${attempt}: JSON parse failed: ${e.message}`); }
+  }
+  if (!parsed) throw new Error("AI returned invalid JSON twice");
   const byName = new Map((parsed.repos || []).map((r) => [r.name, r]));
   const enriched = repos.map((r) => {
     const a = byName.get(`${r.owner}/${r.name}`) || {};
