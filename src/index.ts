@@ -355,6 +355,158 @@ export default {
       }
     }
 
+    if (url.pathname === "/api/run-all" && request.method === "POST") {
+      const token = env.MANUAL_RUN_TOKEN;
+      if (!token || request.headers.get("authorization") !== `Bearer ${token}`) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+
+      const parsedLimit = Number(env.MAX_JOBS_PER_DISPATCH || "10");
+      const limit = Math.max(1, Math.min(25, Number.isFinite(parsedLimit) ? parsedLimit : 10));
+      const { results } = await env.DB.prepare(`
+        SELECT * FROM schedulers
+        WHERE enabled = 1
+        ORDER BY priority ASC, next_run_at ASC
+        LIMIT ?
+      `).bind(limit).all<SchedulerRow>();
+
+      const runResults: Array<{
+        schedulerId: string;
+        schedulerName: string;
+        executionId: string;
+        status: "queued" | "failed";
+        error?: string;
+      }> = [];
+
+      let queued = 0;
+      let failed = 0;
+
+      for (const job of results) {
+        const executionId = crypto.randomUUID();
+        const scheduledFor = new Date().toISOString();
+
+        try {
+          const insert = await env.DB.prepare(`
+            INSERT OR IGNORE INTO scheduler_executions
+            (id, scheduler_id, scheduled_for, started_at, status, attempt)
+            VALUES (?, ?, ?, ?, 'queued', 1)
+          `).bind(executionId, job.id, scheduledFor, scheduledFor).run();
+
+          if (insert.meta.changes === 0) {
+            // Already dispatched for this timestamp; do not duplicate the queue message.
+            runResults.push({
+              schedulerId: job.id,
+              schedulerName: job.name,
+              executionId,
+              status: "queued"
+            });
+            queued++;
+            continue;
+          }
+
+          await env.JOB_QUEUE.send({
+            executionId,
+            schedulerId: job.id,
+            scheduledFor,
+            attempt: 1,
+            force: true
+          } satisfies JobMessage);
+
+          runResults.push({
+            schedulerId: job.id,
+            schedulerName: job.name,
+            executionId,
+            status: "queued"
+          });
+          queued++;
+        } catch (error) {
+          try {
+            await env.DB.prepare(`
+              UPDATE scheduler_executions
+              SET status = 'failed', finished_at = ?, error_text = ?
+              WHERE id = ?
+            `).bind(new Date().toISOString(), String(error), executionId).run();
+          } catch {
+            // Ignore secondary DB errors to keep processing remaining schedulers.
+          }
+          runResults.push({
+            schedulerId: job.id,
+            schedulerName: job.name,
+            executionId,
+            status: "failed",
+            error: String(error)
+          });
+          failed++;
+        }
+      }
+
+      const total = results.length;
+      if (total === 0) {
+        return json({
+          success: true,
+          message: "No enabled schedulers to queue",
+          total: 0,
+          queued: 0,
+          failed: 0,
+          results: []
+        }, 200);
+      }
+
+      if (queued === 0) {
+        return json({
+          success: false,
+          message: "Failed to queue enabled schedulers",
+          total,
+          queued,
+          failed,
+          results: runResults
+        }, 500);
+      }
+
+      return json({
+        success: true,
+        message: "Enabled schedulers queued for immediate execution",
+        total,
+        queued,
+        failed,
+        results: runResults
+      }, 202);
+    }
+
+    if (url.pathname.startsWith("/api/executions/") && request.method === "GET") {
+      const token = env.MANUAL_RUN_TOKEN;
+      if (!token || request.headers.get("authorization") !== `Bearer ${token}`) {
+        return json({ error: "Unauthorized" }, 401);
+      }
+
+      let id = "";
+      try {
+        id = decodeURIComponent(url.pathname.slice("/api/executions/".length));
+      } catch {
+        return json({ error: "Invalid execution id" }, 400);
+      }
+
+      if (!id || id.includes("/") || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+        return json({ error: "Invalid execution id" }, 400);
+      }
+
+      const row = await env.DB.prepare(`
+        SELECT e.id, e.scheduler_id, s.name AS scheduler_name, s.name AS name, e.scheduled_for,
+               e.started_at, e.finished_at, e.status, e.attempt, e.model,
+               e.input_characters, e.output_characters, e.result_text,
+               e.error_text, e.created_at
+        FROM scheduler_executions e
+        LEFT JOIN schedulers s ON s.id = e.scheduler_id
+        WHERE e.id = ?
+      `).bind(id).first<Record<string, unknown>>();
+
+      if (!row) {
+        return json({ error: "Execution not found" }, 404);
+      }
+
+      return json(row);
+    }
+
     if (url.pathname === "/health") {
       return json({ ok: true, service: "cloudflare-ai-scheduler", timestamp: new Date().toISOString() });
     }
