@@ -6,5 +6,5 @@ INSERT OR IGNORE INTO schedulers
 VALUES
 ('ig-reel-daily', 'Daily Instagram Reel (Interesting Facts)', 'Trigger GitHub Actions to build and post a Reel.', 0, 'github_actions_trigger', '15 10 * * *', 'Asia/Jakarta',
  'Trigger the ig-reel pipeline workflow.',
- '{"owner":"hendra","repo":"cloudflare-ai-scheduler","workflow":"ig-reel.yml","ref":"main","inputs":{}}',
+ '{"owner":"YOUR_GITHUB_OWNER","repo":"YOUR_PIPELINE_REPO","workflow":"ig-reel.yml","ref":"main","inputs":{}}',
  5, '2099-01-01T00:00:00.000Z');
