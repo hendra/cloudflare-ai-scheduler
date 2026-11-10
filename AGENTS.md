@@ -45,7 +45,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 
 ## Pull requests
 
-Never commit directly to `main`; every change lands via a PR. PR descriptions follow GitHub best practice: a `## Summary` (what and why, linked spec/plan where one exists), a `## What …`/scope section with concrete bullets, a `## Verification` checklist with real commands/outcomes, `## Out of scope` where relevant, and refs to related PRs. Keep them scannable and honest — don't claim checks that weren't run. **Stacked PRs don't rebase onto `main` automatically** — cherry-pick onto fresh `main` and open a new PR.
+Never commit directly to `main`; every change lands via a PR. **Conflict markers are resolved before committing, always:** after resolving any `git` conflict / cherry-pick, run `git grep -n -E '^(<<<<<<< |>>>>>>> )' -- .` once and confirm it is clean before `git commit` — never commit the in-progress resolution text (see docs/status.md gotcha 20). CI enforces this on every PR. PR descriptions follow GitHub best practice: a `## Summary` (what and why, linked spec/plan where one exists), a `## What …`/scope section with concrete bullets, a `## Verification` checklist with real commands/outcomes, `## Out of scope` where relevant, and refs to related PRs. Keep them scannable and honest — don't claim checks that weren't run. **Stacked PRs don't rebase onto `main` automatically** — cherry-pick onto fresh `main` and open a new PR.
 
 ## Migrated automations (prompts 1–8)
 
