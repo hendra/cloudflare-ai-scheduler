@@ -23,7 +23,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
   (`github-trending-digest.mjs`, `rails-job-search.mjs`, `railsdev-blog-writer.mjs`, `fullstackweb-blog-writer.mjs`, `inasoft-blog-writer.mjs`, `inasoft-news-digest.mjs`).
 - AI chain (all pipelines): `AI_PROVIDER` (default `openrouter` with preset `@preset/ai-scheduler`) → fallbacks `openrouter,groq,cloudflare` → skip providers without keys; retry without `response_format` on Groq `json_validate_failed`.
 - Cover generation shared via `scripts/make-cover.py` + env overrides for branding (title, badge, gradient colors).
-- D1 rows enabled: `github-trending-daily`, `github-trending-weekly`, `rails-job-search-daily`, `railsdev-blog-writer`, `fullstackweb-blog-writer`, `inasoft-blog-writer`, `inasoft-news-digest`, `ig-reel-daily`.
+- D1 rows enabled (5 base + 10 multi-fire clones): `github-trending-daily`, `github-trending-weekly`, `rails-job-search-daily`, `rails-job-search-daily-2000`, `railsdev-blog-writer`, `railsdev-blog-writer-1130`, `railsdev-blog-writer-1620`, `fullstackweb-blog-writer`, `fullstackweb-blog-writer-1130`, `fullstackweb-blog-writer-1620`, `inasoft-blog-writer`, `inasoft-blog-writer-1130`, `inasoft-blog-writer-1620`, `inasoft-news-digest`, `ig-reel-daily`, `ig-reel-daily-1145`, `ig-reel-daily-1635`, `ig-reel-daily-1930`.
 
 ## Non-obvious gotchas
 

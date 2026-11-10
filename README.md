@@ -8,13 +8,13 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler — and, since late 2026
 |---|---|---|---|
 | GitHub Trending Top 10 (`github-trending-daily`) | `50 23 * * *` (06:50 WIB) | Slack `#news` | **enabled** |
 | GitHub Trending weekly (`github-trending-weekly`) | `10 0 * * 1` (Mon 07:10 WIB) | Slack `#news` | **enabled** |
-| Rails remote job search (`rails-job-search-daily`) | `50 0 * * *` (07:50 WIB) | Slack `#jobs` | **enabled** |
-| RailsDev.io blog writer (`railsdev-blog-writer`) | `0 1 * * *` (08:00 WIB) | PR on `hendra/railsdev-site` | **enabled** |
-| FullstackWeb.dev blog writer (`fullstackweb-blog-writer`) | `30 1 * * *` (08:30 WIB) | PR on `hendra/fullstackwebdev-site` | **enabled** |
-| INASOFT blog writer (`inasoft-blog-writer`) | `0 2 * * *` (09:00 WIB) | PR on `hendra/inasoft-site` | **enabled** |
-| IG Reel pipeline (`ig-reel-daily`) | `15 10 * * *` (17:15 WIB) | Instagram @kaliajatau.id via Buffer | **enabled** |
+| Rails remote job search (`rails-job-search-daily` + `-2000`) | 06:45 + 20:00 WIB | Slack `#jobs` | **enabled** |
+| RailsDev.io blog writer (`railsdev-blog-writer` + `-1130`, `-1620`) | 07:45 + 11:30 + 16:20 WIB | PR on `hendra/railsdev-site` | **enabled** |
+| FullstackWeb.dev blog writer (`fullstackweb-blog-writer` + `-1130`, `-1620`) | 07:45 + 11:30 + 16:20 WIB | PR on `hendra/fullstackwebdev-site` | **enabled** |
+| INASOFT blog writer (`inasoft-blog-writer` + `-1130`, `-1620`) | 07:45 + 11:30 + 16:20 WIB | PR on `hendra/inasoft-site` | **enabled** |
+| IG Reel pipeline (`ig-reel-daily` + 3 sibling rows) | `15 1,45 4,35 9,30 12 * * *` → real: 08:15, 11:45, 16:35, 19:30 WIB | Instagram @kaliajatau.id via Buffer | **enabled** |
 
-All pipelines are deterministic, zero-dependency Node 20 scripts (one file each, plus `scripts/ai-providers.mjs` / `scripts/make-cover.py`). No agent tool-calling; 1–2 LLM completions per run.
+Pipelines are deterministic. Most are zero-dependency Node 20 scripts (one file each, plus `scripts/ai-providers.mjs` / `scripts/make-cover.py`); the IG Reel is a Python orchestrator (`scripts/ig_reel_daily.py`; pip deps installed in the workflow). No agent tool-calling; 1–2 LLM completions per run.
 
 **Production default model: OpenRouter `@preset/ai-scheduler`** with fallbacks `openrouter,groq,cloudflare`. Local development: **Ollama `gemma4:e2b`** (configurable via `OLLAMA_*`).
 
