@@ -20,10 +20,10 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 - Bindings (wrangler.template.jsonc): `DB` (D1), `AI` (Workers AI binding), `JOB_QUEUE` (Queue).
 - Queue: max batch 5, 3 retries, dead-letter `scheduler-jobs-dlq`.
 - Pipelines (`scripts/*.mjs`): deterministic, zero-dep Node 20 scripts driven by GitHub Actions
-  (`github-trending-digest.mjs`, `rails-job-search.mjs`, `railsdev-blog-writer.mjs`, `fullstackweb-blog-writer.mjs`, `inasoft-blog-writer.mjs`).
+  (`github-trending-digest.mjs`, `rails-job-search.mjs`, `railsdev-blog-writer.mjs`, `fullstackweb-blog-writer.mjs`, `inasoft-blog-writer.mjs`, `inasoft-news-digest.mjs`).
 - AI chain (all pipelines): `AI_PROVIDER` (default `openrouter` with preset `@preset/ai-scheduler`) → fallbacks `openrouter,groq,cloudflare` → skip providers without keys; retry without `response_format` on Groq `json_validate_failed`.
 - Cover generation shared via `scripts/make-cover.py` + env overrides for branding (title, badge, gradient colors).
-- D1 rows enabled: `github-trending-daily`, `rails-job-search-daily`, `railsdev-blog-writer`, `fullstackweb-blog-writer`, `inasoft-blog-writer`. `ig-reel-daily` disabled.
+- D1 rows enabled: `github-trending-daily`, `rails-job-search-daily`, `railsdev-blog-writer`, `fullstackweb-blog-writer`, `inasoft-blog-writer`, `inasoft-news-digest`. `ig-reel-daily` disabled.
 
 ## Non-obvious gotchas
 
@@ -55,7 +55,7 @@ Never commit directly to `main`; every change lands via a PR. PR descriptions fo
 | 4 (RailsDev blog → PR) | ✅ live |
 | 5 (FullstackWeb.dev blog) | ✅ live |
 | 6 (INASOFT blog) | ✅ live |
-| 7 (INASOFT news digest) | ⏳ not started |
+| 7 (INASOFT news digest → #news) | ✅ live |
 | 8 (Trending weekly) | ⏳ not started |
 | 1 (IG Reel) | ⏳ deferred; workflow scaffolded, untested E2E |
 

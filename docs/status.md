@@ -13,6 +13,7 @@ If you change something here, update this file.
 | `railsdev-blog-writer` | 1 | `0 1 * * *` | 08:00 | `2026-11-11T01:00:00.000Z` | railsdev-site PR |
 | `fullstackweb-blog-writer` | 1 | `30 1 * * *` | 08:30 | `2026-11-11T01:30:00.000Z` | fullstackwebdev-site PR |
 | `inasoft-blog-writer` | 1 | `0 2 * * *` | 09:00 | `2026-11-11T02:00:00.000Z` | inasoft-site PR |
+| `inasoft-news-digest` | 1 | `30 2 * * *` | 09:30 | `2026-11-11T02:30:00.000Z` | #news |
 | `ig-reel-daily` | 0 | `15 10 * * *` | manual | `2099-01-01T00:00:00.000Z` | ig-reel GHA workflow |
 
 Apply pending migrations: `npm run db:migrate:remote`. Remote migrations required manual fixes historically (e.g. 0007); always run it after adding a migration.

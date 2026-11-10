@@ -90,6 +90,6 @@ npx wrangler d1 execute scheduler-db --remote --command \
 | 4 | RailsDev.io blog → PR | ✅ live |
 | 5 | FullstackWeb.dev blog → PR | ✅ live (first PR 2026-11-10 via #36) |
 | 6 | INASOFT blog → PR | ✅ live (first PR `inasoft-site#64`) |
-| 7 | INASOFT news digest → #news | ⏳ not started |
+| 7 | INASOFT news digest → #news | ✅ live |
 | 8 | GitHub Trending weekly → #news | ⏳ not started |
 | 1 | IG Reel pipeline | ⏳ deferred, workflow scaffold exists |
