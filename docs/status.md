@@ -1,6 +1,6 @@
 # Production status — Cloudflare AI Scheduler
 
-**Last updated:** 2026-11-11 (all local dates Asia/Jakarta; cron fields UTC)
+**Last updated:** 2026-11-11 (rails-blog-writer enabled via migration 0009) (all local dates Asia/Jakarta; cron fields UTC)
 **Scope:** what is running, where secrets live, and the non-obvious fixes that make it work.
 If you change something here, update this file.
 
@@ -10,7 +10,7 @@ If you change something here, update this file.
 |---|---|---|---|---|---|
 | `github-trending-daily` | 1 | `50 23 * * *` | 06:50 | 2026-11-10T23:50:00.000Z | #news |
 | `rails-job-search-daily` | 1 | `50 0 * * *` | 07:50 | 2026-11-11T00:50:00.000Z | #jobs |
-| `rails-blog-writer` | 0 | `0 1 * * *` (manual) | manual | 2099-… | railsdev-site PR |
+| `rails-blog-writer` | 1 | `0 1 * * *` | 08:00 | 2026-11-11T01:00:00.000Z | railsdev-site PR |
 | `ig-reel-daily` | 0 | `15 10 * * *` | manual | 2099-… | ig-reel GHA workflow |
 
 Apply pending migrations: `npm run db:migrate:remote`. **The remote DB required `0007` to be applied manually — local migrations do not propagate.**
