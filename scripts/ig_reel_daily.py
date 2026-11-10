@@ -53,8 +53,8 @@ CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME", "opqimovw").strip()
 CLOUD_KEY = os.environ.get("CLOUDINARY_API_KEY", "").strip()
 CLOUD_SECRET = os.environ.get("CLOUDINARY_API_SECRET", "").strip()
 BUFFER_TOKEN = os.environ.get("BUFFER_ACCESS_TOKEN", "").strip()
-BUFFER_CHANNEL = os.environ.get("BUFFER_CHANNEL_ID", "6aed5544e29c69a1717ba62e").strip()
-BUFFER_ORG = os.environ.get("BUFFER_ORG_ID", "6aed53e7ec5c7c6d73f3e437").strip()
+BUFFER_CHANNEL = (os.environ.get("BUFFER_CHANNEL_ID", "") or "6aed5544e29c69a1717ba62e").strip()
+BUFFER_ORG = (os.environ.get("BUFFER_ORG_ID", "") or "6aed53e7ec5c7c6d73f3e437").strip()
 
 WIB = dt.timezone(dt.timedelta(hours=7), "WIB")
 NOW = dt.datetime.now(WIB)
@@ -467,9 +467,19 @@ def main():
             else:
                 fail("CF_ACCOUNT / CF_TOKEN required for a real run")
         else:
-            subprocess.run([sys.executable, str(KIT / "cf_image.py"),
-                            f"{f['image_prompt']}, no text, no letters, no logos, vertical 9:16",
-                            str(img), "--size", "768x1360", "--fit", "1080x1920"], check=True)
+            attempt = 0
+            while True:
+                attempt += 1
+                try:
+                    subprocess.run([sys.executable, str(KIT / "cf_image.py"),
+                                    f"{f['image_prompt']}, no text, no letters, no logos, vertical 9:16",
+                                    str(img), "--size", "768x1360", "--fit", "1080x1920"], check=True)
+                    break
+                except subprocess.CalledProcessError:
+                    if attempt >= 3:
+                        fail(f"cf_image.py failed after {attempt} attempts for fact {i} (Cloudflare quota or capacity?)")
+                    log(f"  cf_image attempt {attempt} failed; retrying in {20 * attempt}s…")
+                    time.sleep(20 * attempt)
         bg = data_uri_image(img)
         html = make_scene_html(
             "fact", f"{i:02d}", f.get("title", ""), f.get("fact", ""),
