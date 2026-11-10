@@ -361,7 +361,8 @@ export default {
         return json({ error: "Unauthorized" }, 401);
       }
 
-      const limit = Math.max(1, Math.min(25, Number(env.MAX_JOBS_PER_DISPATCH || "10")));
+      const parsedLimit = Number(env.MAX_JOBS_PER_DISPATCH || "10");
+      const limit = Math.max(1, Math.min(25, Number.isFinite(parsedLimit) ? parsedLimit : 10));
       const { results } = await env.DB.prepare(`
         SELECT * FROM schedulers
         WHERE enabled = 1
@@ -385,11 +386,23 @@ export default {
         const scheduledFor = new Date().toISOString();
 
         try {
-          await env.DB.prepare(`
-            INSERT INTO scheduler_executions
+          const insert = await env.DB.prepare(`
+            INSERT OR IGNORE INTO scheduler_executions
             (id, scheduler_id, scheduled_for, started_at, status, attempt)
             VALUES (?, ?, ?, ?, 'queued', 1)
           `).bind(executionId, job.id, scheduledFor, scheduledFor).run();
+
+          if (insert.meta.changes === 0) {
+            // Already dispatched for this timestamp; do not duplicate the queue message.
+            runResults.push({
+              schedulerId: job.id,
+              schedulerName: job.name,
+              executionId,
+              status: "queued"
+            });
+            queued++;
+            continue;
+          }
 
           await env.JOB_QUEUE.send({
             executionId,
@@ -466,13 +479,19 @@ export default {
         return json({ error: "Unauthorized" }, 401);
       }
 
-      const id = decodeURIComponent(url.pathname.slice("/api/executions/".length));
-      if (!id || id.includes("/")) {
+      let id = "";
+      try {
+        id = decodeURIComponent(url.pathname.slice("/api/executions/".length));
+      } catch {
+        return json({ error: "Invalid execution id" }, 400);
+      }
+
+      if (!id || id.includes("/") || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
         return json({ error: "Invalid execution id" }, 400);
       }
 
       const row = await env.DB.prepare(`
-        SELECT e.id, e.scheduler_id, s.name AS scheduler_name, e.scheduled_for,
+        SELECT e.id, e.scheduler_id, s.name AS scheduler_name, s.name AS name, e.scheduled_for,
                e.started_at, e.finished_at, e.status, e.attempt, e.model,
                e.input_characters, e.output_characters, e.result_text,
                e.error_text, e.created_at
