@@ -95,5 +95,5 @@ npx wrangler d1 execute scheduler-db --remote --command \
 - Providers: `cloudflare`, `groq`, `openrouter`, `gemini`, `cerebras`, `mistral`, `ollama`.
 - Default provider (production): `openrouter` with preset `@preset/ai-scheduler`.
 - Default fallbacks (production): `openrouter,groq,cloudflare`.
-- Local development: `AI_PROVIDER=ollama` with `qwen3.5:4b` (very verbose; use longer `maxTokens`).
+- Local development: `AI_PROVIDER=ollama` with `gemma4:e2b` (fast enough for interactive dev).
 - Never commit API keys; `.dev.vars` is gitignored. Production keys live in GitHub Actions secrets (`OPENROUTER_API_KEY`, `GROQ_API_KEY`, `CF_*`).
