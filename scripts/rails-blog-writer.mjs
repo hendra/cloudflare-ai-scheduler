@@ -211,45 +211,23 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
   }
   console.log(`topic: ${topic.topic} | keyword: ${topic.keyword} | angle: ${topic.angle}`);
 
-  // 3) article generation — two calls: (A) small JSON metadata, (B) plain-text body
+  // 3) article generation
   const existingLinks = corpus.slice(0, 40).map((c) => `/blog/${c.slug} — ${c.title}`).join("\n");
-  const existingSlugs = corpusSlugs;
-  const metaPrompt = `You choose metadata for one RailsDev.io (railsdev.io) blog article. Topic: ${topic.topic}. Primary keyword: "${topic.keyword}". Angle: ${topic.angle}.
-Pick a title, slug (kebab-case, unique), and service. Reply with ONLY this JSON:
-{"title":"...","seoTitle":"<= 49 chars","description":"120-160 chars","keyword":"${topic.keyword}","slug":"kebab-case-slug","service":"${SERVICE_VALUES.join("|")}","coverAlt":"what the cover diagram shows"}`;
-  const meta = AI_STUB ? stubArticle() : await (async () => {
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try { const m = parseJSONObject(await callCompletion(metaPrompt + (attempt > 1 ? "\n\nPrevious reply invalid; reply with ONLY the JSON object." : ""), { maxTokens: 700 })); if (m) return m; }
-      catch (e) { console.error(`meta attempt ${attempt}:`, e.message); }
-    }
-    return null;
-  })();
-  if (!meta) await fail("article metadata generation failed after 3 attempts");
-  if (!meta.keyword) meta.keyword = topic.keyword;
-  console.log(`meta: ${meta.title} | ${meta.slug}`);
-  const bodyPrompt = `Write the body of one RailsDev.io (railsdev.io) blog article in English: first person, senior-Rails-consultant voice — practical, specific, opinionated, honest about uncertainty.
-Topic: ${topic.topic}. Keyword: "${meta.keyword}". Angle: ${topic.angle}. Title: ${meta.title}.
-Requirements:
-- 1800-2400 words. H2/H3 sections only, never a # H1 line.
-- At least one fenced ruby or bash code example.
-- An explicit blockquote "Verification note" for anything unverified; never invent benchmarks, versions, dates or statistics.
-- At most 2 internal links to these existing posts:
+  const articlePrompt = `Write an SEO article for RailsDev.io (railsdev.io) in English, first person, senior-Rails-consultant voice — practical, specific, opinionated, honest about uncertainty. Topic: ${topic.topic}. Primary keyword: "${topic.keyword}". Angle: ${topic.angle}.
+Target 1800-2400 words, H2/H3 sections only (never H1), include at least one fenced ruby or bash code example, and an explicit blockquote "Verification note" where anything is unverified. Reference ONLY real URLs (your own knowledge of official docs is fine). If a fact can't be verified, mark it in the verification note — never invent benchmarks, versions, dates or statistics. You may include at most 2 internal links to these existing posts:
 ${existingLinks}
-- Reference ONLY real URLs (official docs and the like). If a fact can't be verified, say so in the verification note rather than asserting it.
-Return ONLY the article body as markdown: the opening paragraph and "##" sections. No title, no frontmatter, no preamble, no trailing notes.`;
-  const body = AI_STUB ? stubArticle().body : await (async () => {
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const text = await callCompletion(bodyPrompt + (attempt > 1 ? "\n\nYour previous attempt failed. Return ONLY the markdown body." : ""), { maxTokens: 8000, expectJSON: false });
-        if (text && text.length > 1500) return text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
-        console.error(`body attempt ${attempt}: too short (${text?.length} chars)`);
-      } catch (e) { console.error(`body attempt ${attempt}:`, e.message); }
+
+Reply with ONLY this JSON (no markdown fencing around it):
+{"title":"...","seoTitle":"<= 49 chars","description":"120-160 chars","keyword":"${topic.keyword}","slug":"kebab-case-slug","service":"${SERVICE_VALUES.join("|")}","coverAlt":"what the cover diagram shows","body":"full markdown body with \\n\\n newlines"}`;
+  let article = AI_STUB ? stubArticle() : null;
+  if (!article) {
+    for (let attempt = 1; attempt <= 3 && !article; attempt++) {
+      try { article = parseJSONObject(await callCompletion(articlePrompt + (attempt > 1 ? "\n\nPrevious reply invalid JSON; reply with ONLY the JSON object." : ""), { maxTokens: 4200 })); }
+      catch (e) { console.error(`article attempt ${attempt}:`, e.message); }
     }
-    return null;
-  })();
-  if (!body) await fail("article body generation failed after 3 attempts");
-  const article = { ...meta, body };
-  console.log(`article: ${article.title} | ${article.slug} | seoTitle ${String(article.seoTitle || "").length}c`);
+    if (!article) await fail("article generation failed after 3 attempts");
+  }
+  console.log(`article: ${article.title} | ${article.slug} | seoTitle ${article.seoTitle.length}c`);
 
   // 4) validation
   const v = validateArticle(article, corpusSlugs);
