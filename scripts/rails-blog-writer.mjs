@@ -89,12 +89,29 @@ async function callCompletion(prompt, { forceNoJsonMode = false, maxTokens = 280
     const key = p.key(); if (!key) { console.log(`ai: skip ${name} (no creds)`); continue; }
     const model = AI_MODEL || p.model();
     try {
-      const res = await fetch(`${p.baseURL()}/chat/completions`, {
+      const body = { model, messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature: 0.4, ...(p.jsonMode && expectJSON && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}) };
+      const doFetch = (payload) => fetch(`${p.baseURL()}/chat/completions`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: maxTokens, temperature: 0.4, ...(p.jsonMode && expectJSON && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}) }),
+        body: JSON.stringify(payload),
       });
-      if (!res.ok) { errors.push(`${name}: HTTP ${res.status} ${(await res.text()).slice(0, 400)}`); continue; }
+      let res = await doFetch(body);
+      if (!res.ok) {
+        const errText = (await res.text()).slice(0, 400);
+        if (p.jsonMode && !forceNoJsonMode && errText.includes("json_validate_failed")) {
+          console.log(`ai: ${name} rejected JSON validation; retrying without response_format`);
+          res = await doFetch({ ...body, response_format: undefined });
+          if (res.ok) {
+            const data2 = await res.json();
+            const raw2 = data2?.choices?.[0]?.message?.content || "";
+            if (raw2) { console.log(`ai: ${name} ok (no json mode)`); return raw2; }
+          }
+          errors.push(`${name}: fallback without response_format also failed`);
+          continue;
+        }
+        errors.push(`${name}: HTTP ${res.status} ${errText}`);
+        continue;
+      }
       const data = await res.json();
       const raw = data?.choices?.[0]?.message?.content || "";
       if (!raw) { errors.push(`${name}: empty completion`); continue; }
