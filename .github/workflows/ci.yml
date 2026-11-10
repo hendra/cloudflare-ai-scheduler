@@ -23,3 +23,10 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Check for merge-conflict markers
+        run: |
+          if git grep -n -E '^(<<<<<<< |>>>>>>> )' -- .; then
+            echo "::error::Merge-conflict markers found — resolve them before committing (docs/status.md gotcha 20)."
+            exit 1
+          fi
