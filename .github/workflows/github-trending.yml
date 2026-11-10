@@ -1,0 +1,92 @@
+name: github-trending
+
+# GitHub Trending — Daily Top 10 → Slack #news
+# Headless OpenCode (v2) backed by Cloudflare Workers AI (OpenAI-compatible
+# endpoint). Model chosen 2026-11-10 after checking the Workers AI catalog for
+# a free, tool-calling-capable model; if Workers AI changes availability, the
+# dry run will fail loudly — do not substitute a paid model (zero-spend rule).
+# Model id @cf/meta/llama-3.3-70b-instruct-fp8-fast; open code is pinned to 2.2.6.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Gather + compose the digest but do NOT post to Slack (print it instead)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-trending-daily
+  cancel-in-progress: false
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_NEWS_CHANNEL_ID: ${{ secrets.SLACK_NEWS_CHANNEL_ID }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install OpenCode 2 (pinned)
+        run: curl -fsSL https://opencode.ai/v2/install | bash -s -- --version 2.2.6 --no-modify-path
+
+      - name: Write Workers AI provider config (not committed)
+        run: |
+          cat > opencode.json <<EOF
+          {
+            "\$schema": "https://opencode.ai/config.json",
+            "model": "cloudflare/llama-3.3-70b",
+            "providers": {
+              "cloudflare": {
+                "name": "Cloudflare Workers AI",
+                "env": ["CF_API_TOKEN"],
+                "package": "@opencode/ai/providers/openai-compatible",
+                "settings": {
+                  "baseURL": "https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai/v1",
+                  "apiKey": "{env:CF_API_TOKEN}"
+                },
+                "models": {
+                  "llama-3.3-70b": {
+                    "modelID": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+                    "name": "Llama 3.3 70B (Workers AI)",
+                    "capabilities": { "tools": true, "input": ["text"], "output": ["text"] },
+                    "limit": { "context": 131072, "output": 8192 }
+                  }
+                }
+              }
+            }
+          }
+          EOF
+          echo "Using model cloudflare/llama-3.3-70b (id @cf/meta/llama-3.3-70b-instruct-fp8-fast); dry_run=${DRY_RUN}"
+
+      - name: Run agent on prompts/github-trending-daily.md
+        run: |
+          PROMPT="$(cat prompts/github-trending-daily.md)"
+          if [ "${DRY_RUN}" = "true" ]; then
+            PROMPT="$(printf '%s\n\n%s' "$PROMPT" 'DRY RUN OVERRIDE: Do everything except post to Slack. Print the final would-be Slack message as your only final output.')"
+          fi
+          set +e
+          opencode run --auto --standalone --print-logs --log-level info --model cloudflare/llama-3.3-70b "$PROMPT" > agent-output.log 2>&1
+          rc=$?
+          set -e
+          tail -c 6000 agent-output.log || true
+          exit $rc
+
+      - name: "Notify failure to Slack #news"
+        if: failure()
+        run: |
+          curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{\"channel\": \"${SLACK_NEWS_CHANNEL_ID}\", \"text\": \"⚠️ GitHub Trending daily digest failed — see https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
