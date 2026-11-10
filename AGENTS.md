@@ -34,5 +34,8 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 - **`MAX_AI_RUNS_PER_DAY` is implemented** in `reserveAiRun` as a reserved counter (not a Neuron meter). `daily_usage.ai_runs` counts inference attempts.
 - **Manual run with `force: true` bypasses the `enabled` check** in `executeJob`.
 - **Typecheck scope is `src/**/*.ts` only**; new files outside `src/` won't be checked unless `tsconfig.json` is updated.
-- **No automated tests exist.** Don't claim a test suite; verify via typecheck + curl.<|end|><|start|><|start|>assistant<|channel|>analysis<|message|>I created AGENTS.md. Let me verify file.<|end|><|start|><|start|>assistant to=shell<|channel|>analysis <|constrain|>xml<|message|><rfl:parameter name="command">
-cd /home/hendra/Documents/projects/personal/cloudflare-ai-scheduler && wc -l AGENTS.md && cat AGENTS.md | head -5
+- **No automated tests exist.** Don't claim a test suite; verify via typecheck + curl.
+
+## Pull requests
+
+Never commit directly to `main`; every change lands via a PR. PR descriptions follow GitHub best practice: a `## Summary` (what and why, linked spec/plan where one exists), a `## What …`/scope section with concrete bullets, a `## Verification` checklist with real commands/outcomes, `## Out of scope` where relevant, and refs to related PRs. Keep them scannable and honest — don't claim checks that weren't run.
