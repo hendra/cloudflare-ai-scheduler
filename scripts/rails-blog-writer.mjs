@@ -217,36 +217,25 @@ function frontmatter(a) {
 
   // 2) topic selection
   const topicPrompt = `You pick ONE blog topic for RailsDev.io (railsdev.io) — senior Rails consultancy in Indonesia/English; readers: business owners and senior developers; pillars: rails, ai-engineering, modern full-stack, devtools, open source. Pick the signal with the strongest, most durable angle for that audience.
-Reply with ONLY this JSON: {"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins"}
+Reply with ONLY this JSON (no prose): {"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"<= 49 chars","description":"120-160 chars","slug":"kebab-case-slug","service":"${SERVICE_VALUES.join("|")}","coverAlt":"what the cover diagram shows"}
 Avoid all of these existing posts: ${corpus.slice(0, 80).map((c) => c.title).join(" | ")}
 Signals:
 ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.slice(0, 160)} (${s.signals})`).join("\n")}`;
-  let topic = AI_STUB ? { topic: "Rails migration testing strategy", keyword: "rails migration testing", angle: "practical guide", rationale: "stub" } : null;
+  let topic = AI_STUB ? { topic: "Rails migration testing strategy", keyword: "rails migration testing", angle: "practical guide", rationale: "stub", title: "Rails Migration Testing: A Practical Guide", seoTitle: "Rails Migration Testing: A Practical Guide", description: "Practical guide to writing and verifying Rails migrations in large apps: PostgreSQL pitfalls, Active Record internals and zero-downtime deploy testing.", slug: "rails-migration-testing-guide", service: "Rails Upgrade", coverAlt: "Diagram of a Rails migration being tested against a PostgreSQL database" } : null;
   if (!topic) {
     for (let attempt = 1; attempt <= 3 && !topic; attempt++) {
-      try { topic = parseJSONObject(await callCompletion(topicPrompt + (attempt > 1 ? "\n\nPrevious reply invalid; reply with ONLY the JSON object." : ""), { maxTokens: 700 })); }
+      try { topic = parseJSONObject(await callCompletion(topicPrompt + (attempt > 1 ? "\n\nPrevious reply invalid; reply with ONLY the JSON object." : ""), { maxTokens: 1100 })); }
       catch (e) { console.error(`topic attempt ${attempt}:`, e.message); }
     }
     if (!topic) await fail("topic selection failed after 3 attempts");
   }
+  const meta = topic; // meta is emitted in the same JSON object as the topic
   console.log(`topic: ${topic.topic} | keyword: ${topic.keyword} | angle: ${topic.angle}`);
+  console.log(`meta: ${meta.title} | ${meta.slug}`);
 
-  // 3) article generation — two calls: (A) small JSON metadata, (B) plain-text body
+  // 3) article body (metadata already produced in the topic call)
   const existingLinks = corpus.slice(0, 40).map((c) => `/blog/${c.slug} — ${c.title}`).join("\n");
   const existingSlugs = corpusSlugs;
-  const metaPrompt = `You choose metadata for one RailsDev.io (railsdev.io) blog article. Topic: ${topic.topic}. Primary keyword: "${topic.keyword}". Angle: ${topic.angle}.
-Pick a title, slug (kebab-case, unique), and service. Reply with ONLY this JSON:
-{"title":"...","seoTitle":"<= 49 chars","description":"120-160 chars","keyword":"${topic.keyword}","slug":"kebab-case-slug","service":"${SERVICE_VALUES.join("|")}","coverAlt":"what the cover diagram shows"}`;
-  const meta = AI_STUB ? stubArticle() : await (async () => {
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try { const m = parseJSONObject(await callCompletion(metaPrompt + (attempt > 1 ? "\n\nPrevious reply invalid; reply with ONLY the JSON object." : ""), { maxTokens: 700 })); if (m) return m; }
-      catch (e) { console.error(`meta attempt ${attempt}:`, e.message); }
-    }
-    return null;
-  })();
-  if (!meta) await fail("article metadata generation failed after 3 attempts");
-  if (!meta.keyword) meta.keyword = topic.keyword;
-  console.log(`meta: ${meta.title} | ${meta.slug}`);
   const bodyPrompt = `Write the body of one RailsDev.io (railsdev.io) blog article in English: first person, senior-Rails-consultant voice — practical, specific, opinionated, honest about uncertainty.
 Topic: ${topic.topic}. Keyword: "${meta.keyword}". Angle: ${topic.angle}. Title: ${meta.title}.
 Requirements:
