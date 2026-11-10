@@ -22,7 +22,7 @@ const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || "";
 const CF_API_TOKEN = process.env.CF_API_TOKEN || "";
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
 const SLACK_JOBS_CHANNEL_ID = process.env.SLACK_JOBS_CHANNEL_ID || "";
-const AI_PROVIDER = (process.env.AI_PROVIDER || "cloudflare").toLowerCase();
+const AI_PROVIDER = (process.env.AI_PROVIDER || "groq").toLowerCase();
 const AI_MODEL = process.env.AI_MODEL || "";
 
 const PROVIDERS = {
@@ -33,7 +33,7 @@ const PROVIDERS = {
   openrouter: { name: "openrouter", baseURL: () => "https://openrouter.ai/api/v1", key: () => process.env.OPENROUTER_API_KEY || "", model: () => process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free" },
   mistral:    { name: "mistral",    baseURL: () => "https://api.mistral.ai/v1", key: () => process.env.MISTRAL_API_KEY || "", model: () => process.env.MISTRAL_MODEL || "mistral-small-latest", jsonMode: true },
 };
-const AI_FALLBACKS = (process.env.AI_FALLBACKS || "groq,gemini,cerebras,openrouter,mistral").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
+const AI_FALLBACKS = (process.env.AI_FALLBACKS || "cloudflare,gemini,cerebras,openrouter,mistral").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
 const CHAIN = [AI_PROVIDER, ...AI_FALLBACKS.filter((p) => p !== AI_PROVIDER)];
 
 const TIERS = ["Excellent", "Strong", "Good", "Moderate", "Low"];
@@ -69,7 +69,7 @@ async function fromRemotive() {
   const jobs = (JSON.parse(text).jobs) || [];
   return jobs.filter((j) => (j.publication_date || "") >= new Date(cutoff).toISOString().slice(0, 10))
     .filter((j) => /ruby|rails/i.test(JSON.stringify(j)))
-    .map((j) => ({ source: "remotive", company: j.company_name || "Unknown", title: j.title || "Unknown", url: j.url || "", postedAt: (j.publication_date || "").slice(0, 10), location: j.candidate_required_location || "Remote", salary: j.salary || "", description: strip(j.description).slice(0, 300) }));
+    .map((j) => ({ source: "remotive", company: j.company_name || "Unknown", title: j.title || "Unknown", url: j.url || "", postedAt: (j.publication_date || "").slice(0, 10), location: j.candidate_required_location || "Remote", salary: j.salary || "", description: strip(j.description).slice(0, 250) }));
 }
 async function fromRemoteOk() {
   const { text } = await fetchText("https://remoteok.com/api?tag=ruby");
@@ -77,7 +77,7 @@ async function fromRemoteOk() {
   return items.filter((j) => j && typeof j === "object" && j.position)
     .filter((j) => FRESH(j.date))
     .filter((j) => /ruby|rails/i.test(JSON.stringify(j)))
-    .map((j) => ({ source: "remoteok", company: (j.company || "Unknown").trim(), title: (j.position || "Unknown").trim(), url: j.url || "", postedAt: (j.date || "").slice(0, 10), location: (j.location || "Remote").trim(), salary: (j.salary || "").trim(), description: strip(j.description).slice(0, 300) }));
+    .map((j) => ({ source: "remoteok", company: (j.company || "Unknown").trim(), title: (j.position || "Unknown").trim(), url: j.url || "", postedAt: (j.date || "").slice(0, 10), location: (j.location || "Remote").trim(), salary: (j.salary || "").trim(), description: strip(j.description).slice(0, 250) }));
 }
 async function fromWwr() { // Cloudflare-gated; kept for completeness, expected to fail
   const { text } = await fetchText("https://weworkremotely.com/categories/remote-ruby-on-rails-jobs.rss", { timeout: 15000 });
@@ -130,7 +130,7 @@ const SOURCES = [
 const statuses = [];
 
 // ---------- AI ----------
-async function callCompletion(prompt) {
+async function callCompletion(prompt, { forceNoJsonMode = false } = {}) {
   const errors = [];
   for (const name of CHAIN) {
     const p = PROVIDERS[name];
@@ -143,9 +143,9 @@ async function callCompletion(prompt) {
       const res = await fetch(`${p.baseURL()}/chat/completions`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 2200, temperature: 0.2, ...(p.jsonMode ? { response_format: { type: "json_object" } } : {}) }),
+        body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 2200, temperature: 0.2, ...(p.jsonMode && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}) }),
       });
-      if (!res.ok) { errors.push(`${name}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`); continue; }
+      if (!res.ok) { errors.push(`${name}: HTTP ${res.status} ${(await res.text()).slice(0, 900)}`); continue; }
       const data = await res.json();
       const raw = data?.choices?.[0]?.message?.content || "";
       if (!raw) { errors.push(`${name}: empty completion`); continue; }
@@ -156,10 +156,8 @@ async function callCompletion(prompt) {
   throw new Error(`all AI providers failed: ${errors.join(" | ")}`);
 }
 
-const PROFILE = `Candidate profile (condensed):
-Senior Full-Stack Developer — Ruby on Rails & React, 12+ years. Backend: Rails, Ruby, Node.js, Python, NestJS, GraphQL, REST. Frontend: React, TypeScript, Next.js, Tailwind. DB: PostgreSQL, MySQL, MongoDB, Redis, Elasticsearch, Supabase. Cloud/DevOps: AWS, GCP, DigitalOcean, Docker, Kubernetes, Vercel. AI: LLM integration, RAG, AI agents, Claude. Testing: RSpec. Based in Indonesia; prefers fully-remote worldwide/international roles that accept applicants from Indonesia; EU/APAC/NA companies welcome; country-restricted roles are lower priority.
-Scoring rubric (0-100): Rails/Ruby requirement 25%, seniority 20%, remote eligibility from Indonesia 20%, full-stack/React 10%, backend architecture 10%, stack compatibility 5%, salary attractiveness 5%, company credibility 5%.
-Eligibility classes: worldwide (open to Indonesia) > international (accepts outside company country, note restrictions) > country-restricted (work auth required) > regional/timezone-limited.`;
+const PROFILE = `Senior Full-Stack Developer — Ruby on Rails & React, 12+ years, based in Indonesia. Prefers fully-remote worldwide/international roles open to Indonesian applicants; EU/APAC/NA welcome; country-restricted roles downranked.
+Scoring weights: Rails 25, seniority 20, remote-from-Indonesia 20, full-stack/React 10, backend architecture 10, stack 5, salary 5, company credibility 5.`;
 
 async function score(candidates) {
   if (AI_STUB) return { jobs: candidates.map((_, index) => ({ index, score: 75, tier: "Good", eligibility: "international", restricts: "", why: "Stubbed scoring (AI_STUB)." })), summary: "Stubbed analysis (AI_STUB=true)." };
@@ -167,16 +165,18 @@ async function score(candidates) {
     `${i}. [${j.source}] ${j.company} — ${j.title} | loc: ${j.location || "?"} | posted: ${j.postedAt || "unknown"} | salary: ${j.salary || "n/a"}\n   ${j.description}`).join("\n");
   const prompt = `${PROFILE}
 
-Score EACH job below. Reply with ONLY a JSON object:
-{"jobs":[{"index":0,"score":0-100,"tier":"Excellent|Strong|Good|Moderate|Low","eligibility":"worldwide|international|country-restricted|regional/timezone","restricts":"restriction note or empty string","why":"one line, <=140 chars"}], "summary":"1-2 sentences"}
-- index must be the integer id shown per job.
-- eligibility is based on the location/restriction text only; never assume "remote" means open to Indonesia.
-- Do not invent facts; score only what is stated.
+Score each numbered job for that candidate. Return ONLY this JSON (one entry per numbered job, same order):
+{"jobs":[{"index":0,"score":75,"tier":"Good","eligibility":"worldwide","restricts":"","why":"why they should care"}],"summary":"one sentence overall"}
+tier: Excellent|Strong|Good|Moderate|Low. eligibility: worldwide|international|country-restricted|regional/timezone. Do not invent facts; score only what is stated.
 Jobs:
 ${lines}`;
   let parsed = null;
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const raw = await callCompletion(prompt + (attempt > 1 ? "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON object." : ""));
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const forceNoJsonMode = attempt === 3;
+    let raw;
+    try {
+      raw = await callCompletion(prompt + (attempt > 1 ? "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON object." : ""), { forceNoJsonMode });
+    } catch (e) { console.error(`ai: attempt ${attempt}: ${String(e).slice(0, 600)}`); continue; }
     const m = raw.match(/\{[\s\S]*\}/);
     if (!m) { console.error(`ai: attempt ${attempt}: no JSON object`); continue; }
     try {
