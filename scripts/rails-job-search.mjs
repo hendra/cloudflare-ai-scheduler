@@ -165,11 +165,9 @@ async function score(candidates) {
     `${i}. [${j.source}] ${j.company} — ${j.title} | loc: ${j.location || "?"} | posted: ${j.postedAt || "unknown"} | salary: ${j.salary || "n/a"}\n   ${j.description}`).join("\n");
   const prompt = `${PROFILE}
 
-Score EACH job below. Reply with ONLY a JSON object:
-{"jobs":[{"index":0,"score":0-100,"tier":"Excellent|Strong|Good|Moderate|Low","eligibility":"worldwide|international|country-restricted|regional/timezone","restricts":"restriction note or empty string","why":"one line, <=140 chars"}], "summary":"1-2 sentences"}
-- index must be the integer id shown per job.
-- eligibility is based on the location/restriction text only; never assume "remote" means open to Indonesia.
-- Do not invent facts; score only what is stated.
+Score each numbered job for that candidate. Return ONLY this JSON (one entry per numbered job, same order):
+{"jobs":[{"index":0,"score":75,"tier":"Good","eligibility":"worldwide","restricts":"","why":"why they should care"}],"summary":"one sentence overall"}
+tier: Excellent|Strong|Good|Moderate|Low. eligibility: worldwide|international|country-restricted|regional/timezone. Do not invent facts; score only what is stated.
 Jobs:
 ${lines}`;
   let parsed = null;
