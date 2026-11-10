@@ -57,6 +57,11 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+
       - name: Install site dependencies
         working-directory: site
         run: pnpm install --frozen-lockfile
