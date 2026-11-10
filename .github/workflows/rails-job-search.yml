@@ -1,0 +1,64 @@
+name: rails-job-search
+
+# Rails — Remote Job Search → Slack #jobs
+# Deterministic pipeline (Option A pattern, like github-trending): runs
+# scripts/rails-job-search.mjs, which fetches Remotive + Remote OK + HN
+# "Who is hiring" (We Work Remotely is Cloudflare-gated, skipped), scores
+# candidates with one AI completion, and posts the digest to #jobs.
+# Note: `prompts/rails-job-search.md` remains the human-readable spec;
+# the script is its executable form.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Gather + compose the digest but do NOT post to Slack (print it instead)"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rails-job-search
+  cancel-in-progress: false
+
+jobs:
+  jobs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+      AI_PROVIDER: ${{ vars.AI_PROVIDER }}
+      AI_FALLBACKS: ${{ vars.AI_FALLBACKS }}
+      AI_MODEL: ${{ vars.AI_MODEL }}
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_JOBS_CHANNEL_ID: ${{ secrets.SLACK_JOBS_CHANNEL_ID }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run job search pipeline
+        run: node scripts/rails-job-search.mjs
+
+      - name: "Notify failure to Slack #jobs"
+        if: failure() && env.DRY_RUN != 'true' && !hashFiles('failure-posted')
+        run: |
+          curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "{\"channel\": \"${SLACK_JOBS_CHANNEL_ID}\", \"text\": \"⚠️ Rails job search failed and no note was posted — see https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
