@@ -143,7 +143,7 @@ async function callCompletion(prompt, { forceNoJsonMode = false } = {}) {
       const res = await fetch(`${p.baseURL()}/chat/completions`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 2200, temperature: 0.2, ...(p.jsonMode && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}) }),
+        body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 4096, temperature: 0.2, ...(p.jsonMode && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}) }),
       });
       if (!res.ok) { errors.push(`${name}: HTTP ${res.status} ${(await res.text()).slice(0, 900)}`); continue; }
       const data = await res.json();
