@@ -1,6 +1,6 @@
 # Production status — Cloudflare AI Scheduler
 
-**Last updated:** 2026-11-11 (all dates Asia/Jakarta; cron fields UTC)
+**Last updated:** 2026-11-11 — `github-trending-weekly` enabled (Mon 07:10 WIB); OpenRouter reasoning-model fix documented (gotcha 17)
 **Purpose:** what is running, where secrets live, and the non-obvious fixes that make it work.
 If you change something here, update this file.
 
@@ -9,6 +9,7 @@ If you change something here, update this file.
 | id | enabled | cron (UTC) | WIB | next_run_at | destination |
 |---|---|---|---|---|---|
 | `github-trending-daily` | 1 | `50 23 * * *` | 06:50 | `2026-11-10T23:50:00.000Z` | #news |
+| `github-trending-weekly` | 1 | `10 0 * * 1` | Mon 07:10 | `2026-11-16T00:10:00.000Z` | #news |
 | `rails-job-search-daily` | 1 | `50 0 * * *` | 07:50 | `2026-11-11T00:50:00.000Z` | #jobs |
 | `railsdev-blog-writer` | 1 | `0 1 * * *` | 08:00 | `2026-11-11T01:00:00.000Z` | railsdev-site PR |
 | `fullstackweb-blog-writer` | 1 | `30 1 * * *` | 08:30 | `2026-11-11T01:30:00.000Z` | fullstackwebdev-site PR |
@@ -31,6 +32,7 @@ npx wrangler d1 execute scheduler-db --remote --command \
 |---|---|---|
 | `ci` | `.github/workflows/ci.yml` | typecheck on push/PR |
 | `github-trending` | `.github/workflows/github-trending.yml` | daily top-10 → #news |
+| `github-trending-weekly` | `.github/workflows/github-trending-weekly.yml` | weekly top-10 → #news |
 | `rails-job-search` | `.github/workflows/rails-job-search.yml` | daily jobs digest → #jobs |
 | `railsdev-blog-writer` | `.github/workflows/railsdev-blog-writer.yml` | draft PR on railsdev-site |
 | `fullstackweb-blog-writer` | `.github/workflows/fullstackweb-blog-writer.yml` | draft PR on fullstackwebdev-site |
@@ -65,6 +67,7 @@ npx wrangler d1 execute scheduler-db --remote --command \
 14. **Commit author**: use `*-bot / bot@*.id` per pipeline; don't default to a cross-repo bot name.
 15. **`INASOFT_PAT` was initially mismatched** (name vs value for public token); re-check secrets are repo-correct after copying values.
 16. **ruff-style commit message discipline matters**: refer to actual file/migration/row names (GHA workflow names are case-sensitive).
+17. **OpenRouter `@preset/ai-scheduler` routes to a reasoning model** (`nemotron-3.5-lightning:free` as of 2026-11-11) that returns `content: null` when the reasoning budget eats `max_tokens` — every call was "empty completion" and the chain silently fell back to Groq. All OpenRouter calls now send `reasoning.effort: "none"` (override via `OPENROUTER_REASONING_EFFORT`). If the preset is ever re-pointed to another reasoning model, keep this or set `OPENROUTER_MODEL` explicitly (pick a non-reasoning free model).
 
 ## Slack destinations
 

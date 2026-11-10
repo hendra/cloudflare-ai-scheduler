@@ -23,7 +23,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
   (`github-trending-digest.mjs`, `rails-job-search.mjs`, `railsdev-blog-writer.mjs`, `fullstackweb-blog-writer.mjs`, `inasoft-blog-writer.mjs`, `inasoft-news-digest.mjs`).
 - AI chain (all pipelines): `AI_PROVIDER` (default `openrouter` with preset `@preset/ai-scheduler`) → fallbacks `openrouter,groq,cloudflare` → skip providers without keys; retry without `response_format` on Groq `json_validate_failed`.
 - Cover generation shared via `scripts/make-cover.py` + env overrides for branding (title, badge, gradient colors).
-- D1 rows enabled: `github-trending-daily`, `rails-job-search-daily`, `railsdev-blog-writer`, `fullstackweb-blog-writer`, `inasoft-blog-writer`, `inasoft-news-digest`. `ig-reel-daily` disabled.
+- D1 rows enabled: `github-trending-daily`, `github-trending-weekly`, `rails-job-search-daily`, `railsdev-blog-writer`, `fullstackweb-blog-writer`, `inasoft-blog-writer`, `inasoft-news-digest`. `ig-reel-daily` disabled.
 
 ## Non-obvious gotchas
 
@@ -56,7 +56,7 @@ Never commit directly to `main`; every change lands via a PR. PR descriptions fo
 | 5 (FullstackWeb.dev blog) | ✅ live |
 | 6 (INASOFT blog) | ✅ live |
 | 7 (INASOFT news digest → #news) | ✅ live |
-| 8 (Trending weekly) | ⏳ not started |
+| 8 (Trending weekly → #news) | ✅ live |
 | 1 (IG Reel) | ⏳ deferred; workflow scaffolded, untested E2E |
 
 See `docs/status.md` for production state, secrets inventory, and command cheatsheets.

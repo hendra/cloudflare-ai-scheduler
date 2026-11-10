@@ -7,6 +7,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler — and, since late 2026
 | Automation | Schedule (UTC) | Destination | Status |
 |---|---|---|---|
 | GitHub Trending Top 10 (`github-trending-daily`) | `50 23 * * *` (06:50 WIB) | Slack `#news` | **enabled** |
+| GitHub Trending weekly (`github-trending-weekly`) | `10 0 * * 1` (Mon 07:10 WIB) | Slack `#news` | **enabled** |
 | Rails remote job search (`rails-job-search-daily`) | `50 0 * * *` (07:50 WIB) | Slack `#jobs` | **enabled** |
 | RailsDev.io blog writer (`railsdev-blog-writer`) | `0 1 * * *` (08:00 WIB) | PR on `hendra/railsdev-site` | **enabled** |
 | FullstackWeb.dev blog writer (`fullstackweb-blog-writer`) | `30 1 * * *` (08:30 WIB) | PR on `hendra/fullstackwebdev-site` | **enabled** |
@@ -91,5 +92,5 @@ npx wrangler d1 execute scheduler-db --remote --command \
 | 5 | FullstackWeb.dev blog → PR | ✅ live (first PR 2026-11-10 via #36) |
 | 6 | INASOFT blog → PR | ✅ live (first PR `inasoft-site#64`) |
 | 7 | INASOFT news digest → #news | ✅ live |
-| 8 | GitHub Trending weekly → #news | ⏳ not started |
+| 8 | GitHub Trending weekly → #news | ✅ live |
 | 1 | IG Reel pipeline | ⏳ deferred, workflow scaffold exists |
