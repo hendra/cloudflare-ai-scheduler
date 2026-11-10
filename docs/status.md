@@ -1,6 +1,6 @@
 # Production status — Cloudflare AI Scheduler
 
-**Last updated:** 2026-11-11 — `github-trending-weekly` enabled (Mon 07:10 WIB); IG Reel image fallback chain added (owner override of CF-only); OpenRouter reasoning-model fix documented
+**Last updated:** 2026-11-11 — `github-trending-weekly` enabled (Mon 07:10 WIB); **`ig-reel-daily` enabled (17:15 WIB), first Reel confirmed `sent` (https://www.instagram.com/reel/DflBHH1jFFC/)**; image fallback chain added
 **Purpose:** what is running, where secrets live, and the non-obvious fixes that make it work.
 If you change something here, update this file.
 
@@ -15,7 +15,7 @@ If you change something here, update this file.
 | `fullstackweb-blog-writer` | 1 | `30 1 * * *` | 08:30 | `2026-11-11T01:30:00.000Z` | fullstackwebdev-site PR |
 | `inasoft-blog-writer` | 1 | `0 2 * * *` | 09:00 | `2026-11-11T02:00:00.000Z` | inasoft-site PR |
 | `inasoft-news-digest` | 1 | `30 2 * * *` | 09:30 | `2026-11-11T02:30:00.000Z` | #news |
-| `ig-reel-daily` | 0 | `15 10 * * *` | manual | `2099-01-01T00:00:00.000Z` | ig-reel GHA workflow |
+| `ig-reel-daily` | 1 | `15 10 * * *` | 17:15 | `2026-11-12T10:15:00.000Z` | ig-reel GHA workflow → Instagram |
 
 Apply pending migrations: `npm run db:migrate:remote`. Remote migrations required manual fixes historically (e.g. 0007); always run it after adding a migration.
 
@@ -37,7 +37,7 @@ npx wrangler d1 execute scheduler-db --remote --command \
 | `railsdev-blog-writer` | `.github/workflows/railsdev-blog-writer.yml` | draft PR on railsdev-site |
 | `fullstackweb-blog-writer` | `.github/workflows/fullstackweb-blog-writer.yml` | draft PR on fullstackwebdev-site |
 | `inasoft-blog-writer` | `.github/workflows/inasoft-blog-writer.yml` | Bahasa Indonesia draft PR on inasoft-site |
-| `ig-reel` | `.github/workflows/ig-reel.yml` | IG Reel pipeline (Python Pillow/ffmpeg) |
+| `ig-reel` | `.github/workflows/ig-reel.yml` | Interesting Facts Reel → IG @kaliajatau.id via Buffer |
 
 ## Secrets inventory (names only)
 
@@ -68,7 +68,7 @@ npx wrangler d1 execute scheduler-db --remote --command \
 15. **`INASOFT_PAT` was initially mismatched** (name vs value for public token); re-check secrets are repo-correct after copying values.
 16. **ruff-style commit message discipline matters**: refer to actual file/migration/row names (GHA workflow names are case-sensitive).
 17. **OpenRouter `@preset/ai-scheduler` routes to a reasoning model** (`nemotron-3.5-lightning:free` as of 2026-11-11) that returns `content: null` when the reasoning budget eats `max_tokens` — every call was "empty completion" and the chain silently fell back to Groq. All OpenRouter calls now send `reasoning.effort: "none"` (override via `OPENROUTER_REASONING_EFFORT`). If the preset is ever re-pointed to another reasoning model, keep this or set `OPENROUTER_MODEL` explicitly (pick a non-reasoning free model).
-18. **IG Reel image chain (owner override of playbook "CF-only")**: images go Cloudflare Workers AI → Google AI Studio (`GOOGLE_API_KEY`, default model `gemini-nano-banana-2.1`) → Hugging Face serverless (`HF_TOKEN`, default `black-forest-labs/FLUX.1-schnell`) → Pollinations.ai (no key; free tier = **1 image / 45 s per IP**, sequential waits built in; per-IP rate can 402 and the service itself can 503 in bursts — the chain retries 3×). Google/HF silently skip when their keys are unset; Pollinations is the no-key safety net. All images count as AI-generated (never switches to Cloudinary generation). Best free quality today: Google > HF ≈ CF klein > Pollinations.
+18. **IG Reel image chain (owner override of playbook "CF-only")**: images go Cloudflare Workers AI → Google AI Studio (`GOOGLE_API_KEY`) → Hugging Face serverless (`HF_TOKEN`) → Pollinations.ai. **Reality check 2026-11-11:** Google's Free Tier has *0 image quota* (429 `limit: 0 … on Free Tier`) and HF's `hf-inference` provider deprecated image models (410/400) — both fail fast and are skipped. Pollinations does the real work: **with `POLLINATIONS_SECRET_KEY` (`sk_…`) the pipeline uses the modern `gen.pollinations.ai/image` endpoint — Bearer auth, no per-IP pacing, no watermark.** Without a key it falls back to the classic endpoint (1 image / 45 s per IP, 3× retry incl. 402/503, watermark bottom-right). First live Reel confirmed `sent` via Buffer (https://www.instagram.com/reel/DflBHH1jFFC/).
 
 ## Slack destinations
 
