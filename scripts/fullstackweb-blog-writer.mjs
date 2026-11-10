@@ -304,6 +304,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   if (DRY_RUN) { console.log("=== DRY RUN — would open PR ==="); console.log(`title: content: add ${article.slug}`); console.log(`branch: blog/${article.slug}`); console.log(`description: ${article.description}`); return; }
   if (!FULLSTACKWEB_PAT) await fail("FULLSTACKWEB_PAT not set");
   const git = (args) => execSync(`git ${args}`, { cwd: SITE_DIR, stdio: "pipe", env: { ...process.env, GH_TOKEN: FULLSTACKWEB_PAT } }).toString();
+  const prBodyPath = join(SITE_DIR, ".pr-body.md");
   const branch = `blog/${article.slug}`;
   try { git(`checkout -B ${branch}`); } catch (e) { await fail(`git checkout: ${String(e.message).slice(0, 200)}`); return; }
   git("add src/content/blog src/assets/blog");
