@@ -20,9 +20,9 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 - Bindings (wrangler.template.jsonc): `DB` (D1), `AI` (Workers AI binding), `JOB_QUEUE` (Queue).
 - Job types: `ai_prompt`, `rss_ai_digest`, `http_check`, `github_actions_trigger`.
 - Queue: max batch 5, 3 retries, dead-letter `scheduler-jobs-dlq`.
-- Pipelines (`scripts/*.mjs`): `github-trending-digest.mjs` (daily #news), `rails-job-search.mjs` (daily #jobs), `rails-blog-writer.mjs` (PR-only pilot on railsdev-site). Deterministic, zero-npm-dep Node 20 scripts — no agent tool-calling anywhere (free-model tool-calls are unreliable on current free tiers).
+- Pipelines (`scripts/*.mjs`): `github-trending-digest.mjs` (daily #news), `rails-job-search.mjs` (daily #jobs), `railsdev-blog-writer.mjs` (PR-only pilot on railsdev-site). Deterministic, zero-npm-dep Node 20 scripts — no agent tool-calling anywhere (free-model tool-calls are unreliable on current free tiers).
 - AI chain (all pipelines): `AI_PROVIDER` (default `groq`) → fallbacks `cloudflare,gemini,cerebras,openrouter,mistral` → skip providers without keys; retry without `response_format` on Groq `json_validate_failed`.
-- D1 rows: `github-trending-daily` (enabled), `rails-job-search-daily` (enabled), `rails-blog-writer` (manual), `ig-reel-daily` (disabled).
+- D1 rows: `github-trending-daily` (enabled), `rails-job-search-daily` (enabled), `railsdev-blog-writer` (manual), `ig-reel-daily` (disabled).
 
 ## Non-obvious gotchas
 

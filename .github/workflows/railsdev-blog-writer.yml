@@ -1,4 +1,4 @@
-name: rails-blog-writer
+name: railsdev-blog-writer
 
 # RailsDev.io blog writer (pilot, PR-ONLY — never auto-merges)
 # v1: manual dispatch only. Spec: docs/superpowers/specs/2026-11-11-railsdev-blog-writer-design.md
@@ -18,7 +18,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: rails-blog-writer
+  group: railsdev-blog-writer
   cancel-in-progress: false
 
 jobs:
@@ -67,4 +67,4 @@ jobs:
 
       - name: Run blog writer
         working-directory: scheduler
-        run: node scripts/rails-blog-writer.mjs
+        run: node scripts/railsdev-blog-writer.mjs

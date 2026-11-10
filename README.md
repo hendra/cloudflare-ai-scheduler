@@ -8,7 +8,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 |---|---|---|---|
 | GitHub Trending Top 10 (`github-trending-daily`) | `50 23 * * *` (06:50 WIB) | Slack `#news` | **enabled** |
 | Rails remote job search (`rails-job-search-daily`) | `50 0 * * *` (07:50 WIB) | Slack `#jobs` | **enabled** |
-| RailsDev blog writer (`rails-blog-writer`, `enabled=0`) | manual dispatch | PR on `hendra/railsdev-site` | manual only |
+| RailsDev blog writer (`railsdev-blog-writer`, `enabled=0`) | manual dispatch | PR on `hendra/railsdev-site` | manual only |
 | IG Reel pipeline (`ig-reel-daily`, `enabled=0`) | manual / future | Buffer | disabled |
 
 Backing model: **Groq `openai/gpt-oss-20b`** (default in all pipelines) with fallback to Cloudflare Workers AI (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`). Zero spend is a hard constraint; free tiers are shared and rate-limited, so pipelines degrade to a ⚠️ Slack note rather than a fake digest.
