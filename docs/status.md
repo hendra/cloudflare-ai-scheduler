@@ -41,13 +41,13 @@ npx wrangler d1 execute scheduler-db --remote --command \
 
 ## Secrets inventory (names only)
 
-**GitHub repo secrets** (cloudflare-ai-scheduler): `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` (production `@preset/ai-scheduler`), `RAILSDEV_PAT`, `FULLSTACKWEB_PAT`, `INASOFT_PAT` (Contents RW + PR RW, each scoped to its site), `SLACK_BOT_TOKEN` (xoxb, `chat:write`), `SLACK_NEWS_CHANNEL_ID`, `SLACK_JOBS_CHANNEL_ID`, `SLACK_RAILSDEV_CHANNEL_ID`, `SLACK_FULLSTACKWEBDEV_CHANNEL_ID`, `SLACK_INASOFT_CHANNEL_ID`.
+**GitHub repo secrets** (cloudflare-ai-scheduler): `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` (production `@preset/ai-scheduler`), `RAILSDEV_PAT`, `FULLSTACKWEB_PAT`, `INASOFT_PAT` (Contents RW + PR RW, each scoped to its site), `SLACK_BOT_TOKEN` (xoxb, `chat:write`), `SLACK_NEWS_CHANNEL_ID`, `SLACK_JOBS_CHANNEL_ID`, `SLACK_RAILSDEV_CHANNEL_ID`, `SLACK_FULLSTACKWEBDEV_CHANNEL_ID`, `SLACK_INASOFT_CHANNEL_ID`, **IG Reel:** `BUFFER_ACCESS_TOKEN`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `POLLINATIONS_SECRET_KEY`, plus (optional, currently unusable on free tier) `GOOGLE_API_KEY`, `GOOGLE_IMAGE_MODEL`, `HF_TOKEN`, `HF_IMAGE_MODEL`.
 
-**Actions variables:** `GROQ_MODEL` (deleted; code default `openai/gpt-oss-20b`), `PUBLIC_FORMSPREE_FORM_ID` (`xaeeywav`, public), `AI_PROVIDER`, `AI_FALLBACKS` (unset; code defaults).
+**Actions variables:** `GROQ_MODEL` (deleted; code default `openai/gpt-oss-20b`), `PUBLIC_FORMSPREE_FORM_ID` (`xaeeywav`, public), `AI_PROVIDER`, `AI_FALLBACKS` (unset; code defaults), plus optional `BUFFER_CHANNEL_ID` / `BUFFER_ORG_ID` (default to the playbook values) and `IMAGE_ORDER` for the IG Reel image chain.
 
 **Worker secrets** (`wrangler secret put`): `GITHUB_PAT` (dispatch), `MANUAL_RUN_TOKEN`.
 
-**Local `.dev.vars`** (gitignored): `D1_DATABASE_ID`, `MANUAL_RUN_TOKEN`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` (local testing), plus `OLLAMA_BASE_URL` / `OLLAMA_MODEL`. Template: `.dev.vars.example`.
+**Local `.dev.vars`** (gitignored): `D1_DATABASE_ID`, `MANUAL_RUN_TOKEN`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` (local testing), plus `OLLAMA_BASE_URL` / `OLLAMA_MODEL`; for the IG Reel locally also `BUFFER_ACCESS_TOKEN`, `CLOUDINARY_*`, `POLLINATIONS_SECRET_KEY`, `GOOGLE_API_KEY`, `HF_TOKEN`. Template: `.dev.vars.example`.
 
 ## Operational gotchas (learned the hard way)
 

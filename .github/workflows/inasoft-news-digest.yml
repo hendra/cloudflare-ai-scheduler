@@ -1,8 +1,6 @@
 name: inasoft-news-digest
 
-# INASOFT daily technology/AI digest → Slack #news
-# Manual dispatch only until quality is proven by ≥3 good posts.
-# Then enable daily cron.
+# INASOFT daily technology/AI digest → Slack #news (enabled via D1 row, cron '30 2 * * *')
 
 on:
   workflow_dispatch:

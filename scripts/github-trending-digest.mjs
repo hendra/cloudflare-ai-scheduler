@@ -46,14 +46,13 @@ const CATEGORIES = ["AI/LLM","Agents/MCP","Dev Tools","Web/Frontend","Backend","
 const WEEKLY = String(process.env.WEEKLY || "false") === "true";
 const now = new Date();
 const wibISO = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year:"numeric", month:"2-digit", day:"2-digit" }).format(now);
-const weekStart = new Date(now);
-// Previous Monday 00:00 UTC-ish in Jakarta; good enough for display label
-if (WEEKLY) {
-  const dow = weekStart.getDay() || 7; // Mon=1..Sun=7
-  weekStart.setDate(weekStart.getDate() - dow - 6); // back 6 days before the previous Monday
-  weekStart.setHours(0, 0, 0, 0);
-}
-const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+const WD = { Sun: 7, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+// Anchor all week math to the Jakarta calendar day, not the container's local day
+const [jy, jm, jd] = wibISO.split("-").map(Number);
+const jakartaTodayUTC = Date.UTC(jy, jm - 1, jd); // the Jakarta calendar date as a UTC midnight
+const jakartaDow = WD[new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "Asia/Jakarta" }).format(now)];
+const weekStart = new Date(jakartaTodayUTC - (jakartaDow - 1 + 7) * 86400000);
+const weekEnd = new Date(weekStart.getTime() + 6 * 86400000);
 const wibDateStart = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year:"numeric", month:"2-digit", day:"2-digit" }).format(weekStart);
 const wibDateEnd   = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year:"numeric", month:"2-digit", day:"2-digit" }).format(weekEnd);
 const gainedLabel = WEEKLY ? "this week" : "today";
@@ -199,7 +198,7 @@ ${lines}`;
   const enriched = repos.map((r) => {
     const a = byName.get(`${r.owner}/${r.name}`) || {};
     const category = CATEGORIES.includes(a.category) ? a.category : "Other";
-    return { ...r, what: (a.what || r.description || "No description provided.").trim(), why: (a.why || "Notable on today's trending list.").trim(), category };
+    return { ...r, what: (a.what || r.description || "No description provided.").trim(), why: (a.why || "Notable on the trending list.").trim(), category };
   });
   return { repos: enriched, trend: (parsed.trend || "").trim() || "Various developer tools trending across the ecosystem today." };
 }

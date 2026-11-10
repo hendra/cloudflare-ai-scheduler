@@ -6,7 +6,9 @@ name: ig-reel
 # HTML scenes (headless Chrome) → reel assembled from synthesised original music →
 # Cloudinary hosting → Buffer createPost (reel, shareNow, isAiGenerated).
 # DRY_RUN=true composes everything but skips the upload and post.
-# Images: Cloudflare Workers AI via cf_image.py only (never Cloudinary generation).
+# Images: provider chain cloudflare → google → huggingface → pollinations
+# (POLLINATIONS_SECRET_KEY keyed modern endpoint; fallback to classic per-IP free tier).
+# Cloudinary is hosting/upload only — never used for image generation.
 
 on:
   workflow_dispatch:
@@ -92,10 +94,3 @@ jobs:
       - name: Run IG Reel pipeline
         run: python scripts/ig_reel_daily.py
 
-      - name: "Notify failure to Slack #news"
-        if: failure() && env.DRY_RUN != 'true'
-        run: |
-          curl -sS -X POST https://slack.com/api/chat.postMessage \
-            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
-            -H "Content-Type: application/json; charset=utf-8" \
-            -d "{\"channel\": \"${SLACK_NEWS_CHANNEL_ID}\", \"text\": \"⚠️ IG Reel pipeline failed — see https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"

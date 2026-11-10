@@ -27,6 +27,7 @@ import base64
 import datetime as dt
 import hashlib
 import hmac
+import html
 import json
 import os
 import pathlib
@@ -79,6 +80,8 @@ RSS_FEEDS = [
 def log(*a):
     print(*a, flush=True)
 
+esc = lambda s: html.escape(str(s or ""), quote=True)
+
 
 def http(url, *, data=None, headers=None, timeout=60, method=None):
     req = urllib.request.Request(url, data=data, headers=headers or {"User-Agent": UA}, method=method)
@@ -93,10 +96,31 @@ def http_json(url, payload, headers=None, timeout=120):
     return json.loads(raw)
 
 
-def fail(reason):
+SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN", "").strip()
+SLACK_NEWS_CHANNEL_ID = os.environ.get("SLACK_NEWS_CHANNEL_ID", "").strip()
+
+def fail(reason, post_id=None):
     log(f"FATAL: {reason}")
-    log("REPORT", json.dumps({"status": "failed", "reason": str(reason)[:300],
-                              "posted": False, "draft": False}))
+    report = {"status": "failed", "reason": str(reason)[:300], "posted": False, "draft": False}
+    if post_id:
+        report["post_id"] = post_id
+        report["note"] = "post created on Buffer but not confirmed sent — do NOT blindly redispatch"
+    log("REPORT " + json.dumps(report))
+    if not DRY_RUN and SLACK_BOT_TOKEN and SLACK_NEWS_CHANNEL_ID:
+        text = (f"⚠️ IG Reel pipeline failed: {str(reason)[:220]}"
+                + (f" (Buffer post id {post_id} — reel may still publish)" if post_id else "")
+                + f" — https://github.com/{os.environ.get('GITHUB_REPOSITORY','')}/actions/runs/{os.environ.get('GITHUB_RUN_ID','')}")
+        try:
+            http_json("https://slack.com/api/chat.postMessage",
+                      {"channel": SLACK_NEWS_CHANNEL_ID, "text": text},
+                      headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}, timeout=30)
+            try:
+                writeFileSync_path = pathlib.Path("failure-posted")
+                writeFileSync_path.write_text("1")
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"failure note to Slack failed: {e}", flush=True)
     sys.exit(1)
 
 
@@ -295,11 +319,11 @@ def make_scene_html(kind, num, title, body, source, idx_total, bg_tag):
 <div class="scene">
   {bg_tag}
   <div class="shade"></div>
-  <div class="kicker">Fakta Sains · {idx_total}</div>
-  <div class="num">{num}</div>
-  <h1>{title}</h1>
-  <p class="fact">{body}</p>
-  <div class="src">{source}</div>
+  <div class="kicker">Fakta Sains · {esc(idx_total)}</div>
+  <div class="num">{esc(num)}</div>
+  <h1>{esc(title)}</h1>
+  <p class="fact">{esc(body)}</p>
+  <div class="src">{esc(source)}</div>
   <div class="handle">@kaliajatau.id</div>
   <div class="trust">Sains untuk semua</div>
 </div>
@@ -321,9 +345,9 @@ def hook_scene(title, sub, idx_total):
   .handle {{ position:absolute; top:1690px; left:0; right:0; font-size:31px; color:#FFD23F;
              letter-spacing:4px; font-weight:700 }}
 </style></head><body>
-  <div class="week">Minggu ini · {TODAY}</div>
-  <h1 class="mega">{title}</h1>
-  <div class="sub">{sub}</div>
+  <div class="week">Fakta Sains · {TODAY}</div>
+  <h1 class="mega">{esc(title)}</h1>
+  <div class="sub">{esc(sub)}</div>
   <div class="handle">@kaliajatau.id</div>
 </body></html>"""
     return html
@@ -569,8 +593,8 @@ def buffer_create_and_confirm(video_url, caption):
         if status == "sent":
             return post_id, link
         if status == "error":
-            fail("buffer reported the post is in error state")
-    fail("buffer post never reached status=sent after 6 minutes")
+            fail("buffer reported the post is in error state", post_id=post_id)
+    fail(f"buffer post never reached status=sent after 6 minutes (post_id={post_id})", post_id=post_id)
 
 
 # ---------- main ----------
