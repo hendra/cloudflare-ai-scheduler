@@ -1,252 +1,90 @@
 # Cloudflare AI Scheduler
 
-A dashboard-free, TypeScript scheduler platform for up to 10 initial mixed-frequency jobs. It uses Cloudflare Workers, Cron Triggers, D1, Queues and Workers AI. It does not use Ollama or an external AI inference provider.
+Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashboard — and, since late 2026, the home of three **zero-spend content automations** delivered straight to Slack (trending digests, a Rails jobs digest) and to a GitHub PR (RailsDev blog writer).
 
-## Important scope and limitations
+## What this repo runs today
 
-- This starter dispatches due jobs every minute using one Cron Trigger.
-- Job definitions live in D1, so adding jobs does not require another Cron Trigger.
-- `rss_ai_digest` fetches public RSS feeds and asks Workers AI to summarize the returned feed material.
-- `http_check` checks configured URLs without using AI.
-- `ai_prompt` processes the configured prompt and input JSON. It does not have a general web-search capability.
-- Workers AI is inference, not a search engine. For current research, supply RSS feeds, public API data, or source material. Do not expect the model to browse the web by itself.
-- GitHub and Slack integrations are not included in this first runnable starter. They can be added later using their APIs and securely stored credentials; they are not AI providers.
-- The model selector starts with a lightweight model. The starter records model name and character counts, not actual Neurons. Check actual Neuron consumption in the Cloudflare dashboard.
-- Jobs are disabled until you explicitly enable them; review prompts and inputs before first run.
-- This starter intentionally does not auto-publish content, merge PRs, or send Slack messages. Add explicit destination configuration and validation before enabling side effects.
+| Automation | Schedule (UTC) | Destination | Status |
+|---|---|---|---|
+| GitHub Trending Top 10 (`github-trending-daily`) | `50 23 * * *` (06:50 WIB) | Slack `#news` | **enabled** |
+| Rails remote job search (`rails-job-search-daily`) | `50 0 * * *` (07:50 WIB) | Slack `#jobs` | **enabled** |
+| RailsDev blog writer (`rails-blog-writer`, `enabled=0`) | manual dispatch | PR on `hendra/railsdev-site` | manual only |
+| IG Reel pipeline (`ig-reel-daily`, `enabled=0`) | manual / future | Buffer | disabled |
+
+Backing model: **Groq `openai/gpt-oss-20b`** (default in all pipelines) with fallback to Cloudflare Workers AI (`@cf/meta/llama-3.3-70b-instruct-fp8-fast`). Zero spend is a hard constraint; free tiers are shared and rate-limited, so pipelines degrade to a ⚠️ Slack note rather than a fake digest.
 
 ## Architecture
 
-`Cron Trigger (every minute) -> Worker dispatcher -> D1 due-job lookup -> Cloudflare Queue -> Queue consumer -> Workers AI / RSS / HTTP check -> D1 execution history`
+Two dispatch paths coexist:
 
-The Queue consumer is configured for small batches and retries. Failed messages go to a dead-letter queue.
+1. **Worker dispatcher** (this repo, `src/index.ts`): cron → D1 due rows → Queue → `executeJob` → Workers AI / RSS / HTTP / `github_actions_trigger` → D1 history. `github_actions_trigger` jobs POST to a workflow dispatch endpoint on any GitHub repo (used for `ig-reel-daily`).
+2. **GitHub Actions pipelines** (`scripts/*.mjs`, one workflow each): triggered by `github_actions_trigger` or `workflow_dispatch`. Deterministic, zero-npm-dependency Node scripts (or, for the blog writer, more steps) run headless OpenCode only where agentic tool-calling is justified — which, as of Nov 2026, is nowhere; all pipelines use a fixed pipeline with one or two LLM completions.
 
-Supported job types: `ai_prompt`, `rss_ai_digest`, `http_check`, and `github_actions_trigger` (dispatches a GitHub Actions workflow via the REST API; requires the `GITHUB_PAT` secret).
-
-## Prerequisites
-
-- Cloudflare account with Workers, D1, Queues and Workers AI enabled.
-- Node.js 20 or newer.
-- Wrangler CLI (installed through npm in this project).
-
-Workers AI Free currently includes 10,000 Neurons/day. If the daily free allocation is exceeded, further inference calls fail on Workers Free. Model availability and eligibility can change; verify the selected model in the current model catalog before deployment.
+AI provider chain (same in all pipelines): `AI_PROVIDER` (default `groq`) → `AI_FALLBACKS` (`cloudflare,gemini,cerebras,openrouter,mistral`) → skip providers without credentials; retry without `response_format` on `json_validate_failed`.
 
 ## Setup
-
-### 1. Install dependencies
 
 ```bash
 npm install
 npx wrangler login
-```
 
-Or run the interactive setup helper:
-```bash
-npm run setup
-```
-
-### 2. Create D1 database
-
-```bash
-npx wrangler d1 create scheduler-db
-```
-
-Copy the returned `database_id` into `.dev.vars` as `D1_DATABASE_ID` (see `.dev.vars.example`).
-`wrangler.jsonc` is generated from `wrangler.template.jsonc` by `npm run gen:config`, which reads
-`.dev.vars` — it runs automatically before `dev`, `deploy` and the migration commands, and
-`wrangler.jsonc` is gitignored. Do not edit `wrangler.jsonc` by hand; edit `wrangler.template.jsonc` instead.
-
-### 3. Create queues
-
-```bash
+# 1. Create D1 + queues, put database_id in .dev.vars
+npx wrangler d1 create scheduler-db           # → database_id → .dev.vars as D1_DATABASE_ID
 npx wrangler queues create scheduler-jobs
 npx wrangler queues create scheduler-jobs-dlq
-```
-
-### 4. Apply migrations
-
-```bash
 npm run db:migrate:local
-```
 
-For production:
+# 2. Worker secret (manual API / github_actions_trigger)
+npx wrangler secret put GITHUB_PAT            # classic PAT with `repo` scope
 
-```bash
-npm run db:migrate:remote
-```
+# 3. .dev.vars (gitignored; see .dev.vars.example)
+#    D1_DATABASE_ID and MANUAL_RUN_TOKEN are required; provider keys optional.
 
-The starter seed rows were removed (`migrations/0006_remove_seed_jobs.sql`); jobs you want to schedule are added as their own migration files with `enabled=0` and a far-future `next_run_at` until verified.
-
-### Optional: Configure GitHub Actions trigger
-
-For `github_actions_trigger` jobs, store a GitHub PAT with `repo`/`workflow` scope:
-
-```bash
-npx wrangler secret put GITHUB_PAT
-```
-
-The job's `input_json` must include `owner`, `repo`, `workflow`, and optionally `ref` and `inputs`:
-
-```json
-{"owner":"your-org","repo":"ig-reel-pipeline","workflow":"reel.yml","ref":"main","inputs":{"topic":"interesting facts"}}
-```
-
-### 5. Configure model
-
-The default model is set in `wrangler.template.jsonc`:
-
-```json
-"DEFAULT_AI_MODEL": "@cf/google/gemma-4-26b-a4b-it"
-```
-
-This is the lightweight default. The model catalog can change. Confirm that this exact model is currently available to your account. If it is unavailable, replace it with a currently available, free-eligible text-generation model. Do not select models marked as requiring a paid billing method.
-
-The automatic strategy is budget-first: operational tasks use `DEFAULT_AI_MODEL`; tasks whose names indicate article/research/engineering/SEO/report/digest use `QUALITY_AI_MODEL` only if you configure one. It defaults to an empty value, so all tasks use the lightweight default and preserve the free quota. Per-job overrides can be supplied in `input_json` as `"model": "@cf/..."`; only do this after verifying that model's availability and price eligibility.
-
-### 6. Test locally
-
-```bash
-npm run dev
-```
-
-In another terminal, test:
-
-```bash
+npm run dev                              # dev server
 curl http://localhost:8787/health
-curl http://localhost:8787/api/schedulers
-curl http://localhost:8787/api/executions
-curl http://localhost:8787/api/usage
 ```
 
-Run migrations locally before testing. For a quick manual dispatch test, temporarily set one scheduler's `next_run_at` to a past UTC timestamp and enable it. Use Wrangler's scheduled-event testing support or wait for the next minute tick.
+`wrangler.jsonc` is gitignored and **generated** from `wrangler.template.jsonc` by `npm run gen:config` (auto-runs before `dev`/`deploy`/migrations). Edit the template, never the generated file.
 
-### 7. Deploy
+Production:
 
 ```bash
-npm run typecheck
-npm run deploy
+npm run db:migrate:remote          # apply pending migrations (e.g. 0007)
+npm run typecheck && npm run deploy
 ```
 
-After deployment, check:
+## Managing jobs
 
-```bash
-curl https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev/health
-```
-
-## Managing jobs without a dashboard
-
-Use D1 SQL through Wrangler. Example:
-
-Enable a scheduler:
+All admin is via D1 SQL through Wrangler or `/api/*` with `Authorization: Bearer $MANUAL_RUN_TOKEN`. See `docs/status.md` for the live-row dump, enable/disable commands, and the secrets inventory.
 
 ```bash
 npx wrangler d1 execute scheduler-db --remote --command \
-"UPDATE schedulers SET enabled = 1, next_run_at = '2026-11-10T01:00:00.000Z' WHERE id = 'rails-trends'"
+  "SELECT id, name, enabled, cron_expression, next_run_at FROM schedulers ORDER BY priority"
 ```
 
-Disable a scheduler:
+## Documentation
 
-```bash
-npx wrangler d1 execute scheduler-db --remote --command \
-"UPDATE schedulers SET enabled = 0 WHERE id = 'rails-trends'"
-```
-
-Inspect scheduler definitions:
-
-```bash
-npx wrangler d1 execute scheduler-db --remote --command \
-"SELECT id, name, enabled, cron_expression, timezone, next_run_at FROM schedulers ORDER BY priority"
-```
-
-Inspect recent executions:
-
-```bash
-npx wrangler d1 execute scheduler-db --remote --command \
-"SELECT scheduler_id, scheduled_for, status, model, error_text FROM scheduler_executions ORDER BY created_at DESC LIMIT 50"
-```
-
-Inspect daily usage counters:
-
-```bash
-npx wrangler d1 execute scheduler-db --remote --command \
-"SELECT * FROM daily_usage ORDER BY usage_date DESC LIMIT 14"
-```
-
-## Manual API endpoints
-
-All manual endpoints require `Authorization: Bearer $MANUAL_RUN_TOKEN`.
-
-Queue a single scheduler:
-
-```bash
-curl -X POST "https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev/api/run" \\
-  -H "Authorization: Bearer YOUR_MANUAL_RUN_TOKEN" \\
-  -H "Content-Type: application/json" \\
-  -d '{"schedulerId":"rails-trends"}'
-```
-
-Queue every enabled scheduler:
-
-```bash
-curl -X POST "https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev/api/run-all" \\
-  -H "Authorization: Bearer YOUR_MANUAL_RUN_TOKEN"
-```
-
-Retrieve execution details:
-
-```bash
-curl -X GET "https://YOUR-WORKER.YOUR-SUBDOMAIN.workers.dev/api/executions/EXECUTION_ID" \\
-  -H "Authorization: Bearer YOUR_MANUAL_RUN_TOKEN"
-```
-
-`POST /api/run-all` returns `202 Accepted` when at least one scheduler is queued, `200 OK` when there are no enabled schedulers, and `500` if all queue submissions fail. `GET /api/executions/:id` returns `404 Not Found` for unknown execution IDs.
-
-## Scheduling and timezone notes
-
-Cron expressions use five fields: minute, hour, day-of-month, month, day-of-week. The scheduler stores `next_run_at` in UTC. The current starter includes a small cron parser. It evaluates cron matches in UTC; convert each desired local schedule to UTC before storing the expression. The `timezone` column is retained for configuration/documentation but is not yet used for timezone conversion by the parser.
-
-For Asia/Jakarta (UTC+7), examples:
-- 07:50 WIB -> `50 0 * * *` UTC
-- 11:50 WIB -> `50 4 * * *` UTC
-- 16:50 WIB -> `50 9 * * *` UTC
-
-Do not use a local-time cron expression directly unless you add timezone-aware conversion.
-
-## Free-tier budgeting
-
-- Workers Free: 100,000 requests/day; 5 Cron Triggers/account; 10 ms CPU per invocation.
-- Workers AI: 10,000 Neurons/day free allocation. Inference calls fail after the daily free allocation is exhausted on Workers Free.
-- Queue and D1 quotas are separate. Check the current Cloudflare pricing/limits pages before production use.
-- A single every-minute dispatcher is 1,440 Cron invocations/day. This is below the documented 100,000 Workers request allowance, but cron CPU time is constrained to 10 ms on Free.
-- Do not run 10 heavy AI jobs simultaneously. Keep batches small and stagger the schedules.
-- `MAX_AI_RUNS_PER_DAY` is an application-level cap on attempted AI inferences, reserved before calling the model. It is not a direct Neuron meter; one inference may consume very different Neurons from another. The default is 30 attempts/day.
+- `docs/status.md` — production state, live rows, secrets inventory, operational gotchas, prompt-migration scorecard.
+- `docs/superpowers/specs/` · `docs/superpowers/plans/` — approved designs and implementation plans (trending digest, rails jobs, railsdev blog writer).
+- `AGENTS.md` — commands, runtime gotchas, PR conventions.
+- `prompts/` — the original Claude Scheduler prompts (goals retained, execution rewritten for CI).
 
 ## Security
 
-- Do not expose management endpoints publicly. The included endpoints are read-only, but still consider protecting them with Cloudflare Access.
-- Store secrets with `wrangler secret put SECRET_NAME`; never commit API tokens.
-- Validate and constrain all feed URLs and configured destinations before production.
-- Treat RSS and external source text as untrusted input.
-- Do not automatically execute code generated by the model.
-- Keep article publication, PR creation, auto-merge and Slack notification as separate explicit integrations with their own safeguards.
+- Never commit `.dev.vars` or real tokens. `gen:config` writes only local files.
+- **`prompts/1.md` originally contained a plaintext Cloudflare API token.** It was scrubbed and never committed to Git history, but the token must be treated as compromised — rotate/revoke it.
+- `GITHUB_PAT` used for dispatch only; site repos use `RAILSDEV_PAT` scoped to contents+PRs of that repo only.
+- Slack tokens are bot tokens (`xoxb-…`) with `chat:write`; failure with `not_allowed_token_type` means the wrong token type was set, or the bot isn't installed / lacks the scope.
+- RSS and API payloads are untrusted input; scripts only pass through verified fields.
 
-## Known starter limitations to address before production
+## Status of the Claude Scheduler migration
 
-1. The basic cron parser evaluates UTC only. It does not implement full timezone/DST semantics.
-2. Job definitions are added as migrations and are disabled until verified. Review URLs, inputs and prompts before enabling.
-3. The lightweight model name is configurable; verify current availability and free eligibility.
-4. Character counts are not Neuron counts. Monitor Neurons in Cloudflare.
-5. The scheduler uses D1 uniqueness to reduce duplicate dispatches, but queue delivery is at-least-once. Make every job handler idempotent before adding side effects.
-6. `MAX_AI_RUNS_PER_DAY` is reserved for a future quota guard. Add a hard reservation counter before enabling high-volume AI tasks.
-7. The sample dispatcher advances due schedules after queue send. For stronger transactional guarantees, use an outbox table and a reconciliation cron.
-8. The queue dead-letter queue needs manual inspection and replay procedures.
-
-## Official documentation
-
-- Workers limits: https://developers.cloudflare.com/workers/platform/limits/
-- Workers AI pricing: https://developers.cloudflare.com/workers-ai/platform/pricing/
-- Workers AI models: https://developers.cloudflare.com/workers-ai/models/
-- Queues limits: https://developers.cloudflare.com/queues/platform/limits/
-- D1 pricing: https://developers.cloudflare.com/d1/platform/pricing/
-- Wrangler configuration: https://developers.cloudflare.com/workers/wrangler/configuration/
-
+| Prompt | Automation | State |
+|---|---|---|
+| 2 | GitHub Trending daily → #news | ✅ live, enabled 06:50 WIB |
+| 3 | Rails remote jobs → #jobs | ✅ live, enabled 07:50 WIB |
+| 4 | RailsDev.io blog → PR | ✅ PR open `hendra/railsdev-site#28`; writer built & verified; manual only |
+| 5, 6 | FullstackWeb.dev / INASOFT blog writers | ⏳ not started (same pattern as #4) |
+| 7 | INASOFT news digest → #news | ⏳ not started |
+| 8 | GitHub Trending weekly → #news | ⏳ not started (same pipeline, `since=weekly`) |
+| 1 | IG Reel pipeline | ⏳ deferred; workflow exists but untested end-to-end |
