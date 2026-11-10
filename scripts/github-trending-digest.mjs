@@ -8,12 +8,17 @@
 //     content — Workers AI rejects array/null content) → compose mrkdwn
 //   → print (DRY_RUN) or post to Slack #news via chat.postMessage
 //
-// Env: CF_ACCOUNT_ID, CF_API_TOKEN (Workers AI), SLACK_BOT_TOKEN,
-//      SLACK_NEWS_CHANNEL_ID, GH_TOKEN (fallback + gh), DRY_RUN=true|false
-//      AI_STUB=true  -> skip the Workers AI call and synthesize the analysis
-//      locally (for offline testing and dry runs when the free daily Neuron
-//      allocation is exhausted). Never posts anything new; output is clearly
-//      generic and only exists to exercise the pipeline end-to-end.
+// Env: DRY_RUN=true|false; AI_PROVIDER (default cloudflare); AI_FALLBACKS
+//      (default "groq,gemini,cerebras,openrouter,mistral", comma-separated,
+//      providers without credentials are skipped); AI_MODEL (overrides primary);
+//      <PROVIDER>_MODEL per provider (CLOUDFLARE_MODEL, GROQ_MODEL,
+//      CEREBRAS_MODEL, GEMINI_MODEL, OPENROUTER_MODEL, MISTRAL_MODEL).
+// Credentials: CF_ACCOUNT_ID + CF_API_TOKEN (cloudflare), GROQ_API_KEY, CEREBRAS_API_KEY, GEMINI_API_KEY,
+//      OPENROUTER_API_KEY, MISTRAL_API_KEY. SLACK_BOT_TOKEN, SLACK_NEWS_CHANNEL_ID,
+//      GH_TOKEN (fallback + gh).
+//      AI_STUB=true  -> skip all AI calls and synthesize the analysis locally
+//      (offline testing / dry runs when the free daily Neuron allocation is
+//      exhausted). Never posts anything new; only exists to exercise the pipeline.
 // Exit: 0 = digest (or failure note) posted or fully handled; 1 = unhandled error
 //       (workflow failure step posts a generic ⚠️ only if we didn't post one).
 
@@ -25,7 +30,22 @@ const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || "";
 const CF_API_TOKEN = process.env.CF_API_TOKEN || "";
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
 const SLACK_NEWS_CHANNEL_ID = process.env.SLACK_NEWS_CHANNEL_ID || "";
-const AI_MODEL = process.env.AI_MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+const AI_MODEL = process.env.AI_MODEL || ""; // overrides the primary provider's model
+// Provider chain: AI_PROVIDER (default cloudflare) then AI_FALLBACKS in order;
+// providers without credentials are skipped. Per-provider model overrides:
+// Provider model overrides: CLOUDFLARE_MODEL, GROQ_MODEL, CEREBRAS_MODEL,
+// GEMINI_MODEL, OPENROUTER_MODEL, MISTRAL_MODEL.
+const PROVIDERS = {
+  cloudflare: { name: "cloudflare", baseURL: () => `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai/v1`, key: () => CF_API_TOKEN, model: () => process.env.CLOUDFLARE_MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast", jsonMode: true },
+  groq:       { name: "groq",       baseURL: () => "https://api.groq.com/openai/v1", key: () => process.env.GROQ_API_KEY || "", model: () => process.env.GROQ_MODEL || "openai/gpt-oss-120b", jsonMode: true },
+  cerebras:   { name: "cerebras",   baseURL: () => "https://api.cerebras.ai/v1", key: () => process.env.CEREBRAS_API_KEY || "", model: () => process.env.CEREBRAS_MODEL || "llama-3.3-70b", jsonMode: true },
+  gemini:     { name: "gemini",     baseURL: () => "https://generativelanguage.googleapis.com/v1beta/openai", key: () => process.env.GEMINI_API_KEY || "", model: () => process.env.GEMINI_MODEL || "gemini-2.5-flash", jsonMode: true },
+  openrouter: { name: "openrouter", baseURL: () => "https://openrouter.ai/api/v1", key: () => process.env.OPENROUTER_API_KEY || "", model: () => process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free" },
+  mistral:    { name: "mistral",    baseURL: () => "https://api.mistral.ai/v1", key: () => process.env.MISTRAL_API_KEY || "", model: () => process.env.MISTRAL_MODEL || "mistral-small-latest", jsonMode: true },
+};
+const AI_PROVIDER = (process.env.AI_PROVIDER || "cloudflare").toLowerCase();
+const AI_FALLBACKS = (process.env.AI_FALLBACKS || "groq,gemini,cerebras,openrouter,mistral").toLowerCase().split(",").map((s) => s.trim()).filter(Boolean);
+const CHAIN = [AI_PROVIDER, ...AI_FALLBACKS.filter((p) => p !== AI_PROVIDER)];
 const CATEGORIES = ["AI/LLM","Agents/MCP","Dev Tools","Web/Frontend","Backend","Infra/DevOps","Data","Security","Other"];
 const now = new Date();
 const wibISO = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year:"numeric", month:"2-digit", day:"2-digit" }).format(now);
@@ -116,7 +136,39 @@ async function fetchReadme(owner, name) {
   return "";
 }
 
-// ---------- 2. AI analysis (single call, string content) ----------
+async function callCompletion(prompt) {
+  const errors = [];
+  for (const name of CHAIN) {
+    const p = PROVIDERS[name];
+    if (!p) { errors.push(`${name}: unknown provider`); continue; }
+    const key = p.key();
+    if (!key) { console.log(`ai: skipping ${name} (no credentials)`); continue; }
+    const model = AI_MODEL || p.model();
+    console.log(`ai: trying ${name} (model ${model})`);
+    try {
+      const res = await fetch(`${p.baseURL()}/chat/completions`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }], max_tokens: 2200, temperature: 0.4, ...(p.jsonMode ? { response_format: { type: "json_object" } } : {}) }),
+      });
+      if (!res.ok) {
+        const text = (await res.text()).slice(0, 300);
+        errors.push(`${name}: HTTP ${res.status} ${text}`);
+        continue;
+      }
+      const data = await res.json();
+      const raw = data?.choices?.[0]?.message?.content || "";
+      if (!raw) { errors.push(`${name}: empty completion`); continue; }
+      console.log(`ai: ${name} succeeded`);
+      return raw;
+    } catch (e) {
+      errors.push(`${name}: ${String(e).slice(0, 200)}`);
+    }
+  }
+  throw new Error(`all AI providers failed: ${errors.join(" | ")}`);
+}
+
+// ---------- 2. AI analysis (single completion, string content) ----------
 async function analyze(repos) {
   if (process.env.AI_STUB === "true") {
     return { repos: repos.map((r) => ({ ...r, what: r.description || "No description provided.", why: "Notable on today's trending list.", category: "Other" })), trend: "Stubbed analysis (AI_STUB=true) — pattern detection omitted." };
@@ -132,17 +184,14 @@ Then write "trend": 2-3 sentences noting patterns across the 10 (dominant langua
 Reply with ONLY a JSON object, no prose: {"repos":[{"name":"owner/name","what":"...","why":"...","category":"..."}], "trend":"..."} — repos array must be in the same order as the input, exactly 10 items.
 Repositories:
 ${lines}`;
-  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/ai/v1/chat/completions`, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${CF_API_TOKEN}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: AI_MODEL, messages: [{ role: "user", content: prompt }], max_tokens: 2200, temperature: 0.4 }),
-  });
-  if (!res.ok) throw new Error(`Workers AI HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`);
-  const data = await res.json();
-  const raw = data?.choices?.[0]?.message?.content || "";
-  const m = raw.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error("Workers AI returned no JSON object");
-  const parsed = JSON.parse(m[0]);
+  let parsed = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const raw = await callCompletion(prompt + (attempt > 1 ? "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON object." : ""));
+    const m = raw.match(/\{[\s\S]*\}/);
+    if (!m) { console.error(`ai: attempt ${attempt}: no JSON object found`); continue; }
+    try { parsed = JSON.parse(m[0]); break; } catch (e) { console.error(`ai: attempt ${attempt}: JSON parse failed: ${e.message}`); }
+  }
+  if (!parsed) throw new Error("AI returned invalid JSON twice");
   const byName = new Map((parsed.repos || []).map((r) => [r.name, r]));
   const enriched = repos.map((r) => {
     const a = byName.get(`${r.owner}/${r.name}`) || {};
@@ -182,7 +231,9 @@ async function postToSlack(messages, isFailureNote = false) {
 // ---------- main ----------
 (async () => {
   if (!DRY_RUN && (!SLACK_BOT_TOKEN || !SLACK_NEWS_CHANNEL_ID)) { console.error("FATAL: SLACK_BOT_TOKEN and SLACK_NEWS_CHANNEL_ID required (or set DRY_RUN=true)"); process.exit(1); }
-  if (!CF_ACCOUNT_ID || !CF_API_TOKEN) { console.error("FATAL: CF_ACCOUNT_ID and CF_API_TOKEN required"); process.exit(1); }
+  const usable = CHAIN.filter((n) => PROVIDERS[n] && PROVIDERS[n].key());
+  if (usable.length === 0 && process.env.AI_STUB !== "true") { console.error("FATAL: no AI provider in the chain has credentials (set CF_API_TOKEN or e.g. GITHUB_MODELS_TOKEN/GROQ_API_KEY/GEMINI_API_KEY and adjust AI_PROVIDER/AI_FALLBACKS)"); process.exit(1); }
+  console.log(`ai: provider chain ${CHAIN.join(" -> ")} (usable: ${usable.join(", ") || "none, using AI_STUB/none"})`);
   let collected;
   try { collected = await collect(); } catch (e) { await fail(`data collection failed: ${e.message}`); return; }
   const { repos, fallback } = collected;
