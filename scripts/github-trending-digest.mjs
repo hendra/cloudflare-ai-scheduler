@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 import { PROVIDERS, providerChain, callModel } from "./ai-providers.mjs";
-// GitHub Trending — Daily Top 10 → Slack #news (deterministic, zero dependencies)
+// GitHub Trending — Daily/Weekly Top 10 → Slack #news (deterministic, zero dependencies)
 //
-// Flow: fetch github.com/trending?since=daily (regex parse, browser UA)
+// WEEKLY=true fetches github.com/trending?since=weekly and labels the digest
+// "Top 10 of the Week" (coverage: previous Monday–Sunday, Asia/Jakarta).
+//
+// Flow: fetch the trending page (regex parse, browser UA)
 //   → fallback: GitHub search API via `gh` (labelled "fallback: newly created
 //     repos by stars") → for each repo fetch README (best-effort, 4 KB cap)
+//     and, in weekly mode only, license + latest release via `gh api` (best-effort)
 //   → ONE Workers AI completion (OpenAI-compatible chat endpoint, plain string
 //     content — Workers AI rejects array/null content) → compose mrkdwn
 //   → print (DRY_RUN) or post to Slack #news via chat.postMessage
@@ -37,15 +41,39 @@ const AI_MODEL = process.env.AI_MODEL || ""; // overrides the primary provider's
 // Provider model overrides: CLOUDFLARE_MODEL, GROQ_MODEL, CEREBRAS_MODEL,
 // GEMINI_MODEL, OPENROUTER_MODEL, MISTRAL_MODEL.
 const CATEGORIES = ["AI/LLM","Agents/MCP","Dev Tools","Web/Frontend","Backend","Infra/DevOps","Data","Security","Other"];
+// Weekly mode (WEEKLY=true): fetches github.com/trending?since=weekly, labels the
+// digest "Top 10 of the Week", and uses the previous Monday–Sunday window in Asia/Jakarta.
+const WEEKLY = String(process.env.WEEKLY || "false") === "true";
 const now = new Date();
 const wibISO = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year:"numeric", month:"2-digit", day:"2-digit" }).format(now);
+const weekStart = new Date(now);
+// Previous Monday 00:00 UTC-ish in Jakarta; good enough for display label
+if (WEEKLY) {
+  const dow = weekStart.getDay() || 7; // Mon=1..Sun=7
+  weekStart.setDate(weekStart.getDate() - dow - 6); // back 6 days before the previous Monday
+  weekStart.setHours(0, 0, 0, 0);
+}
+const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+const wibDateStart = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year:"numeric", month:"2-digit", day:"2-digit" }).format(weekStart);
+const wibDateEnd   = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year:"numeric", month:"2-digit", day:"2-digit" }).format(weekEnd);
+const gainedLabel = WEEKLY ? "this week" : "today";
+const digestTitle = WEEKLY ? "Top 10 of the Week" : "Top 10 Today";
+const trendTitle = WEEKLY ? "Trends of the Week" : "Trend of the Day";
+const footerKind = WEEKLY ? "weekly" : "daily";
+const headerLink = WEEKLY
+  ? "<https://github.com/trending?since=weekly|github.com/trending (weekly)>"
+  : "<https://github.com/trending?since=daily|github.com/trending>";
+const repoMetaLine = (r) => {
+  if (!r.license && !r.release) return "";
+  return `\n📄 ${r.license || "license not shown"}${r.release ? ` · 🏷️ ${r.release.tag} (${r.release.date || "date unknown"})` : ""}`;
+};
 
 const strip = (s) => s.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
 const num = (s) => parseInt(String(s).replace(/[^\d]/g, ""), 10) || 0;
 
 function fail(msg) {
   console.error("FATAL:", msg);
-  const note = `⚠️ _GitHub Trending — Top 10 Today_ could not be produced. ${msg}`.slice(0, 500);
+  const note = `⚠️ _GitHub Trending — ${digestTitle}_ could not be produced. ${msg}`.slice(0, 500);
   if (DRY_RUN) { console.error("dry run — not posting failure note to Slack"); process.exit(1); }
   return postToSlack([note], true).then(() => {
     try { writeFileSync("failure-posted", "1"); } catch {}
@@ -65,7 +93,7 @@ async function fetchText(url, { ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKi
 
 // ---------- 1. collect ----------
 async function collect() {
-  const { text: html } = await fetchText("https://github.com/trending?since=daily");
+  const { text: html } = await fetchText(WEEKLY ? "https://github.com/trending?since=weekly" : "https://github.com/trending?since=daily");
   const blocks = html.match(/<article class="Box-row">[\s\S]*?<\/article>/g) || [];
   const repos = [];
   for (const block of blocks) {
@@ -77,7 +105,7 @@ async function collect() {
     const descM = block.match(/<p class="col-9[^>]*>([\s\S]*?)<\/p>/);
     const langM = block.match(/itemprop="programmingLanguage">([^<]+)</);
     const starsM = block.match(/href="\/[^"]+\/stargazers"[^>]*>[\s\S]*?<\/svg>\s*([\d,]+)\s*<\/a>/);
-    const todayM = block.match(/([\d,]+)\s+stars? today/);
+    const todayM = block.match(/([\d,]+)\s+stars?\s+(?:today|this week)/);
     const forksM = block.match(/href="\/[^"]+\/forks"[^>]*>[\s\S]*?<\/svg>\s*([\d,]+)\s*<\/a>/);
     repos.push({
       owner, name,
@@ -97,11 +125,14 @@ async function collect() {
 }
 
 async function collectFallback() {
-  const d = new Date(Date.now() - 86400000);
-  const since = d.toISOString().slice(0, 10);
+  const fallbackStart = WEEKLY ? weekStart : new Date(Date.now() - 86400000);
+  const since = fallbackStart.toISOString().slice(0, 10);
+  const created = WEEKLY
+    ? `created:${since}..${weekEnd.toISOString().slice(0, 10)}`
+    : `created:>=${since}`;
   try {
     const out = execSync(
-      `gh api "search/repositories?q=created:>=${since}&sort=stars&order=desc&per_page=10" --jq '.items[] | [.full_name, (.description // ""), (.stargazers_count|tostring), (.forks_count|tostring), (.language // "unknown")] | @tsv'`,
+      `gh api "search/repositories?q=${created}&sort=stars&order=desc&per_page=10" --jq '.items[] | [.full_name, (.description // ""), (.stargazers_count|tostring), (.forks_count|tostring), (.language // "unknown")] | @tsv'`,
       { encoding: "utf8", timeout: 60000 }
     );
     const repos = out.trim().split("\n").filter(Boolean).map((line) => {
@@ -114,6 +145,20 @@ async function collectFallback() {
   } catch (e) {
     throw new Error(`both trending page parse and search API fallback failed: ${String(e).slice(0, 200)}`);
   }
+}
+
+// ---------- 2b. weekly-only per-repo license + latest release (best-effort, when visible) ----------
+function enrichRepoApi(r) {
+  if (!WEEKLY) return;
+  try {
+    const lic = execSync(`gh api repos/${r.owner}/${r.name} --jq '.license.spdx_id // ""'`, { encoding: "utf8", timeout: 30000 }).trim();
+    r.license = lic && lic !== "NOASSERTION" ? lic : null;
+  } catch { r.license = null; }
+  try {
+    const rel = execSync(`gh api repos/${r.owner}/${r.name}/releases/latest --jq '[.tag_name // "", .published_at // ""] | @tsv'`, { encoding: "utf8", timeout: 30000 }).trim();
+    const [tag, published] = rel.split("\t");
+    r.release = tag ? { tag, date: (published || "").slice(0, 10) } : null;
+  } catch { r.release = null; }
 }
 
 async function fetchReadme(owner, name) {
@@ -129,7 +174,7 @@ async function fetchReadme(owner, name) {
 // ---------- 2. AI analysis (single completion, string content) ----------
 async function analyze(repos) {
   if (process.env.AI_STUB === "true") {
-    return { repos: repos.map((r) => ({ ...r, what: r.description || "No description provided.", why: "Notable on today's trending list.", category: "Other" })), trend: "Stubbed analysis (AI_STUB=true) — pattern detection omitted." };
+    return { repos: repos.map((r) => ({ ...r, what: r.description || "No description provided.", why: "Notable on the weekly trending list.", category: "Other" })), trend: "Stubbed analysis (AI_STUB=true) — pattern detection omitted." };
   }
   const lines = repos.map((r, i) =>
     `${i + 1}. ${r.owner}/${r.name} | lang=${r.language} | stars=${r.stars ?? "n/a"} | today=${r.today ?? "n/a"} | forks=${r.forks ?? "n/a"}\n   desc: ${r.description || "(none)"}\n   readme excerpt: ${(r.readme || "(unavailable)").slice(0, 600)}`
@@ -161,15 +206,18 @@ ${lines}`;
 
 // ---------- 3. message + post ----------
 function compose({ repos, fallback, trend }) {
+  const dateLine = WEEKLY
+    ? `📅 _Week:_ ${wibDateStart} – ${wibDateEnd} (Asia/Jakarta)`
+    : `📅 _Date:_ ${wibISO} (Asia/Jakarta)`;
   const header = fallback
-    ? `🔥 _GitHub Trending — Top 10 (fallback: newly created repos by stars)_\n📅 _Date:_ ${wibISO} (Asia/Jakarta) | 🔗 <https://github.com/trending?since=daily|github.com/trending>\n`
-    : `🔥 _GitHub Trending — Top 10 Today_\n📅 _Date:_ ${wibISO} (Asia/Jakarta) | 🔗 <https://github.com/trending?since=daily|github.com/trending>\n`;
+    ? `⚠️ _GitHub Trending — ${digestTitle} (fallback: newly created repos by stars)_\n${dateLine} | 🔗 ${headerLink}\n`
+    : `${WEEKLY ? "📊" : "🔥"} _GitHub Trending — ${digestTitle}_\n${dateLine} | 🔗 ${headerLink}\n`;
   const sections = repos.map((r, i) => {
-    const stars = r.stars != null ? `⭐ ${r.stars.toLocaleString()}${r.today != null ? ` (+${r.today.toLocaleString()} today)` : ""}` : "⭐ n/a";
+    const stars = r.stars != null ? `⭐ ${r.stars.toLocaleString()}${r.today != null ? ` (+${r.today.toLocaleString()} ${gainedLabel})` : ""}` : "⭐ n/a";
     const forks = r.forks != null ? `🍴 ${r.forks.toLocaleString()}` : "🍴 n/a";
-    return `━━━━━━━━━━━━━━━━━━━━\n_${i + 1}. <${r.url}|${r.owner}/${r.name}>_ · \`${r.language}\` · ${r.category}\n${stars} · ${forks}\n${r.what}\n💡 ${r.why}`;
+    return `━━━━━━━━━━━━━━━━━━━━\n_${i + 1}. <${r.url}|${r.owner}/${r.name}>_ · \`${r.language}\` · ${r.category}\n${stars} · ${forks}${repoMetaLine(r)}\n${r.what}\n💡 ${r.why}`;
   });
-  const tail = `━━━━━━━━━━━━━━━━━━━━\n📈 _Trend of the Day_\n${trend}\n\n🤖 _Automated daily GitHub trending digest_`;
+  const tail = `━━━━━━━━━━━━━━━━━━━━\n📈 _${trendTitle}_\n${trend}\n\n🤖 _Automated ${footerKind} GitHub trending digest_`;
   return { header, full: [header, sections.join("\n\n"), tail].join("\n\n") };
 }
 
@@ -195,14 +243,14 @@ async function postToSlack(messages, isFailureNote = false) {
   let collected;
   try { collected = await collect(); } catch (e) { await fail(`data collection failed: ${e.message}`); return; }
   const { repos, fallback } = collected;
-  for (const r of repos) { r.readme = await fetchReadme(r.owner, r.name).catch(() => ""); }
+  for (const r of repos) { r.readme = await fetchReadme(r.owner, r.name).catch(() => ""); enrichRepoApi(r); }
   let analysis;
   try { analysis = await analyze(repos); } catch (e) { console.error("AI analysis failed:", e.message); await fail(`AI analysis failed: ${e.message}`); return; }
   const { header, full } = compose({ repos: analysis.repos, fallback, trend: analysis.trend });
   const SLACK_LIMIT = 3500;
   const parts = full.length <= SLACK_LIMIT ? [full] : [
-    [header, analysis.repos.slice(0, 5).map((r, i) => `_${i + 1}. <${r.url}|${r.owner}/${r.name}>_ · \`${r.language}\` · ${r.category}\n⭐ ${r.stars?.toLocaleString?.() ?? "n/a"}${r.today != null ? ` (+${r.today.toLocaleString()} today)` : ""} · 🍴 ${r.forks?.toLocaleString?.() ?? "n/a"}\n${r.what}\n💡 ${r.why}`).join("\n\n")].join("\n\n"),
-    [analysis.repos.slice(5).map((r, i) => `_${i + 6}. <${r.url}|${r.owner}/${r.name}>_ · \`${r.language}\` · ${r.category}\n⭐ ${r.stars?.toLocaleString?.() ?? "n/a"}${r.today != null ? ` (+${r.today.toLocaleString()} today)` : ""} · 🍴 ${r.forks?.toLocaleString?.() ?? "n/a"}\n${r.what}\n💡 ${r.why}`).join("\n\n"), "━━━━━━━━━━━━━━━━━━━━\n📈 _Trend of the Day_\n" + analysis.trend + "\n\n🤖 _Automated daily GitHub trending digest_"].join("\n\n"),
+    [header, analysis.repos.slice(0, 5).map((r, i) => `_${i + 1}. <${r.url}|${r.owner}/${r.name}>_ · \`${r.language}\` · ${r.category}\n⭐ ${r.stars?.toLocaleString?.() ?? "n/a"}${r.today != null ? ` (+${r.today.toLocaleString()} ${gainedLabel})` : ""} · 🍴 ${r.forks?.toLocaleString?.() ?? "n/a"}${repoMetaLine(r)}\n${r.what}\n💡 ${r.why}`).join("\n\n")].join("\n\n"),
+    [analysis.repos.slice(5).map((r, i) => `_${i + 6}. <${r.url}|${r.owner}/${r.name}>_ · \`${r.language}\` · ${r.category}\n⭐ ${r.stars?.toLocaleString?.() ?? "n/a"}${r.today != null ? ` (+${r.today.toLocaleString()} ${gainedLabel})` : ""} · 🍴 ${r.forks?.toLocaleString?.() ?? "n/a"}${repoMetaLine(r)}\n${r.what}\n💡 ${r.why}`).join("\n\n"), `━━━━━━━━━━━━━━━━━━━━\n📈 _${trendTitle}_\n` + analysis.trend + `\n\n🤖 _Automated ${footerKind} GitHub trending digest_`].join("\n\n"),
   ];
   if (DRY_RUN) {
     console.log("=== DRY RUN — message(s) that would be posted to #news ===");
@@ -211,5 +259,5 @@ async function postToSlack(messages, isFailureNote = false) {
     process.exit(0);
   }
   await postToSlack(parts);
-  console.log(JSON.stringify({ event: "github-trending-posted", date: wibISO, repos: analysis.repos.length, fallback, parts: parts.length }));
+  console.log(JSON.stringify({ event: WEEKLY ? "github-trending-weekly-posted" : "github-trending-posted", date: WEEKLY ? `${wibDateStart}–${wibDateEnd}` : wibISO, repos: analysis.repos.length, fallback, parts: parts.length }));
 })().catch((e) => fail(`unexpected error: ${String(e).slice(0, 300)}`));
