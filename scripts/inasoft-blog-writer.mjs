@@ -156,7 +156,7 @@ ${"Diskusi awal biasanya dimulai dari pertanyaan paling dasar: apa yang bisa dit
 
 
 // ---------- metadata helpers ----------
-const DESC_MAX_CHARS = 180; // validation limit for description
+const DESC_MAX_CHARS = 160; // inasoft-site astro schema: description.max(160) — must match the site, not the old script limit
 // Clamp to max chars at a word boundary; hard cut if there is no decent boundary.
 function clampAtWord(s, max) {
   const t = String(s || "").trim();
@@ -176,7 +176,7 @@ function validateArticle(a, corpusSlugs) {
   const req = (cond, msg) => { if (!cond) errs.push(msg); };
   req(a.title && a.title.length >= 20 && a.title.length <= 120, "title length");
   
-  req(a.description && a.description.length >= 100 && a.description.length <= 180, `description ${a?.description?.length} not in 100-180`);
+  req(a.description && a.description.length >= 100 && a.description.length <= 160, `description ${a?.description?.length} not in 100-160 (inasoft-site schema max 160)`);
   req(/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(a.slug || ""), "slug format");
   // Services are required by the INASOFT schema (astro check). Tolerate model mistakes:
   // drop unknown slugs, and if none remain, pick the closest by simple keyword heuristics.
@@ -357,7 +357,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     console.error("metadata validation failed, requesting metadata fix:", v.errs.join("; "));
     try {
       const metaNow = Object.fromEntries(META_KEYS.map((k) => [k, article[k]]));
-      const fixPrompt = `You previously produced this blog metadata JSON for inasoft.id:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style (Bahasa Indonesia)\n- seoTitle: at most 50 chars\n- description: 100-180 chars (target 150-170) and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- coverAlt: short diagram description\nOutput ONLY the JSON object, no prose.`;
+      const fixPrompt = `You previously produced this blog metadata JSON for inasoft.id:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style (Bahasa Indonesia)\n- seoTitle: at most 50 chars\n- description: 120-160 chars (hard max 160, inasoft-site schema) and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- coverAlt: short diagram description\nOutput ONLY the JSON object, no prose.`;
       const fixed = parseJSONObject(await callModel(fixPrompt, { maxTokens: 2048 }));
       if (fixed && typeof fixed === "object") {
         for (const k of META_KEYS) if (typeof fixed[k] === "string" && fixed[k].trim()) article[k] = fixed[k].trim();
