@@ -106,6 +106,21 @@ function stubArticle() {
   return { title: "Rails Migration Testing: A Practical Guide", seoTitle: "Rails Migration Testing: A Practical Guide", description: "Practical guide to writing and verifying Rails migrations in large apps: PostgreSQL pitfalls, Active Record internals and zero-downtime deploy testing.", keyword: "rails migration testing", slug: "rails-migration-testing-guide", service: "Rails Upgrade", coverAlt: "Diagram of a Rails migration being tested against a PostgreSQL database, with rollback steps", body };
 }
 
+// ---------- metadata helpers ----------
+const DESC_MAX_CHARS = 160; // validation limit for description
+// Clamp to max chars at a word boundary; hard cut if there is no decent boundary.
+function clampAtWord(s, max) {
+  const t = String(s || "").trim();
+  if (t.length <= max) return t;
+  const cut = t.slice(0, max + 1);
+  const at = cut.lastIndexOf(" ");
+  const base = at >= 40 ? cut.slice(0, at) : t.slice(0, max);
+  return base.trim().replace(/[\s.,;:!?—–-]+$/u, "");
+}
+const META_KEYS = ["title", "seoTitle", "description", "keyword", "slug", "service", "coverAlt"];
+const META_ERR = /^(title length|seoTitle|description|slug format|slug already exists|keyword)/;
+const isMetaErr = (e) => META_ERR.test(e);
+
 // ---------- validation ----------
 function validateArticle(a, corpusSlugs) {
   const errs = [];
@@ -214,10 +229,30 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   })();
   if (!body) await fail("article body generation failed after 3 attempts");
   const article = { ...meta, body };
+  if (article.description && article.description.length > DESC_MAX_CHARS) {
+    const clamped = clampAtWord(article.description, DESC_MAX_CHARS);
+    console.log(`description clamped: ${article.description.length}c -> ${clamped.length}c`);
+    article.description = clamped;
+  }
   console.log(`article: ${article.title} | ${article.slug} | seoTitle ${String(article.seoTitle || "").length}c`);
 
   // 4) validation (with one self-correction retry)
   let v = validateArticle(article, corpusSlugs);
+  // 4a) metadata self-correction — the body-only retry below cannot fix these
+  if (!v.ok && v.errs.some(isMetaErr)) {
+    console.error("metadata validation failed, requesting metadata fix:", v.errs.join("; "));
+    try {
+      const metaNow = Object.fromEntries(META_KEYS.map((k) => [k, article[k]]));
+      const fixPrompt = `You previously produced this blog metadata JSON for railsdev.io:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style\n- seoTitle: at most 49 chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- service: one of ${SERVICE_VALUES.join(" | ")}\n- coverAlt: short diagram description\nOutput ONLY the JSON object, no prose.`;
+      const fixed = parseJSONObject(await callModel(fixPrompt, { maxTokens: 2048 }));
+      if (fixed && typeof fixed === "object") {
+        for (const k of META_KEYS) if (typeof fixed[k] === "string" && fixed[k].trim()) article[k] = fixed[k].trim();
+        if (article.description && article.description.length > DESC_MAX_CHARS) article.description = clampAtWord(article.description, DESC_MAX_CHARS);
+        v = validateArticle(article, corpusSlugs);
+        console.log(v.ok ? "validation ok after metadata fix" : `still failing after metadata fix: ${v.errs.join("; ")}`);
+      }
+    } catch (e) { console.error("metadata fix call failed:", e.message); }
+  }
   if (!v.ok) {
     console.error("validation failed, retrying body with feedback:", v.errs.join("; "));
     const retryBody = await (async () => {
