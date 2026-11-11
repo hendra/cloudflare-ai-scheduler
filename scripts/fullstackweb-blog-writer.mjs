@@ -332,7 +332,12 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   // 7) build must pass
   console.log("running astro check && astro build …");
   try { execSync("npm run build", { cwd: SITE_DIR, stdio: "pipe", timeout: 600000, env: { ...process.env } }); }
-  catch (e) { const out = String(e.stdout || "") + String(e.stderr || ""); await fail(`site build failed: ${out.slice(-500)}`); return; }
+  catch (e) {
+    const raw = String(e.stdout || "") + String(e.stderr || "");
+    const lines = raw.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
+    await fail(`site build failed:\n${lines.slice(-30).join("\n") || "(no output captured from build)"}`);
+    return;
+  }
   console.log("build passed");
 
   // 8) commit + PR (skipped in DRY_RUN)
