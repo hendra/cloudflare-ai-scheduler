@@ -1,7 +1,7 @@
 // Shared AI provider configuration for all scripts in this repo.
 // Primary: OpenCode Console (opencode.ai) — OpenAI-compatible chat-completions
-// at `https://opencode.ai/inference/go/openai/v1` (Go plan) or
-// `https://opencode.ai/inference/openai/v1` (pay-as-you-go).
+// at `https://opencode.ai/inference/openai/v1` (pay-as-you-go, needs credits on
+// the workspace) or `https://opencode.ai/inference/go/openai/v1` (Go plan).
 // Fallback: OpenRouter (preset `@preset/ai-scheduler`).
 // Never commit API keys — pass them via environment variables or .dev.vars (gitignored).
 //
@@ -17,12 +17,13 @@
 //                  chain falls through to the next one.
 //   OPENCODE_API_KEY   OpenCode Console API key (oc_sk_…).
 //   OPENCODE_MODEL     Console model (default "glm-5.3-flash" — "GLM-5.3-Flash").
-//   OPENCODE_BASE_URL  Console base (default "https://opencode.ai/inference/go/openai/v1"
-//                      — Go plan; pay-as-you-go is "https://opencode.ai/inference/openai/v1").
+//   OPENCODE_BASE_URL  Console base (default "https://opencode.ai/inference/openai/v1"
+//                      — pay-as-you-go; the Go plan is
+//                      "https://opencode.ai/inference/go/openai/v1").
 //   OPENROUTER_API_KEY / OPENROUTER_MODEL  OpenRouter provider.
 
 export const PROVIDERS = {
-  opencode:   { name: "opencode",   baseURL: () => process.env.OPENCODE_BASE_URL || "https://opencode.ai/inference/go/openai/v1", key: () => process.env.OPENCODE_API_KEY || "", model: () => process.env.OPENCODE_MODEL || "glm-5.3-flash" },
+  opencode:   { name: "opencode",   baseURL: () => process.env.OPENCODE_BASE_URL || "https://opencode.ai/inference/openai/v1", key: () => process.env.OPENCODE_API_KEY || "", model: () => process.env.OPENCODE_MODEL || "glm-5.3-flash" },
   openrouter: { name: "openrouter", baseURL: () => "https://openrouter.ai/api/v1",  key: () => process.env.OPENROUTER_API_KEY    || "", model: () => process.env.OPENROUTER_MODEL  || "@preset/ai-scheduler", jsonMode: false },
 };
 
@@ -103,6 +104,13 @@ export async function callModel(promptOrOpts, opts = {}) {
       while (!res.ok && res.status === 429 && waits < MAX_RATE_WAITS) {
         const wait = rateLimitWaitMs(res);
         if (!wait) break; // no retry hint (e.g. a daily quota) — fall through now
+        // A hard usage limit ("Free usage limit reached", "Insufficient balance")
+        // will not clear by waiting — fall through to the next provider at once.
+        const body = await res.clone().text().catch(() => "");
+        if (/free usage limit|usage limit reached|insufficient balance/i.test(body)) {
+          console.log(`ai: ${p.name} hard usage limit (429); not waiting`);
+          break;
+        }
         console.log(`ai: ${p.name} rate limited (429); waiting ${Math.round(wait / 1000)}s`);
         await new Promise((r) => setTimeout(r, wait));
         res = await doFetch(payload);
