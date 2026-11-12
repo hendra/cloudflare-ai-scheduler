@@ -38,8 +38,9 @@ Sections: ${h2.join(" | ")}
 Opening paragraph: ${intro}
 
 The cover has a left text block and a right diagram of the architecture or workflow the article recommends. Keep labels short and technically true to the article. Never show prices.
+The 3 bullets are concrete points about the article's subject (what it does, what the reader learns or does). Never describe the cover: no "left", "right", "diagram", "takeaways", "pricing", "image", "shown here".
 Reply with ONLY this JSON (no prose, no code fence):
-{"eyebrow":"topic in 2-4 words (<= ${LIMITS.eyebrow} chars)","title":"tool or concept name (<= ${LIMITS.title} chars)","subtitle":["line 1 (<= ${LIMITS.subtitle} chars)","line 2 (<= ${LIMITS.subtitle} chars)"],"bullets":["exactly 3 short points (<= ${LIMITS.bullet} chars each)","...","..."],"diagram":{"nodes":[{"label":"<= ${LIMITS.label} chars","sub":"optional, <= ${LIMITS.sub} chars","kind":"card|accent|hub","lines":["optional code line, <= ${LIMITS.line} chars"]}],"edges":[[0,1]]}}
+{"eyebrow":"topic in 2-4 words (<= ${LIMITS.eyebrow} chars)","title":"tool or concept name (<= ${LIMITS.title} chars)","subtitle":["line 1 (<= ${LIMITS.subtitle} chars)","line 2 (<= ${LIMITS.subtitle} chars)"],"bullets":["exactly 3 short points (<= ${LIMITS.bullet} chars each), each a fact about the topic","...","..."],"diagram":{"nodes":[{"label":"<= ${LIMITS.label} chars","sub":"optional, <= ${LIMITS.sub} chars","kind":"card|accent|hub","lines":["optional code line, <= ${LIMITS.line} chars"]}],"edges":[[0,1]]}}
 Diagram rules: 2-${MAX_NODES[site] || 5} nodes in reading order; kind "accent" highlights the key step, "hub" marks a central component, "card" is a plain box; at most 2 "lines" per node (class names, commands, columns); edges are [from, to] node indexes with from < to; at most ${MAX_SIDE_EDGES} edges may skip a node.`;
 }
 
