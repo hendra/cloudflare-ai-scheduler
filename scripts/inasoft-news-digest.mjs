@@ -108,17 +108,23 @@ const CATEGORIES = [
   { key: "TECHNOLOGY", label: "TECHNOLOGY", emoji: "🌐" },
 ];
 
-function fail(reason) {
+// Async + awaited at every call site: execution must stop here, never continue past a failure
+// (previously the script kept running while the Slack note was in flight).
+async function fail(reason) {
   console.error("FATAL:", reason);
   const note = `⚠️ _INASOFT DAILY TECH & AI NEWS DIGEST_ could not be produced. ${String(reason).slice(0, 300)}`;
   if (DRY_RUN) { console.error("dry run — not posting failure note to Slack"); process.exit(1); }
   if (!SLACK_BOT_TOKEN || !SLACK_NEWS_CHANNEL_ID) process.exit(1);
-  fetch("https://slack.com/api/chat.postMessage", {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${SLACK_BOT_TOKEN}`, "Content-Type": "application/json; charset=utf-8" },
-    body: JSON.stringify({ channel: SLACK_NEWS_CHANNEL_ID, text: note }),
-  }).then(() => { try { writeFileSync("failure-posted", "1"); } catch {} process.exit(1); })
-    .catch(() => process.exit(1));
+  try {
+    const res = await fetch("https://slack.com/api/chat.postMessage", {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${SLACK_BOT_TOKEN}`, "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ channel: SLACK_NEWS_CHANNEL_ID, text: note }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (j.ok) { try { writeFileSync("failure-posted", "1"); } catch {} }
+  } catch {}
+  process.exit(1);
 }
 
 async function main() {
@@ -126,7 +132,7 @@ async function main() {
   const chain = providerChain();
   const usable = chain.filter((n) => PROVIDERS[n] && PROVIDERS[n].key());
   console.log(`ai: provider chain ${chain.join(" -> ")} (usable: ${usable.join(", ") || "none"})`);
-  if (usable.length === 0) fail("no AI provider has credentials");
+  if (usable.length === 0) await fail("no AI provider has credentials");
 
   // 1) collect signals
   const all = [];
@@ -135,7 +141,7 @@ async function main() {
     all.push(...items);
   }
   console.log(`signals collected: ${all.length} items from ${SOURCES.length} sources`);
-  if (all.length < 4) fail("too few items from sources; refusing to fabricate");
+  if (all.length < 4) await fail("too few items from sources; refusing to fabricate");
 
   // 2) ask AI to SELECT with grounded refs — composition is deterministic afterwards
   const lines = all.map((s, i) => `${i + 1}. [${s.source}] ${s.title} | ${s.url} | ${s.date || "(date unknown)"} | ${s.summary.slice(0, 140)}`).join("\n");
@@ -154,31 +160,33 @@ ${lines}`;
     try {
       const raw = await callModel(prompt + (attempt > 1 ? "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON object." : ""), { maxTokens: 3000, expectJSON: true, temperature: 0.4 });
       const m = raw.match(/\{[\s\S]*\}/);
-      parsed = JSON.parse(m ? m[0] : raw);
+      const j = JSON.parse(m ? m[0] : raw);
+      if (!Array.isArray(j?.stories) || j.stories.length !== 4) throw new Error(`expected 4 stories, got ${Array.isArray(j?.stories) ? j.stories.length : "none"}`);
+      parsed = j;
     } catch (e) { lastErr = e; console.error(`AI selection attempt ${attempt} failed: ${String(e).slice(0, 160)}`); }
   }
-  if (!parsed) { fail(`AI selection failed after 3 attempts: ${String(lastErr).slice(0, 220)}`); return; }
+  if (!parsed) await fail(`AI selection failed after 3 attempts: ${String(lastErr).slice(0, 220)}`);
 
   // 3) ground + validate
   const stories = parsed.stories || [];
-  if (stories.length !== 4) fail(`AI returned ${stories.length} stories (need exactly 4)`);
+  if (stories.length !== 4) await fail(`AI returned ${stories.length} stories (need exactly 4)`);
   const seenRefs = new Set();
   const byCat = new Map(CATEGORIES.map(c => [c.key, null]));
   for (const s of stories) {
     const idx = parseInt(s.ref, 10) - 1;
     const cand = all[idx];
-    if (cand === undefined) fail(`AI returned invalid ref ${s.ref}`);
-    if (seenRefs.has(s.ref)) fail(`AI repeated ref ${s.ref} across categories`);
+    if (cand === undefined) await fail(`AI returned invalid ref ${s.ref}`);
+    if (seenRefs.has(s.ref)) await fail(`AI repeated ref ${s.ref} across categories`);
     seenRefs.add(s.ref);
     const cat = byCat.get(s.category);
-    if (cat) fail(`duplicate category ${s.category}`);
+    if (cat) await fail(`duplicate category ${s.category}`);
     const c = CATEGORIES.find(c => c.key === s.category);
-    if (!c) fail(`unknown category ${s.category}`);
+    if (!c) await fail(`unknown category ${s.category}`);
     byCat.set(c.key, { ...s, headline: cand.title, url: cand.url, date: cand.date, source: cand.source });
   }
   const ordered = CATEGORIES.map(c => byCat.get(c.key));
   const insight = safeMrkdwn(parsed.insight || "").trim();
-  if (!insight) fail("AI returned an empty insight");
+  if (!insight) await fail("AI returned an empty insight");
 
   // 4) compose mrkdwn deterministically
   const header = `🚀 _INASOFT DAILY TECH & AI NEWS DIGEST_\n📅 _Date:_ ${wib} (Asia/Jakarta)\n🌍 _Coverage:_ Latest trending developments in AI, AI Engineering, Software Development & Technology.\n\n`;
@@ -218,4 +226,4 @@ ${lines}`;
   }
 }
 
-main().catch((e) => { console.error("FATAL:", e?.message || e); process.exit(1); });
+main().catch(async (e) => { await fail(`unexpected error: ${String(e?.message || e).slice(0, 300)}`); });
