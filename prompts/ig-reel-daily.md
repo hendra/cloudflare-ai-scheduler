@@ -14,7 +14,7 @@ Create and post 1 Instagram Reel in the **Interesting Facts & Knowledge** niche 
 - **Niche:** Interesting Facts & Knowledge — science/knowledge findings
 - **Airtime target:** around 17:15 WIB (GMT+7, Asia/Jakarta), end of the workday
 - **Playbook:** `https://res.cloudinary.com/opqimovw/raw/upload/ig-kit/ig-playbook.md` — authoritative source for the whole workflow
-- **Scripts:** `render_html.py`, `cf_image.py`, and `build_reel.py`, downloadable from `https://res.cloudinary.com/opqimovw/raw/upload/ig-kit/<name>`
+- **Scripts:** `render_html.py`, `cf_image.py`, and `build_reel.py` — vendored in this repo at `scripts/ig-kit/` (byte-identical to the Cloudinary ig-kit; nothing is downloaded or executed from the network at runtime)
 - **Hosting/upload:** Cloudinary (hosting and upload only — never for image generation)
 - **Publishing:** Buffer, posted as an Instagram `reel`
 
@@ -36,7 +36,7 @@ Create and post 1 Instagram Reel in the **Interesting Facts & Knowledge** niche 
 ## Process
 
 1. Read the playbook: download it with curl from `https://res.cloudinary.com/opqimovw/raw/upload/ig-kit/ig-playbook.md`. Follow ALL of its rules (flow §2, niche format §3.B, upload §4, safety rules §6).
-2. Fetch the scripts `render_html.py`, `cf_image.py`, and `build_reel.py` from `https://res.cloudinary.com/opqimovw/raw/upload/ig-kit/<name>` and save them to the working directory.
+2. Use the vendored copies of `render_html.py`, `cf_image.py`, and `build_reel.py` from `scripts/ig-kit/` in this repo. Do not download or execute scripts from the network at runtime.
 3. Research 4–5 science/knowledge findings released recently (the last few days) from credible sources; check the last 7 days of posts in Buffer to avoid repeating a topic.
 4. Render scene PNGs at 1080×1920 (hook → fact → CTA; source + date on every scene; illustrations from `cf_image.py`).
 5. Assemble the Reel with `build_reel.py` (original, royalty-free music) and check several frames.

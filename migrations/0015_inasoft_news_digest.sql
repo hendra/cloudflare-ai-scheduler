@@ -1,4 +1,4 @@
--- INASOFT technology & AI news digest, daily 09:30 WIB (02:30 UTC) after the blog writer (09:00).
+-- INASOFT technology & AI news digest, daily 09:30 WIB (02:30 UTC), shortly after the 07:45 WIB blog-writer slot.
 -- Delivers a 4-story digest to the Slack #news channel.
 INSERT OR IGNORE INTO schedulers
 (id, name, description, enabled, job_type, cron_expression, timezone, prompt, input_json, priority, next_run_at)
