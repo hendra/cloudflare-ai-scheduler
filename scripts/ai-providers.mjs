@@ -16,7 +16,7 @@
 //                  article bodies). On timeout the provider is skipped and the
 //                  chain falls through to the next one.
 //   OPENCODE_API_KEY   OpenCode Console API key (oc_sk_…).
-//   OPENCODE_MODEL     Console model (default "glm-5.3-flash" — "GLM-5.3-Flash").
+//   OPENCODE_MODEL     Console model (default "glm-5.3-flash-free" — "GLM-5.3-Flash Free").
 //   OPENCODE_BASE_URL  Console base (default "https://opencode.ai/inference/openai/v1"
 //                      — pay-as-you-go; the Go plan is
 //                      "https://opencode.ai/inference/go/openai/v1").
@@ -28,7 +28,7 @@
 //                  when unconfigured).
 
 export const PROVIDERS = {
-  opencode:   { name: "opencode",   baseURL: () => process.env.OPENCODE_BASE_URL || "https://opencode.ai/inference/openai/v1", key: () => process.env.OPENCODE_API_KEY || "", model: () => process.env.OPENCODE_MODEL || "glm-5.3-flash" },
+  opencode:   { name: "opencode",   baseURL: () => process.env.OPENCODE_BASE_URL || "https://opencode.ai/inference/openai/v1", key: () => process.env.OPENCODE_API_KEY || "", model: () => process.env.OPENCODE_MODEL || "glm-5.3-flash-free" },
   openrouter: { name: "openrouter", baseURL: () => "https://openrouter.ai/api/v1",  key: () => process.env.OPENROUTER_API_KEY    || "", model: () => process.env.OPENROUTER_MODEL  || "@preset/ai-scheduler", jsonMode: false },
   groq:       { name: "groq",       baseURL: () => "https://api.groq.com/openai/v1", key: () => process.env.GROQ_API_KEY || "", model: () => process.env.GROQ_MODEL || "openai/gpt-oss-120b", jsonMode: true },
   gemini:     { name: "gemini",     baseURL: () => "https://generativelanguage.googleapis.com/v1beta/openai", key: () => process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "", model: () => process.env.GEMINI_MODEL || "gemini-3.5-flash", jsonMode: true },

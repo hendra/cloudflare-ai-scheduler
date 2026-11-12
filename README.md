@@ -16,7 +16,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler — and, since late 2026
 
 Pipelines are deterministic. Most are zero-dependency Node 20 scripts (one file each, plus `scripts/ai-providers.mjs` / `scripts/make-cover.py`); the IG Reel is a Python orchestrator (`scripts/ig_reel_daily.py`; pip deps installed in the workflow). No agent tool-calling; 1–2 LLM completions per run.
 
-**Production default model: OpenCode Console `glm-5.3-flash`** (opencode.ai), fallbacks `openrouter` (preset `@preset/ai-scheduler`) → `groq` → `gemini` → `cloudflare`.
+**Production default model: OpenCode Console `glm-5.3-flash-free`** (opencode.ai), fallbacks `openrouter` (preset `@preset/ai-scheduler`) → `groq` → `gemini` → `cloudflare`.
 
 ## Architecture
 

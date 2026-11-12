@@ -9,7 +9,7 @@ hosting → Buffer createPost (Instagram reel).
 Env (see .github/workflows/ig-reel.yml):
   DRY_RUN=true            Everything except the Cloudinary upload + Buffer post
   CF_ACCOUNT, CF_TOKEN    Cloudflare Workers AI (images) — required for real images
-  OPENCODE_API_KEY        text brain (opencode.ai Console, model glm-5.3-flash)
+  OPENCODE_API_KEY        text brain (opencode.ai Console, model glm-5.3-flash-free)
   OPENROUTER_API_KEY      fallback brain (preset @preset/ai-scheduler, reasoning excluded)
   GROQ_API_KEY            fallback brain (openai/gpt-oss-20b)
   BUFFER_ACCESS_TOKEN     optional in dry run, required in real run
@@ -53,7 +53,7 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
 OPENCODE_API_KEY = os.environ.get("OPENCODE_API_KEY", "").strip()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b").strip()
-OPENCODE_MODEL = (os.environ.get("OPENCODE_MODEL", "") or "glm-5.3-flash").strip()
+OPENCODE_MODEL = (os.environ.get("OPENCODE_MODEL", "") or "glm-5.3-flash-free").strip()
 OPENCODE_BASE_URL = (os.environ.get("OPENCODE_BASE_URL", "https://opencode.ai/inference/openai/v1") or "").rstrip("/")
 CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME", "opqimovw").strip()
 CLOUD_KEY = os.environ.get("CLOUDINARY_API_KEY", "").strip()
