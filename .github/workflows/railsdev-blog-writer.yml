@@ -1,9 +1,11 @@
 name: railsdev-blog-writer
 
-# RailsDev.io blog writer (pilot, PR-ONLY — never auto-merges)
-# v1: manual dispatch only. Spec: docs/superpowers/specs/2026-11-11-railsdev-blog-writer-design.md
+# RailsDev.io blog writer
+# PR-ONLY — never auto-merges. Spec: docs/superpowers/specs/2026-11-11-railsdev-blog-writer-design.md
 # Generates one draft article per run, opens a PR on hendra/railsdev-site,
-# notifies #railsdev, and leaves merge to a human.
+# notifies #railsdev, and leaves merge to a human. Triggered by the Cloudflare Worker
+# scheduler (D1 row) via workflow_dispatch; AI via scripts/ai-providers.mjs
+# (OpenRouter preset → Groq → Cloudflare).
 
 on:
   workflow_dispatch:
@@ -27,44 +29,57 @@ jobs:
     timeout-minutes: 30
     env:
       PUBLIC_FORMSPREE_FORM_ID: ${{ vars.PUBLIC_FORMSPREE_FORM_ID }}
-      RAILSDEV_PAT: ${{ secrets.RAILSDEV_PAT }}
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       AI_PROVIDER: openrouter
       AI_FALLBACKS: openrouter,groq,cloudflare
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       AI_MODEL: ${{ vars.AI_MODEL }}
       GROQ_MODEL: ${{ vars.GROQ_MODEL }}
-      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-      SLACK_RAILSDEV_CHANNEL_ID: ${{ secrets.SLACK_RAILSDEV_CHANNEL_ID }}
-      DRY_RUN: ${{ inputs.dry_run }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
       SITE_DIR: ../site
     steps:
       - name: Checkout scheduler repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           path: scheduler
 
-      - name: Checkout railsdev-site
-        uses: actions/checkout@v4
+      - name: Checkout hendra/railsdev-site
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: hendra/railsdev-site
           token: ${{ secrets.RAILSDEV_PAT }}
           path: site
 
       - name: Set up Node 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
 
       - name: Install site dependencies
         working-directory: site
-        run: npm ci --no-audit --no-fund
+        run: npm ci --no-audit --no-fund --ignore-scripts
 
       - name: Install Pillow (for cover generation)
-        run: pip3 install Pillow
+        run: pip3 install Pillow==13.0.0
 
       - name: Run blog writer
         working-directory: scheduler
         run: node scripts/railsdev-blog-writer.mjs
+        env:
+          RAILSDEV_PAT: ${{ secrets.RAILSDEV_PAT }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_RAILSDEV_CHANNEL_ID: ${{ secrets.SLACK_RAILSDEV_CHANNEL_ID }}
+
+      - name: Notify failure to Slack
+        if: failure() && env.DRY_RUN != 'true' && !hashFiles('scheduler/failure-posted')
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_RAILSDEV_CHANNEL_ID: ${{ secrets.SLACK_RAILSDEV_CHANNEL_ID }}
+        run: |
+          TEXT="⚠️ RailsDev.io blog writer failed and no note was posted — see https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "$(jq -n --arg ch "${SLACK_RAILSDEV_CHANNEL_ID}" --arg text "${TEXT}" '{channel:$ch, text:$text}')"

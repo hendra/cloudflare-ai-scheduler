@@ -7,14 +7,30 @@ const json = (data: unknown, status = 200) =>
     headers: { "content-type": "application/json; charset=utf-8" }
   });
 
+// Bearer MANUAL_RUN_TOKEN check shared by every /api/* route. Constant-time comparison
+// (crypto.subtle.timingSafeEqual) so the token can't be recovered via response timing.
+function isAuthorized(request: Request, env: Env): boolean {
+  const token = env.MANUAL_RUN_TOKEN;
+  if (!token) return false;
+  const enc = new TextEncoder();
+  const got = enc.encode(request.headers.get("authorization") ?? "");
+  const want = enc.encode(`Bearer ${token}`);
+  return got.byteLength === want.byteLength && crypto.subtle.timingSafeEqual(got, want);
+}
+
 function utcMinute(date = new Date()): string {
   const d = new Date(date);
   d.setUTCSeconds(0, 0);
   return d.toISOString();
 }
 
+// More than this far past its scheduled time, a due run is skipped instead of
+// executed (catch-up storm guard after downtime). The schedule is re-armed from now.
+const SKIP_OVERDUE_MS = 15 * 60 * 1000;
+
 async function dispatchDueJobs(env: Env): Promise<number> {
   const now = utcMinute();
+  const nowDate = new Date(now);
   const limit = Math.max(1, Math.min(25, Number(env.MAX_JOBS_PER_DISPATCH || "10")));
 
   const { results } = await env.DB.prepare(`
@@ -30,42 +46,69 @@ async function dispatchDueJobs(env: Env): Promise<number> {
     const scheduledFor = job.next_run_at;
     const executionId = crypto.randomUUID();
 
-    // Unique(scheduler_id, scheduled_for) protects against duplicate dispatches.
-    const insert = await env.DB.prepare(`
-      INSERT OR IGNORE INTO scheduler_executions
-      (id, scheduler_id, scheduled_for, started_at, status, attempt)
-      VALUES (?, ?, ?, ?, 'queued', 1)
-    `).bind(executionId, job.id, scheduledFor, new Date().toISOString()).run();
-
-    if (insert.meta.changes === 0) {
-      // Already dispatched or executed. Advance the schedule without duplicating work.
-      const next = nextCronOccurrence(job.cron_expression, new Date(scheduledFor));
-      await env.DB.prepare(`
-        UPDATE schedulers SET next_run_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-      `).bind(next.toISOString(), job.id).run();
-      continue;
-    }
-
     try {
-      await env.JOB_QUEUE.send({
-        executionId,
-        schedulerId: job.id,
-        scheduledFor,
-        attempt: 1
-      } satisfies JobMessage);
+      // Fail fast on an invalid cron_expression: log and skip this row entirely
+      // (before inserting an execution row or sending to the queue).
+      matchesCron(job.cron_expression, nowDate);
 
-      const next = nextCronOccurrence(job.cron_expression, new Date(scheduledFor));
+      // Catch-up storm guard: skip runs that are more than 15 minutes overdue.
+      // Record nothing; just re-arm next_run_at to the next occurrence after now.
+      const overdueMs = nowDate.getTime() - new Date(scheduledFor).getTime();
+      if (overdueMs > SKIP_OVERDUE_MS) {
+        const next = nextCronOccurrence(job.cron_expression, nowDate);
+        await env.DB.prepare(`
+          UPDATE schedulers SET next_run_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+        `).bind(next.toISOString(), job.id).run();
+        console.log(JSON.stringify({ event: "dispatch_skipped_overdue", schedulerId: job.id, scheduledFor, overdueMinutes: Math.round(overdueMs / 60000), nextRunAt: next.toISOString() }));
+        continue;
+      }
+
+      // Unique(scheduler_id, scheduled_for) protects against duplicate dispatches.
+      const insert = await env.DB.prepare(`
+        INSERT OR IGNORE INTO scheduler_executions
+        (id, scheduler_id, scheduled_for, started_at, status, attempt)
+        VALUES (?, ?, ?, ?, 'queued', 1)
+      `).bind(executionId, job.id, scheduledFor, new Date().toISOString()).run();
+
+      if (insert.meta.changes === 0) {
+        // Already dispatched or executed. Re-arm the schedule from now.
+        const next = nextCronOccurrence(job.cron_expression, nowDate);
+        await env.DB.prepare(`
+          UPDATE schedulers SET next_run_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+        `).bind(next.toISOString(), job.id).run();
+        continue;
+      }
+
+      try {
+        await env.JOB_QUEUE.send({
+          executionId,
+          schedulerId: job.id,
+          scheduledFor,
+          attempt: 1
+        } satisfies JobMessage);
+      } catch (sendError) {
+        // Queue send failed: do NOT advance next_run_at, and delete the execution row
+        // so the next tick re-inserts and re-sends (INSERT OR IGNORE would otherwise
+        // silently drop the run).
+        await env.DB.prepare(`
+          DELETE FROM scheduler_executions WHERE id = ?
+        `).bind(executionId).run();
+        console.error(JSON.stringify({ event: "dispatch_send_failed", schedulerId: job.id, executionId, error: String(sendError) }));
+        continue;
+      }
+
+      // Next occurrence is computed from now (not the possibly-stale scheduledFor).
+      const next = nextCronOccurrence(job.cron_expression, nowDate);
       await env.DB.prepare(`
         UPDATE schedulers SET last_run_at = ?, next_run_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
       `).bind(scheduledFor, next.toISOString(), job.id).run();
 
       queued++;
     } catch (error) {
-      await env.DB.prepare(`
-        UPDATE scheduler_executions SET status = 'failed', finished_at = ?, error_text = ?
-        WHERE id = ?
-      `).bind(new Date().toISOString(), String(error), executionId).run();
-      throw error;
+      // e.g. invalid cron_expression in this row: log and skip it; do not abort
+      // the whole tick for the remaining rows.
+      console.error(JSON.stringify({ event: "dispatch_row_failed", schedulerId: job.id, scheduledFor, error: String(error) }));
+      continue;
     }
   }
 
@@ -123,7 +166,7 @@ function chooseModel(env: Env, job: SchedulerRow, input: Record<string, unknown>
     `${job.id} ${job.name} ${job.job_type}`
   );
   const fast = env.DEFAULT_AI_MODEL || "@cf/meta/llama-3.2-3b-instruct";
-  const quality = (env as Env & { QUALITY_AI_MODEL?: string }).QUALITY_AI_MODEL;
+  const quality = env.QUALITY_AI_MODEL;
   return isComplex && quality ? quality : fast;
 }
 
@@ -216,7 +259,8 @@ async function runGitHubActionsTrigger(env: Env, input: Record<string, unknown>)
   return `Dispatched workflow ${workflow} on ${owner}/${repo}@${ref}`;
 }
 
-async function executeJob(env: Env, message: JobMessage): Promise<void> {
+async function executeJob(env: Env, message: JobMessage, queueAttempts?: number): Promise<void> {
+  const attempt = queueAttempts ?? message.attempt ?? 1;
   const job = await env.DB.prepare("SELECT * FROM schedulers WHERE id = ?")
     .bind(message.schedulerId).first<SchedulerRow>();
 
@@ -228,10 +272,18 @@ async function executeJob(env: Env, message: JobMessage): Promise<void> {
   }
 
   const startedAt = new Date().toISOString();
-  await env.DB.prepare(`
+  // Atomically claim the execution row before doing any work. Queues are
+  // at-least-once: if this row is already running/succeeded (redelivery),
+  // meta.changes === 0 and we return so the consumer acks without re-running.
+  const claimed = await env.DB.prepare(`
     UPDATE scheduler_executions SET status = 'running', started_at = ?, attempt = ?
-    WHERE id = ?
-  `).bind(startedAt, message.attempt, message.executionId).run();
+    WHERE id = ? AND status IN ('queued', 'failed')
+  `).bind(startedAt, attempt, message.executionId).run();
+
+  if (claimed.meta.changes === 0) {
+    console.log(JSON.stringify({ event: "execution_already_claimed", executionId: message.executionId, schedulerId: message.schedulerId, attempt }));
+    return;
+  }
 
   try {
     const input = JSON.parse(job.input_json || "{}") as Record<string, unknown>;
@@ -292,7 +344,7 @@ export default {
   async queue(batch: MessageBatch<JobMessage>, env: Env) {
     for (const message of batch.messages) {
       try {
-        await executeJob(env, message.body);
+        await executeJob(env, message.body, message.attempts);
         message.ack();
       } catch (error) {
         // Cloudflare Queues retries according to wrangler configuration, then DLQs.
@@ -306,14 +358,7 @@ export default {
 
     if (url.pathname === "/api/run" && request.method === "POST") {
       // Protect manual execution with a secret token.
-      const token = env.MANUAL_RUN_TOKEN;
-
-      if (
-        !token ||
-        request.headers.get("authorization") !== `Bearer ${token}`
-      ) {
-        return json({ error: "Unauthorized" }, 401);
-      }
+      if (!isAuthorized(request, env)) return json({ error: "Unauthorized" }, 401);
 
       let body: { schedulerId?: string };
 
@@ -392,30 +437,26 @@ export default {
     }
 
     if (url.pathname === "/api/run-all" && request.method === "POST") {
-      const token = env.MANUAL_RUN_TOKEN;
-      if (!token || request.headers.get("authorization") !== `Bearer ${token}`) {
-        return json({ error: "Unauthorized" }, 401);
-      }
+      if (!isAuthorized(request, env)) return json({ error: "Unauthorized" }, 401);
 
-      const parsedLimit = Number(env.MAX_JOBS_PER_DISPATCH || "10");
-      const limit = Math.max(1, Math.min(25, Number.isFinite(parsedLimit) ? parsedLimit : 10));
+      // No limit: cover every enabled scheduler (18 today), not just the first 10.
       const { results } = await env.DB.prepare(`
         SELECT * FROM schedulers
         WHERE enabled = 1
         ORDER BY priority ASC, next_run_at ASC
-        LIMIT ?
-      `).bind(limit).all<SchedulerRow>();
+      `).all<SchedulerRow>();
 
       const runResults: Array<{
         schedulerId: string;
         schedulerName: string;
         executionId: string;
-        status: "queued" | "failed";
+        status: "queued" | "failed" | "skipped";
         error?: string;
       }> = [];
 
       let queued = 0;
       let failed = 0;
+      let skipped = 0;
 
       for (const job of results) {
         const executionId = crypto.randomUUID();
@@ -434,9 +475,9 @@ export default {
               schedulerId: job.id,
               schedulerName: job.name,
               executionId,
-              status: "queued"
+              status: "skipped"
             });
-            queued++;
+            skipped++;
             continue;
           }
 
@@ -484,17 +525,19 @@ export default {
           total: 0,
           queued: 0,
           failed: 0,
+          skipped: 0,
           results: []
         }, 200);
       }
 
-      if (queued === 0) {
+      if (queued + skipped === 0) {
         return json({
           success: false,
           message: "Failed to queue enabled schedulers",
           total,
           queued,
           failed,
+          skipped,
           results: runResults
         }, 500);
       }
@@ -505,15 +548,13 @@ export default {
         total,
         queued,
         failed,
+        skipped,
         results: runResults
       }, 202);
     }
 
     if (url.pathname.startsWith("/api/executions/") && request.method === "GET") {
-      const token = env.MANUAL_RUN_TOKEN;
-      if (!token || request.headers.get("authorization") !== `Bearer ${token}`) {
-        return json({ error: "Unauthorized" }, 401);
-      }
+      if (!isAuthorized(request, env)) return json({ error: "Unauthorized" }, 401);
 
       let id = "";
       try {
@@ -547,7 +588,12 @@ export default {
       return json({ ok: true, service: "cloudflare-ai-scheduler", timestamp: new Date().toISOString() });
     }
 
-    // Read-only operational endpoints. Protect with an Access policy before exposing publicly.
+    // Read-only operational endpoints — same bearer token as the rest of /api/*
+    // (they expose job config, AI output/error text, and usage).
+    if (url.pathname.startsWith("/api/") && !isAuthorized(request, env)) {
+      return json({ error: "Unauthorized" }, 401);
+    }
+
     if (url.pathname === "/api/schedulers" && request.method === "GET") {
       const { results } = await env.DB.prepare(`
         SELECT id, name, description, enabled, job_type, cron_expression, timezone,
@@ -558,7 +604,8 @@ export default {
     }
 
     if (url.pathname === "/api/executions" && request.method === "GET") {
-      const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") || 25)));
+      const parsedLimit = Number(url.searchParams.get("limit") || 25);
+      const limit = Number.isFinite(parsedLimit) ? Math.min(100, Math.max(1, parsedLimit)) : 25;
       const { results } = await env.DB.prepare(`
         SELECT e.id, e.scheduler_id, s.name, e.scheduled_for, e.started_at,
                e.finished_at, e.status, e.model, e.error_text, e.created_at

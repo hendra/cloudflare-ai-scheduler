@@ -9,21 +9,21 @@ import { PROVIDERS, providerChain, callModel } from "./ai-providers.mjs";
 //   print (DRY_RUN) or post to Slack #jobs via chat.postMessage.
 //
 // Env: DRY_RUN=true|false; AI_STUB=true (offline testing); AI_PROVIDER
-//   (default cloudflare); AI_FALLBACKS (default groq,gemini,cerebras,openrouter,
-//   mistral); AI_MODEL; <PROVIDER>_MODEL. SLACK_BOT_TOKEN, SLACK_JOBS_CHANNEL_ID,
+//   (default openrouter); AI_FALLBACKS (default groq,cloudflare); AI_MODEL
+//   (primary provider only); <PROVIDER>_MODEL. SLACK_BOT_TOKEN, SLACK_JOBS_CHANNEL_ID,
 //   GH_TOKEN, CF_ACCOUNT_ID, CF_API_TOKEN, GROQ_API_KEY, …
 // Exit: 0 = digest (or failure note) posted/printed; 1 = failure (a ⚠️ note is
 //   posted when possible). NEVER posts a digest with invented jobs.
 
 import { writeFileSync } from "node:fs";
+import { safeMrkdwn, slackLink, splitForSlack, postSlack, postSlackParts } from "./slack.mjs";
 
 const DRY_RUN = String(process.env.DRY_RUN || "false") === "true";
 const AI_STUB = process.env.AI_STUB === "true";
-const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || "";
-const CF_API_TOKEN = process.env.CF_API_TOKEN || "";
+
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
 const SLACK_JOBS_CHANNEL_ID = process.env.SLACK_JOBS_CHANNEL_ID || "";
-const AI_MODEL = process.env.AI_MODEL || "";
+
 
 
 const TIERS = ["Excellent", "Strong", "Good", "Moderate", "Low"];
@@ -34,11 +34,13 @@ const strip = (s) => String(s || "").replace(/<[^>]+>/g, " ").replace(/&#x2F;/gi
 const daysOld = (d) => { const t = Date.parse(d); return Number.isFinite(t) ? (Date.now() - t) / 86400_000 : null; };
 const FRESH = (d) => { const a = daysOld(d); return a == null || a <= 30; };
 
-function fail(msg, causes = []) {
+function fail(msg) {
   console.error("FATAL:", msg);
   const note = `⚠️ _Rails Remote Jobs — ${wib}_ could not be produced. ${msg}`.slice(0, 400);
   if (DRY_RUN) { console.error("dry run — not posting failure note to Slack"); process.exit(1); }
-  return postToSlack([note]).then(() => { try { writeFileSync("failure-posted", "1"); } catch {} process.exit(1); }).catch(() => process.exit(1));
+  // failure-posted only when Slack actually accepted the note (workflow contract).
+  return postSlack({ token: SLACK_BOT_TOKEN, channel: SLACK_JOBS_CHANNEL_ID, text: note })
+    .then((r) => { if (r.ok) { try { writeFileSync("failure-posted", "1"); } catch {} } else console.error("failure note rejected by Slack:", r.error); process.exit(1); });
 }
 
 async function fetchText(url, { timeout = 25000, headers = {}, ua = "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0" } = {}) {
@@ -145,14 +147,16 @@ ${lines}`;
     if (!m) { console.error(`ai: attempt ${attempt}: no JSON object`); continue; }
     try {
       const p = JSON.parse(m[0]);
+      const seenIdx = new Set(); // AI sometimes emits the same index twice → duplicate listings
       const jobs = (p.jobs || []).filter((j) => Number.isInteger(j.index) && j.index >= 0 && j.index < candidates.length)
+        .filter((j) => { if (seenIdx.has(j.index)) return false; seenIdx.add(j.index); return true; })
         .map((j) => ({ index: j.index, score: Math.max(0, Math.min(100, Math.round(Number(j.score) || 0))), tier: TIERS.includes(j.tier) ? j.tier : "Moderate", eligibility: ELIGIBILITY.includes(j.eligibility) ? j.eligibility : "international", restricts: String(j.restricts || "").slice(0, 80), why: String(j.why || "").slice(0, 160) }));
       if (jobs.length === 0) { console.error(`ai: attempt ${attempt}: no valid job entries`); continue; }
       parsed = { jobs, summary: String(p.summary || "").slice(0, 300) };
       break;
     } catch (e) { console.error(`ai: attempt ${attempt}: ${e.message}`); }
   }
-  if (!parsed) throw new Error("AI returned invalid JSON twice");
+  if (!parsed) throw new Error("AI returned invalid JSON after 3 attempts");
   return parsed;
 }
 
@@ -163,27 +167,16 @@ function render(ranked, sourceStatus, totalCandidates) {
   const shown = sorted.filter((j, i) => ["Excellent", "Strong", "Good"].includes(j.tier) || i < 12).slice(0, 12);
   const notShown = ranked.length - shown.length;
   const header = `💼 _Rails Remote Jobs — ${wib} (Asia/Jakarta)_\nSources: ${sourceStatus.map(([n, ok, cnt]) => ok ? `✅ ${n} (${cnt})` : `❌ ${n}`).join(" · ")}\n${totalCandidates} fresh candidates (≤30d, deduped) — scored vs profile\n`;
-  const body = shown.map((j, i) => `_${i + 1}. ${j.company} — ${j.title}_ · ${j.eligibility === "worldwide" ? "🌍 Worldwide" : j.eligibility === "international" ? "🌐 Intl" : j.eligibility === "country-restricted" ? "🔒 " + (j.restricts || "restricted") : "🕒 " + (j.restricts || "regional")} · **${j.tier} ${j.score}**${j.salary ? ` · ${j.salary}` : ""}\n→ ${j.url}\n💡 ${j.why}`).join("\n\n");
+  const body = shown.map((j, i) => `_${i + 1}. ${safeMrkdwn(j.company)} — ${safeMrkdwn(j.title)}_ · ${j.eligibility === "worldwide" ? "🌍 Worldwide" : j.eligibility === "international" ? "🌐 Intl" : j.eligibility === "country-restricted" ? "🔒 " + (safeMrkdwn(j.restricts) || "restricted") : "🕒 " + (safeMrkdwn(j.restricts) || "regional")} · *${j.tier} ${j.score}*${j.salary ? ` · ${safeMrkdwn(j.salary)}` : ""}\n→ ${slackLink(j.url, j.url)}\n💡 ${safeMrkdwn(j.why)}`).join("\n\n");
   const footer = `\n\n${notShown > 0 ? `_${notShown} more (Moderate/Low) not shown._` : ""}\n🤖 _Automated Rails job search · ${totalCandidates} candidates scored · verify eligibility per posting · sources: ${sourceStatus.filter(([, ok]) => ok).map(([n]) => n).join(", ")}_`;
   return header + "\n" + body + footer;
 }
 
-async function postToSlack(messages) {
-  for (const text of messages) {
-    const res = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${SLACK_BOT_TOKEN}`, "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ channel: SLACK_JOBS_CHANNEL_ID, text }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!body.ok) throw new Error(`Slack post failed: ${body.error || res.status}`);
-  }
-  console.log(`Slack post: ok (${messages.length} message(s))`);
-}
+
 
 (async () => {
   if (!DRY_RUN && (!SLACK_BOT_TOKEN || !SLACK_JOBS_CHANNEL_ID)) { console.error("FATAL: SLACK_BOT_TOKEN and SLACK_JOBS_CHANNEL_ID required (or DRY_RUN=true)"); process.exit(1); }
-  if (!CF_ACCOUNT_ID && !providerChain().some((n) => PROVIDERS[n]?.key()) && !AI_STUB) { console.error("FATAL: no AI provider credentials found"); process.exit(1); }
+  if (!providerChain().some((n) => PROVIDERS[n]?.key()) && !AI_STUB) { console.error("FATAL: no AI provider in the chain has credentials"); process.exit(1); }
   const all = [];
   for (const [name, fn] of SOURCES) {
     try { const jobs = await fn(); all.push(...jobs); statuses.push([name, true, jobs.length]); console.log(`source ${name}: ${jobs.length} fresh jobs`); }
@@ -203,8 +196,21 @@ async function postToSlack(messages) {
   try { scored = await score(candidates); } catch (e) { await fail(`AI analysis failed: ${String(e).slice(0, 300)}`); return; }
   const ranked = scored.jobs.map((s) => ({ ...candidates[s.index], ...s }));
   const msg = render(ranked, statuses, candidates.length);
-  const parts = msg.length <= 3500 ? [msg] : msg.match(/[\s\S]{1,3400}(\n|$)/g);
+  const parts = splitForSlack(msg, 3400);
   if (DRY_RUN) { console.log("=== DRY RUN — would post to #jobs ===\n" + parts.map((p, i) => `--- part ${i + 1} (${p.length} chars) ---\n${p}`).join("\n") + `\n=== end dry run ===`); return; }
-  await postToSlack(parts);
+  const r = await postSlackParts({ token: SLACK_BOT_TOKEN, channel: SLACK_JOBS_CHANNEL_ID, parts });
+  if (!r.ok) {
+    console.error(`Slack post failed: ${r.error} (${r.posted} of ${parts.length} part(s) accepted)`);
+    if (r.posted > 0) {
+      // Channel already saw a partial digest — make the gap explicit in-channel.
+      const note = `⚠️ _Rails Remote Jobs — ${wib}_ posting failed after part ${r.posted} of ${parts.length} — the digest above is incomplete. ${r.error}`.slice(0, 500);
+      const nr = await postSlack({ token: SLACK_BOT_TOKEN, channel: SLACK_JOBS_CHANNEL_ID, text: note });
+      if (nr.ok) { try { writeFileSync("failure-posted", "1"); } catch {} }
+      process.exit(1);
+    }
+    await fail(`Slack post failed: ${r.error}`);
+    return;
+  }
+  console.log(`Slack post: ok (${r.posted} message(s))`);
   console.log(JSON.stringify({ event: "rails-jobs-posted", date: wib, candidates: candidates.length, shown: Math.min(ranked.length, 12) }));
 })().catch((e) => fail(`unexpected error: ${String(e).slice(0, 300)}`));

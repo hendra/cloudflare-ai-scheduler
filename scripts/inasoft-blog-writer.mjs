@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-import { PROVIDERS, providerChain, callModel } from "./ai-providers.mjs";
+import { callModel } from "./ai-providers.mjs";
 // INASOFT blog writer (pilot, PR-only) — deterministic, zero dependencies.
 //
 // Flow: fetch signals (HN front page + GitHub Trending) → load existing corpus
-//   (title/slug list, blocks duplicates) → 1 AI completion picks a topic →
-//   1 AI completion writes the article (JSON, hard-validated) → ImageMagick
-//   text-on-brand cover → write .md + cover into the site checkout →
-//   `astro check && astro build` must pass → branch → commit → push → PR →
-//   Slack #fullstackwebdev summary. Any hard failure → Slack note, NO push, NO PR.
+//   (title/slug list, blocks duplicates) → 1 AI completion picks a topic (metadata
+//   included) → 1 AI completion writes the markdown article body (hard-validated) →
+//   cover generated via Pillow (scripts/make-cover.py) → write .md + cover into the
+//   site checkout → `npm run build` must pass → branch → commit → push → PR →
+//   Slack #inasoft summary (SLACK_INASOFT_CHANNEL_ID). Any hard failure → Slack note, NO push, NO PR.
 //
 // Env:
 //   SITE_DIR        path to the inasoft-site checkout (default: "inasoft-site")
@@ -19,9 +19,9 @@ import { PROVIDERS, providerChain, callModel } from "./ai-providers.mjs";
 //   PUBLIC_FORMSPREE_FORM_ID  (astro env schema requires it at build time)
 // Exit: 0 ok (PR opened or dry-run printed), 1 failure (Slack note attempted).
 
-import { readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { execFileSync, execSync } from "node:child_process";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 
 const DRY_RUN = String(process.env.DRY_RUN || "false") === "true";
 const AI_STUB = process.env.AI_STUB === "true";
@@ -29,10 +29,6 @@ const SITE_DIR = process.env.SITE_DIR || "inasoft-site";
 const INASOFT_PAT = process.env.INASOFT_PAT || "";
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
 const SLACK_CHANNEL = process.env.SLACK_INASOFT_CHANNEL_ID || "";
-const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || "";
-const CF_API_TOKEN = process.env.CF_API_TOKEN || "";
-const AI_MODEL = process.env.AI_MODEL || "";
-
 const SERVICE_VALUES = [
   "jasa-integrasi-ai-rag",
   "jasa-pembuatan-ai-agent",
@@ -48,10 +44,18 @@ const SERVICE_VALUES = [
   "jasa-pembuatan-sistem-erp",
   "jasa-pembuatan-aplikasi-mobile",
 ];
-const CATEGORY_VALUES = ["ai-engineering", "software-engineering", "panduan-bisnis", "cloud-devops"];
-const SUBCATEGORY_VALUES = ["ai-agents", "rag", "mcp", "ai-automation", "llm-engineering", "ruby-on-rails", "backend", "frontend", "database", "perencanaan-proyek", "saas", "modernisasi-sistem", "devops", "container", "cloud"];
+// Mirrors inasoft-site src/lib/categories.ts — the schema refines that the subcategory belongs to the category.
+const SUBCATEGORIES_BY_CATEGORY = {
+  "ai-engineering": ["ai-agents", "rag", "mcp", "ai-automation", "llm-engineering"],
+  "software-engineering": ["ruby-on-rails", "backend", "frontend", "database"],
+  "panduan-bisnis": ["perencanaan-proyek", "saas", "modernisasi-sistem"],
+  "cloud-devops": ["devops", "container", "cloud"],
+};
+const CATEGORY_VALUES = Object.keys(SUBCATEGORIES_BY_CATEGORY);
+const SUBCATEGORY_VALUES = Object.values(SUBCATEGORIES_BY_CATEGORY).flat();
+const categoryOf = (sub) => CATEGORY_VALUES.find((c) => SUBCATEGORIES_BY_CATEGORY[c].includes(sub));
+const SEO_TITLE_MAX = 50; // inasoft-site schema: seoTitle.max(50)
 const PILLAR_VALUES = ["software-bisnis", "ai-untuk-bisnis", "pengembangan-software", "tutorial-teknis"];
-const wib = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const strip = (s) => String(s || "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
 
 // ---------- tiny helpers ----------
@@ -74,24 +78,29 @@ async function headOk(url) {
 }
 async function fail(msg) {
   console.error("FATAL:", msg);
-  try { await postToSlack([`⚠️ _INASOFT blog writer failed:_ ${msg}`.slice(0, 500)]); try { writeFileSync("failure-posted", "1"); } catch {} } catch {}
+  try {
+    // Only claim failure-posted when Slack actually accepted the note; the
+    // workflow falls back to its own note otherwise.
+    const posted = await postToSlack([`⚠️ _INASOFT blog writer failed:_ ${msg}`.slice(0, 500)]);
+    if (posted) { try { writeFileSync("failure-posted", "1"); } catch {} }
+  } catch {}
   process.exit(1);
 }
 
+// Returns true only when every message was accepted by Slack. In DRY_RUN or with
+// missing credentials it logs and returns false (nothing was really posted).
 async function postToSlack(messages) {
-  if (DRY_RUN || !SLACK_BOT_TOKEN || !SLACK_CHANNEL) { messages.forEach((m) => console.log("[dry] slack:", m.slice(0, 120))); return; }
+  if (DRY_RUN || !SLACK_BOT_TOKEN || !SLACK_CHANNEL) { messages.forEach((m) => console.log("[dry] slack:", m.slice(0, 120))); return false; }
   for (const text of messages) {
     const res = await fetch("https://slack.com/api/chat.postMessage", { method: "POST", headers: { "Authorization": `Bearer ${SLACK_BOT_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify({ channel: SLACK_CHANNEL, text }) });
     const body = await res.json().catch(() => ({}));
     if (!body.ok) throw new Error(`Slack post failed: ${body.error || res.status}`);
   }
   console.log(`Slack post: ok (${messages.length})`);
+  return true;
 }
 
 // ---------- AI ----------
-// Free-tier Groq caps ~8k TPM per minute; one article needs 3-4 calls, so pace them.
-const AI_CALL_SPACING_MS = 5000;
-
 function parseJSONObject(raw) { const m = String(raw).match(/\{[\s\S]*\}/); if (!m) return null; try { return JSON.parse(m[0]); } catch { return null; } }
 
 // ---------- signals ----------
@@ -196,14 +205,23 @@ function validateArticle(a, corpusSlugs) {
     console.warn("category: fallback applied ->", a.category);
   }
   if (!SUBCATEGORY_VALUES.includes(a.subcategory)) {
-    a.subcategory = a.category === "ai-engineering" ? "llm-engineering" : "backend";
+    a.subcategory = SUBCATEGORIES_BY_CATEGORY[a.category][0];
     console.warn("subcategory: fallback applied ->", a.subcategory);
+  } else if (categoryOf(a.subcategory) !== a.category) {
+    // The subcategory is the more specific choice; derive the category from it.
+    console.warn(`category: "${a.category}" does not own subcategory "${a.subcategory}" -> ${categoryOf(a.subcategory)}`);
+    a.category = categoryOf(a.subcategory);
   }
   if (!PILLAR_VALUES.includes(a.pillar)) {
     a.pillar = "pengembangan-software";
     console.warn("pillar: fallback applied ->", a.pillar);
   }
-  if (!a.seoTitle) a.seoTitle = String(a.title || "").slice(0, 50);
+  if (!a.seoTitle) a.seoTitle = clampAtWord(a.title, SEO_TITLE_MAX);
+  else if (a.seoTitle.length > SEO_TITLE_MAX) {
+    const clamped = clampAtWord(a.seoTitle, SEO_TITLE_MAX);
+    console.warn(`seoTitle clamped: ${a.seoTitle.length}c -> ${clamped.length}c`);
+    a.seoTitle = clamped;
+  }
   if (!a.lang) a.lang = "id";
   req(!corpusSlugs.includes(a.slug), "slug already exists");
   req((() => {
@@ -218,17 +236,20 @@ function validateArticle(a, corpusSlugs) {
   req(fences % 2 === 0, "unbalanced code fences");
   const words = a.body.trim().split(/\s+/).length;
   req(words >= 1500, `only ${words} words (need >= 1500)`);
-  for (const line of String(a.body || "").split("\n")) { /* fences-aware scan */ }
   const bodyNoFences = String(a.body || "").split(/```/).filter((_, i) => i % 2 === 0).join("\n");
   req(!/lorem(?:\s|_)ipsum|\{placeholder\}|\[insert/i.test(bodyNoFences), "placeholder token in body");
   const kw = a.keyword || "";
   const norm = (t) => String(t || "").toLowerCase().replace(/[\u2010\u2011\u2012\u2013\u2014-]/g, " ").replace(/\s+/g, " ").trim();
+  // Require at least the first two significant words (was: only the first; full-all-words was
+  // deliberately relaxed in d0be839 for model tolerance — see git log).
   const kwWords = norm(kw).split(/\s+/).filter((w) => w.length > 2);
   const hay = norm((a.title || "") + " " + (a.description || "") + " " + bodyNoFences.slice(0, 2000));
-  req(kwWords.slice(0, 1).every((w) => hay.includes(w)), "keyword missing from title/description/intro");
+  req(kwWords.slice(0, 2).every((w) => hay.includes(w)), "keyword words missing from title/description/intro");
   req(/catatan verifikasi|verification note/i.test(a.body), "no verification note");
   req(CATEGORY_VALUES.includes(a.category), `category "${a.category}" not in allowed list`);
   req(SUBCATEGORY_VALUES.includes(a.subcategory), `subcategory "${a.subcategory}" not in allowed list`);
+  req(categoryOf(a.subcategory) === a.category, `subcategory "${a.subcategory}" does not belong to category "${a.category}"`);
+  req(String(a.seoTitle || "").length <= SEO_TITLE_MAX, `seoTitle ${String(a.seoTitle || "").length}c > ${SEO_TITLE_MAX}`);
   req(PILLAR_VALUES.includes(a.pillar), `pillar "${a.pillar}" not in allowed list`);
   req(!a.service || SERVICE_VALUES.includes(a.service), `service "${a.service}" not in allowed list`);
   const links = a.body.match(/\]\((https?:\/\/[^)\s]+)\)/g) || [];
@@ -283,7 +304,7 @@ function frontmatter(a) {
   // 2) topic selection
   const topicPrompt = `You pick ONE blog topic for INASOFT (inasoft.id) — Indonesian IT company for software development, AI engineering, and digital transformation; readers: business owners and tech managers in Indonesia; pillars: AI engineering, modern software development, business software, cloud & DevOps. Pick the signal with the strongest, most durable angle for that audience.
 Reply with ONLY this JSON (no prose):
-{"topic":"short topic (Bahasa Indonesia)","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"<= 50 chars","description":"120-160 chars","slug":"kebab-case-slug","lang":"id","service":"one of: ${SERVICE_VALUES.join("|")}","category":"one of: ${CATEGORY_VALUES.join("|")}","subcategory":"one of: ${SUBCATEGORY_VALUES.join("|")} (must belong to category)","pillar":"one of: ${PILLAR_VALUES.join("|")}","coverAlt":"what the cover diagram shows"}
+{"topic":"short topic (Bahasa Indonesia)","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"<= 50 chars","description":"120-160 chars","slug":"kebab-case-slug","lang":"id","service":"one of: ${SERVICE_VALUES.join("|")}","category":"one of: ${CATEGORY_VALUES.join("|")}","subcategory":"must belong to the chosen category — ${Object.entries(SUBCATEGORIES_BY_CATEGORY).map(([c, subs]) => `${c}: ${subs.join("|")}`).join("; ")}","pillar":"one of: ${PILLAR_VALUES.join("|")}","coverAlt":"what the cover diagram shows"}
 Avoid all of these existing posts: ${corpus.slice(0, 80).map((c) => c.title).join(" | ")}
 Signals:
 ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.slice(0, 160)} (${s.signals})`).join("\n")}`;
@@ -318,7 +339,6 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
 
   // 3) article body (metadata already produced in the topic call)
   const existingLinks = corpus.slice(0, 40).map((c) => `/blog/${c.slug} — ${c.title}`).join("\n");
-  const existingSlugs = corpusSlugs;
   const bodyPrompt = `Write the body of one INASOFT (inasoft.id) blog article in Bahasa Indonesia. Voice: first person, senior full-stack and AI engineer from INASOFT — practical, specific, honest about uncertainty, no marketing copy, no hype.
 Topic: ${topic.topic}. Keyword: "${meta.keyword}". Angle: ${topic.angle}. Title: ${meta.title}.
 Requirements:
@@ -425,17 +445,23 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   // 8) commit + PR (skipped in DRY_RUN)
   if (DRY_RUN) { console.log("=== DRY RUN — would open PR ==="); console.log(`title: content: add ${article.slug}`); console.log(`branch: blog/${article.slug}`); console.log(`description: ${article.description}`); return; }
   if (!INASOFT_PAT) await fail("INASOFT_PAT not set");
-  const git = (args) => execSync(`git ${args}`, { cwd: SITE_DIR, stdio: "pipe", env: { ...process.env, GH_TOKEN: INASOFT_PAT } }).toString();
+  const gitEnv = { ...process.env, GH_TOKEN: INASOFT_PAT };
+  const git = (args) => execFileSync("git", args, { cwd: SITE_DIR, stdio: "pipe", env: gitEnv }).toString();
   const prBodyPath = join(SITE_DIR, ".pr-body.md");
   const branch = `blog/${article.slug}`;
-  try { git(`checkout -B ${branch}`); } catch (e) { await fail(`git checkout: ${String(e.message).slice(0, 200)}`); return; }
-  git("add src/content/blog src/assets/blog");
-  git(`-c user.name="inasoft-bot" -c user.email="bot@inasoft.id" commit -m "content: add ${article.slug}"`);
-  git(`push -u origin ${branch}`);
+  // Refuse to clobber an existing remote branch (could be a human's review edits); fail early instead.
+  try {
+    const remote = git(["ls-remote", "--heads", "origin", branch]).trim();
+    if (remote) { await fail(`remote branch ${branch} already exists (likely from a previous run); refusing to force-push — delete it or resolve the slug collision yourself, then re-run`); return; }
+  } catch { /* ls-remote itself failed; let push report the real error */ }
+  try { git(["checkout", "-B", branch]); } catch (e) { await fail(`git checkout: ${String(e.message).slice(0, 200)}`); return; }
+  git(["add", "src/content/blog", "src/assets/blog"]);
+  git(["-c", "user.name=inasoft-bot", "-c", "user.email=bot@inasoft.id", "commit", "-m", `content: add ${article.slug}`]);
+  git(["push", "-u", "origin", branch]);
   const prBody = `## Summary\n- Article: **${article.title}** (keyword: ${article.keyword}, ~${v.wordCount} words)\n- Service angle: ${article.service || "(none)"}\n- Generated by the inasoft-blog-writer pilot pipeline from signals + corpus review; **requires human review before merge**.\n\n## Sources\n- Topic from signals; external links in the article are HEAD-verified.\n\n## Validation\n- [x] astro check && astro build passed\n- [x] description ${article.description.length}c · keyword in title/desc/intro\n- [x] ${v.links.length} external links HEAD-checked (${dead} dead)\n- [ ] **Human: verify version numbers, code examples run, and the voice matches the site.**\n\nDO NOT MERGE WITHOUT REVIEW.`;
   writeFileSync(prBodyPath, prBody);
-  const pr = execSync(`gh pr create --base main --head ${branch} --title "content: add ${article.slug}" --body-file ${prBodyPath}`, { cwd: SITE_DIR, env: { ...process.env, GH_TOKEN: INASOFT_PAT }, stdio: "pipe" }).toString().trim();
-  try { require('node:fs').unlinkSync(prBodyPath); } catch {}
+  const pr = execFileSync("gh", ["pr", "create", "--base", "main", "--head", branch, "--title", `content: add ${article.slug}`, "--body-file", prBodyPath], { cwd: SITE_DIR, env: gitEnv, stdio: "pipe" }).toString().trim();
+  try { unlinkSync(prBodyPath); } catch {}
   console.log("PR opened:", pr);
   // The PR is the deliverable; a Slack summary failure (e.g. channel_not_found) must not fail the run.
   try { await postToSlack([`🖌️ _INASOFT draft PR ready_\n*${article.title}*\n→ ${pr}\n${v.wordCount} words · keyword: ${article.keyword} · needs your review before merge.`]); }

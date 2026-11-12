@@ -2,6 +2,21 @@
 // Production uses OpenRouter (preset `@preset/ai-scheduler`) with Groq and CF as fallbacks.
 // Local development uses Ollama (`gemma4:e2b` by default; override with OLLAMA_MODEL).
 // Never commit API keys — pass them via environment variables or .dev.vars (gitignored).
+//
+// Env:
+//   AI_PROVIDER    primary provider (default "openrouter")
+//   AI_FALLBACKS   comma-separated fallbacks (default "groq,cloudflare" when unset;
+//                  empty string forces no fallbacks). Providers without credentials
+//                  are skipped.
+//   AI_MODEL       model override for the PRIMARY provider only; fallbacks always
+//                  use their own <PROVIDER>_MODEL default (an OpenRouter preset id
+//                  is meaningless to Groq/CF).
+//   AI_TIMEOUT_MS  per-request timeout in milliseconds (default 90000; covers long
+//                  article bodies). On timeout the provider is skipped and the
+//                  chain falls through to the next one.
+//   <PROVIDER>_MODEL  per-provider model override (CLOUDFLARE_MODEL, GROQ_MODEL,
+//                  OPENROUTER_MODEL, GEMINI_MODEL, CEREBRAS_MODEL, MISTRAL_MODEL,
+//                  OLLAMA_MODEL).
 
 export const PROVIDERS = {
   cloudflare: { name: "cloudflare", baseURL: () => `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID || ""}/ai/v1`, key: () => process.env.CF_API_TOKEN || "", model: () => process.env.CLOUDFLARE_MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast" },
@@ -13,13 +28,14 @@ export const PROVIDERS = {
   ollama:     { name: "ollama",     baseURL: () => process.env.OLLAMA_BASE_URL || "http://localhost:11434/v1", key: () => process.env.OLLAMA_API_KEY || "ollama", model: () => process.env.OLLAMA_MODEL || "gemma4:e2b", think: false },
 };
 
-export const AI_PROVIDER = (process.env.AI_PROVIDER || "groq").toLowerCase();
+export const AI_PROVIDER = (process.env.AI_PROVIDER || "openrouter").toLowerCase();
 export const AI_MODEL = process.env.AI_MODEL || "";
-export const AI_FALLBACKS = (process.env.AI_FALLBACKS || "")
+export const AI_FALLBACKS = (process.env.AI_FALLBACKS === undefined ? "groq,cloudflare" : process.env.AI_FALLBACKS)
   .toLowerCase()
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
+export const AI_TIMEOUT_MS = Math.max(1, parseInt(process.env.AI_TIMEOUT_MS, 10) || 90_000);
 
 export function providerChain() {
   const chain = [AI_PROVIDER];
@@ -49,13 +65,14 @@ export async function callModel(promptOrOpts, opts = {}) {
     if (!p) { errors.push(`${name}: unknown provider`); continue; }
     const key = p.key();
     if (!key && name !== "ollama") { console.log(`ai: skip ${name} (no credentials)`); continue; }
-    const model = AI_MODEL || p.model();
+    const model = name === AI_PROVIDER && AI_MODEL ? AI_MODEL : p.model();
     try {
       const payload = { model, messages, max_tokens: maxTokens, temperature, ...(p.think !== undefined ? { think: p.think } : {}), ...(p.jsonMode && expectJSON && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}), ...(name === "openrouter" ? { reasoning: { effort: process.env.OPENROUTER_REASONING_EFFORT || "none" } } : {}) };
       const doFetch = (body) => fetch(`${p.baseURL()}/chat/completions`, {
         method: "POST",
         headers: { "Authorization": `Bearer ${p.key()}`, "Content-Type": "application/json" },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(AI_TIMEOUT_MS),
       });
       let res = await doFetch(payload);
       if (!res.ok) {

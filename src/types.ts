@@ -9,6 +9,7 @@ export interface Env {
   AI_OUTPUT_TOKEN_LIMIT: string;
   MANUAL_RUN_TOKEN?: string;
   GITHUB_PAT?: string;
+  QUALITY_AI_MODEL?: string;
 }
 
 export interface SchedulerRow {

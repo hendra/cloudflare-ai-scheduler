@@ -1,6 +1,10 @@
 name: inasoft-news-digest
 
-# INASOFT daily technology/AI digest → Slack #news (enabled via D1 row, cron '30 2 * * *')
+# INASOFT daily technology/AI digest → Slack #news
+# scripts/inasoft-news-digest.mjs composes the digest via the AI chain
+# (OpenRouter preset → Groq → Cloudflare, via scripts/ai-providers.mjs).
+# Triggered by the Cloudflare Worker scheduler (D1 row, cron '30 2 * * *')
+# via workflow_dispatch.
 
 on:
   workflow_dispatch:
@@ -23,33 +27,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-      SLACK_NEWS_CHANNEL_ID: ${{ secrets.SLACK_NEWS_CHANNEL_ID }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       AI_PROVIDER: openrouter
       AI_FALLBACKS: openrouter,groq,cloudflare
       AI_MODEL: ${{ vars.AI_MODEL }}
       GROQ_MODEL: ${{ vars.GROQ_MODEL }}
-      DRY_RUN: ${{ inputs.dry_run }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Node 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
 
       - name: Run digest pipeline
         run: node scripts/inasoft-news-digest.mjs
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_NEWS_CHANNEL_ID: ${{ secrets.SLACK_NEWS_CHANNEL_ID }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
 
       - name: Notify Slack failure
         if: failure() && env.DRY_RUN != 'true' && !hashFiles('failure-posted')
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_NEWS_CHANNEL_ID: ${{ secrets.SLACK_NEWS_CHANNEL_ID }}
         run: |
+          TEXT="⚠️ INASOFT news digest failed — see https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           curl -sS -X POST https://slack.com/api/chat.postMessage \
             -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
             -H "Content-Type: application/json; charset=utf-8" \
-            -d '{"channel":"'$SLACK_NEWS_CHANNEL_ID'","text":"⚠️ INASOFT news digest failed — see https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"}'
+            -d "$(jq -n --arg ch "${SLACK_NEWS_CHANNEL_ID}" --arg text "${TEXT}" '{channel:$ch, text:$text}')"

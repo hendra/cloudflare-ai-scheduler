@@ -37,7 +37,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 - **AI model availability changes.** `DEFAULT_AI_MODEL` (`@cf/google/gemma-4-26b-a4b-it`) must be verified; `QUALITY_AI_MODEL` empty = all tasks use the lightweight model. Per-job `input_json.model` must start with `@cf/`.
 - **`MAX_AI_RUNS_PER_DAY`** is a reserved-attempt counter, not a Neuron meter.
 - **`force: true`** on `executeJob` bypasses `enabled`.
-- **Groq is the fallback free brain**; production primary is **OpenRouter `@preset/ai-scheduler`** (`openai/gpt-oss-20b` is unusable for structured JSON on free keys; use `openai/gpt-oss-20b` via OpenRouter). Cloudflare Neurons are shared and exhaust daily (~10k/day).
+- **Groq is the fallback free brain**; production primary is **OpenRouter `@preset/ai-scheduler`** (`openai/gpt-oss-20b` returns empty completions on Groq free keys, so it is not used as the Groq fallback — the code default Groq model is `llama-3.1-8b-instant`; the OpenRouter preset is what production uses). Cloudflare Neurons are shared and exhaust daily (~10k/day).
 - **Astro schema gates the pipelines** — if a generated `.md` fails `astro build`, the run aborts with a ⚠️ Slack note, never a bad PR.
 - **We Work Remotely is Cloudflare-gated** (empty 301). Jobs digest lists it as ❌ in the footer.
 - **Typecheck covers `src/**/*.ts` only**; new files outside `src/` aren't checked unless `tsconfig.json` is updated.

@@ -12,7 +12,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler — and, since late 2026
 | RailsDev.io blog writer (`railsdev-blog-writer` + `-1130`, `-1620`) | 07:45 + 11:30 + 16:20 WIB | PR on `hendra/railsdev-site` | **enabled** |
 | FullstackWeb.dev blog writer (`fullstackweb-blog-writer` + `-1130`, `-1620`) | 07:45 + 11:30 + 16:20 WIB | PR on `hendra/fullstackwebdev-site` | **enabled** |
 | INASOFT blog writer (`inasoft-blog-writer` + `-1130`, `-1620`) | 07:45 + 11:30 + 16:20 WIB | PR on `hendra/inasoft-site` | **enabled** |
-| IG Reel pipeline (`ig-reel-daily` + 3 sibling rows) | `15 1,45 4,35 9,30 12 * * *` → real: 08:15, 11:45, 16:35, 19:30 WIB | Instagram @kaliajatau.id via Buffer | **enabled** |
+| IG Reel pipeline (`ig-reel-daily` + 3 sibling rows) | 4 rows — `15 1`, `45 4`, `35 9`, `30 12` UTC (08:15, 11:45, 16:35, 19:30 WIB) | Instagram @kaliajatau.id via Buffer | **enabled** |
 
 Pipelines are deterministic. Most are zero-dependency Node 20 scripts (one file each, plus `scripts/ai-providers.mjs` / `scripts/make-cover.py`); the IG Reel is a Python orchestrator (`scripts/ig_reel_daily.py`; pip deps installed in the workflow). No agent tool-calling; 1–2 LLM completions per run.
 
@@ -23,7 +23,7 @@ Pipelines are deterministic. Most are zero-dependency Node 20 scripts (one file 
 Two dispatch paths share the D1 `schedulers` table:
 
 1. **Worker dispatcher** (this repo, `src/index.ts`): cron → D1 due rows → Queue → `executeJob` → Workers AI / RSS / HTTP / `github_actions_trigger` → D1 history.
-2. **GitHub Actions pipelines** (`scripts/*.mjs` called from `.github/workflows/*.yml`): triggered by cron (independent of the Worker) or `workflow_dispatch`. They are **not** routed through the Worker's queue.
+2. **GitHub Actions pipelines** (`scripts/*.mjs` called from `.github/workflows/*.yml`): `workflow_dispatch` only, invoked by the Worker scheduler (D1 `schedulers` rows where `job_type = github_actions_trigger`). They are **not** routed through the Worker's queue.
 
 AI provider chain (all pipelines): `AI_PROVIDER` (default `openrouter`) → `AI_FALLBACKS` (`openrouter,groq,cloudflare`) → skip providers without credentials; retry without `response_format` on Groq `json_validate_failed`.
 
@@ -60,7 +60,7 @@ npm run typecheck && npm run deploy
 
 ## Managing jobs
 
-All admin is via D1 SQL through Wrangler or `/api/*` with `Authorization: Bearer $MANUAL_RUN_TOKEN`. See `docs/status.md`.
+All admin is via D1 SQL through Wrangler or `/api/*` with `Authorization: Bearer $MANUAL_RUN_TOKEN` — **every** `/api/*` route (reads included) requires the bearer token, checked in constant time. See `docs/status.md`.
 
 ```bash
 npx wrangler d1 execute scheduler-db --remote --command \

@@ -1,12 +1,11 @@
 name: rails-job-search
 
 # Rails — Remote Job Search → Slack #jobs
-# Deterministic pipeline (Option A pattern, like github-trending): runs
-# scripts/rails-job-search.mjs, which fetches Remotive + Remote OK + HN
+# Runs scripts/rails-job-search.mjs: fetches Remotive + Remote OK + HN
 # "Who is hiring" (We Work Remotely is Cloudflare-gated, skipped), scores
-# candidates with one AI completion, and posts the digest to #jobs.
-# Note: `prompts/rails-job-search.md` remains the human-readable spec;
-# the script is its executable form.
+# candidates via the AI chain (OpenRouter preset → Groq → Cloudflare,
+# via scripts/ai-providers.mjs), and posts the digest to #jobs.
+# `prompts/rails-job-search.md` remains the human-readable spec.
 
 on:
   workflow_dispatch:
@@ -29,37 +28,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
       AI_PROVIDER: openrouter
       AI_FALLBACKS: openrouter,groq,cloudflare
       AI_MODEL: ${{ vars.AI_MODEL }}
       GROQ_MODEL: ${{ vars.GROQ_MODEL }}
-      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-      SLACK_JOBS_CHANNEL_ID: ${{ secrets.SLACK_JOBS_CHANNEL_ID }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      DRY_RUN: ${{ inputs.dry_run }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Node 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
 
       - name: Run job search pipeline
         run: node scripts/rails-job-search.mjs
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_JOBS_CHANNEL_ID: ${{ secrets.SLACK_JOBS_CHANNEL_ID }}
 
       - name: "Notify failure to Slack #jobs"
         if: failure() && env.DRY_RUN != 'true' && !hashFiles('failure-posted')
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_JOBS_CHANNEL_ID: ${{ secrets.SLACK_JOBS_CHANNEL_ID }}
         run: |
+          TEXT="⚠️ Rails job search failed and no note was posted — see https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           curl -sS -X POST https://slack.com/api/chat.postMessage \
             -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
             -H "Content-Type: application/json; charset=utf-8" \
-            -d "{\"channel\": \"${SLACK_JOBS_CHANNEL_ID}\", \"text\": \"⚠️ Rails job search failed and no note was posted — see https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}\"}"
+            -d "$(jq -n --arg ch "${SLACK_JOBS_CHANNEL_ID}" --arg text "${TEXT}" '{channel:$ch, text:$text}')"

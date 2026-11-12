@@ -1,6 +1,6 @@
 # Production status — Cloudflare AI Scheduler
 
-**Last updated:** 2026-11-11 — `github-trending-weekly` enabled (Mon 07:10 WIB); **`ig-reel-daily` enabled (17:15 WIB), first Reel confirmed `sent` (https://www.instagram.com/reel/DflBHH1jFFC/)**; image fallback chain added
+**Last updated:** 2026-11-12 — hardening pass after full code review: `/api/*` routes all require the bearer token; dispatcher claims execution rows (queue re-delivery safe); overdue runs >15 min skipped and re-armed from `now`; migration `0018_production_state` brings the D1 rows in line with production (all 18 `github_actions_trigger`, `enabled=1`); pipeline scripts fail jobs only when Slack accepts the failure note (`failure-posted` contract); IG kit vendored into `scripts/ig-kit/`; pip/actions pinned. Also: `github-trending-weekly` enabled 2026-11-11 (Mon 07:10 WIB); **`ig-reel-daily` enabled (08:15 WIB), first Reel confirmed `sent` (https://www.instagram.com/reel/DflBHH1jFFC/)**; image fallback chain added.
 **Purpose:** what is running, where secrets live, and the non-obvious fixes that make it work.
 If you change something here, update this file.
 
@@ -44,6 +44,7 @@ npx wrangler d1 execute scheduler-db --remote --command \
 | `github-trending` | `.github/workflows/github-trending.yml` | daily top-10 → #news |
 | `github-trending-weekly` | `.github/workflows/github-trending-weekly.yml` | weekly top-10 → #news |
 | `rails-job-search` | `.github/workflows/rails-job-search.yml` | daily jobs digest → #jobs |
+| `inasoft-news-digest` | `.github/workflows/inasoft-news-digest.yml` | daily tech/AI digest → #news |
 | `railsdev-blog-writer` | `.github/workflows/railsdev-blog-writer.yml` | draft PR on railsdev-site |
 | `fullstackweb-blog-writer` | `.github/workflows/fullstackweb-blog-writer.yml` | draft PR on fullstackwebdev-site |
 | `inasoft-blog-writer` | `.github/workflows/inasoft-blog-writer.yml` | Bahasa Indonesia draft PR on inasoft-site |
@@ -53,7 +54,9 @@ npx wrangler d1 execute scheduler-db --remote --command \
 
 **GitHub repo secrets** (cloudflare-ai-scheduler): `CF_ACCOUNT_ID`, `CF_API_TOKEN`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` (production `@preset/ai-scheduler`), `RAILSDEV_PAT`, `FULLSTACKWEB_PAT`, `INASOFT_PAT` (Contents RW + PR RW, each scoped to its site), `SLACK_BOT_TOKEN` (xoxb, `chat:write`), `SLACK_NEWS_CHANNEL_ID`, `SLACK_JOBS_CHANNEL_ID`, `SLACK_RAILSDEV_CHANNEL_ID`, `SLACK_FULLSTACKWEBDEV_CHANNEL_ID`, `SLACK_INASOFT_CHANNEL_ID`, **IG Reel:** `BUFFER_ACCESS_TOKEN`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `POLLINATIONS_SECRET_KEY`, plus (optional, currently unusable on free tier) `GOOGLE_API_KEY`, `GOOGLE_IMAGE_MODEL`, `HF_TOKEN`, `HF_IMAGE_MODEL`.
 
-**Actions variables:** `GROQ_MODEL` (deleted; code default `openai/gpt-oss-20b`), `PUBLIC_FORMSPREE_FORM_ID` (`xaeeywav`, public), `AI_PROVIDER`, `AI_FALLBACKS` (unset; code defaults), plus optional `BUFFER_CHANNEL_ID` / `BUFFER_ORG_ID` (default to the playbook values) and `IMAGE_ORDER` for the IG Reel image chain.
+**Actions variables:** `GROQ_MODEL` (unset; code default `llama-3.1-8b-instant`), `PUBLIC_FORMSPREE_FORM_ID` (`xaeeywav`, public), `AI_PROVIDER` (unset; code default `openrouter`), `AI_FALLBACKS` (unset; code default `groq,cloudflare`), plus optional `BUFFER_CHANNEL_ID` / `BUFFER_ORG_ID` (default to the playbook values) and `IMAGE_ORDER` for the IG Reel image chain.
+
+**Read routes:** every `/api/*` GET (`/api/schedulers`, `/api/executions`, `/api/usage`) requires `Authorization: Bearer $MANUAL_RUN_TOKEN` (constant-time comparison). Set `MANUAL_RUN_TOKEN` via `wrangler secret put`.
 
 **Worker secrets** (`wrangler secret put`): `GITHUB_PAT` (dispatch), `MANUAL_RUN_TOKEN`.
 
