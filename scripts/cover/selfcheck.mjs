@@ -3,6 +3,10 @@
 import assert from "node:assert/strict";
 import { escapeXml, parseCoverSpec, coverAltFromSpec, coverSpecPrompt, STUB_SPEC } from "./spec.mjs";
 import { TEMPLATES } from "./templates.mjs";
+import { renderCover, pngSize, findChrome } from "./render.mjs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const good = {
   eyebrow: "rails pgvector",
@@ -48,5 +52,34 @@ assert.ok(!TEMPLATES.fullstackweb.render(amp).includes("R&amp;D Ops"), "fullstac
 assert.deepEqual([TEMPLATES.fullstackweb.width, TEMPLATES.fullstackweb.scale], [1200, 2]);
 const five = parseCoverSpec(JSON.stringify({ ...good, diagram: { nodes: "ABCDE".split("").map((label) => ({ label, lines: ["x = 1", "y = 2"] })), edges: [[0, 1], [1, 2], [2, 3], [3, 4], [0, 4]] } })).spec;
 for (const t of Object.values(TEMPLATES)) assert.ok(!/NaN|undefined/.test(t.render(five)), "no NaN/undefined in output");
+
+// ---- renderer ----
+const ihdr = Buffer.alloc(24);
+Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(ihdr);
+ihdr.write("IHDR", 12, "ascii"); ihdr.writeUInt32BE(1600, 16); ihdr.writeUInt32BE(900, 20);
+const fake = join(tmpdir(), "cover-selfcheck-ihdr.png");
+writeFileSync(fake, ihdr);
+assert.deepEqual(pngSize(fake), [1600, 900]);
+
+if (findChrome()) {
+  const outDir = process.env.COVER_SAMPLES || join(tmpdir(), "cover-samples");
+  const siteDir = process.env.COVER_SITE_DIR || mkdtempSync(join(tmpdir(), "cover-site-"));
+  mkdirSync(outDir, { recursive: true });
+  const ina = parseCoverSpec(JSON.stringify({
+    eyebrow: "AI agents", title: "AI Agent", subtitle: ["Bukan sekadar menjawab,", "tetapi menyelesaikan tugas"],
+    bullets: ["Merencanakan langkah", "Memanggil tool lewat API", "Minta bantuan manusia"],
+    diagram: { nodes: [{ label: "Tujuan", sub: "apa yang diminta" }, { label: "AI agent", sub: "LLM + memori", kind: "hub" }, { label: "Panggil tool", sub: "CRM · email · database", kind: "accent" }, { label: "Hasil diperiksa", sub: "atau tanya manusia" }], edges: [[0, 1], [1, 2], [2, 3], [1, 3]] },
+  })).spec;
+  const longRd = parseCoverSpec(JSON.stringify({ ...good, eyebrow: "rails security", title: "Active Record Encryption Keys" })).spec;
+  const cases = [["railsdev", r.spec, 1600, 900], ["railsdev-long", longRd, 1600, 900], ["inasoft", ina, 1600, 900], ["fullstackweb", r.spec, 2400, 1260], ["fullstackweb-hub", { ...r.spec, diagram: { nodes: [...r.spec.diagram.nodes, { label: "Cited answer", sub: "", kind: "card", lines: [] }].map((n, i) => (i === 2 ? { ...n, kind: "hub" } : n)), edges: [[0, 1], [1, 2], [2, 3]] } }, 2400, 1260]];
+  for (const [name, spec, w, h] of cases) {
+    const outPath = join(outDir, `${name}.png`);
+    renderCover({ site: name.split("-")[0], spec, siteDir, outPath });
+    assert.deepEqual(pngSize(outPath), [w, h], name);
+  }
+  console.log(`rendered ${cases.length} samples into ${outDir}`);
+} else {
+  console.log("chrome not found: render skipped");
+}
 
 console.log("cover self-check: ok");
