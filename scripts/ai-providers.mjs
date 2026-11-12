@@ -2,14 +2,14 @@
 // Primary: OpenCode Console (opencode.ai) — OpenAI-compatible chat-completions
 // at `https://opencode.ai/inference/openai/v1` (pay-as-you-go, needs credits on
 // the workspace) or `https://opencode.ai/inference/go/openai/v1` (Go plan).
-// Fallback: OpenRouter (preset `@preset/ai-scheduler`).
+// Fallbacks: OpenRouter (preset `@preset/ai-scheduler`) → Groq → Gemini → Cloudflare.
 // Never commit API keys — pass them via environment variables or .dev.vars (gitignored).
 //
 // Env:
 //   AI_PROVIDER    primary provider (default "opencode")
-//   AI_FALLBACKS   comma-separated fallbacks (default "openrouter" when unset;
-//                  empty string forces no fallbacks). Providers without credentials
-//                  are skipped.
+//   AI_FALLBACKS   comma-separated fallbacks (default "openrouter,groq,gemini,cloudflare"
+//                  when unset; empty string forces no fallbacks). Providers without
+//                  credentials are skipped.
 //   AI_MODEL       model override for the PRIMARY provider only; fallbacks always
 //                  use their own <PROVIDER>_MODEL default.
 //   AI_TIMEOUT_MS  per-request timeout in milliseconds (default 90000; covers long
@@ -21,15 +21,26 @@
 //                      — pay-as-you-go; the Go plan is
 //                      "https://opencode.ai/inference/go/openai/v1").
 //   OPENROUTER_API_KEY / OPENROUTER_MODEL  OpenRouter provider.
+//   GROQ_API_KEY / GROQ_MODEL              Groq provider.
+//   GEMINI_API_KEY (or GOOGLE_API_KEY) / GEMINI_MODEL   Gemini provider.
+//   CF_ACCOUNT_ID / CF_API_TOKEN / CLOUDFLARE_MODEL     Cloudflare Workers AI provider.
+//   CEREBRAS_API_KEY / MISTRAL_API_KEY / OLLAMA_BASE_URL  extra providers (skipped
+//                  when unconfigured).
 
 export const PROVIDERS = {
   opencode:   { name: "opencode",   baseURL: () => process.env.OPENCODE_BASE_URL || "https://opencode.ai/inference/openai/v1", key: () => process.env.OPENCODE_API_KEY || "", model: () => process.env.OPENCODE_MODEL || "glm-5.3-flash" },
   openrouter: { name: "openrouter", baseURL: () => "https://openrouter.ai/api/v1",  key: () => process.env.OPENROUTER_API_KEY    || "", model: () => process.env.OPENROUTER_MODEL  || "@preset/ai-scheduler", jsonMode: false },
+  groq:       { name: "groq",       baseURL: () => "https://api.groq.com/openai/v1", key: () => process.env.GROQ_API_KEY || "", model: () => process.env.GROQ_MODEL || "openai/gpt-oss-120b", jsonMode: true },
+  gemini:     { name: "gemini",     baseURL: () => "https://generativelanguage.googleapis.com/v1beta/openai", key: () => process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "", model: () => process.env.GEMINI_MODEL || "gemini-3.5-flash", jsonMode: true },
+  cloudflare: { name: "cloudflare", baseURL: () => `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID || ""}/ai/v1`, key: () => process.env.CF_API_TOKEN || "", model: () => process.env.CLOUDFLARE_MODEL || "@cf/openai/gpt-oss-120b" },
+  cerebras:   { name: "cerebras",   baseURL: () => "https://api.cerebras.ai/v1", key: () => process.env.CEREBRAS_API_KEY || "", model: () => process.env.CEREBRAS_MODEL || "llama-3.3-70b", jsonMode: true },
+  mistral:    { name: "mistral",    baseURL: () => "https://api.mistral.ai/v1", key: () => process.env.MISTRAL_API_KEY || "", model: () => process.env.MISTRAL_MODEL || "mistral-small-latest", jsonMode: true },
+  ollama:     { name: "ollama",     baseURL: () => process.env.OLLAMA_BASE_URL || "http://localhost:11434/v1", key: () => process.env.OLLAMA_API_KEY || "ollama", model: () => process.env.OLLAMA_MODEL || "gemma4:e2b", think: false },
 };
 
 export const AI_PROVIDER = (process.env.AI_PROVIDER || "opencode").toLowerCase();
 export const AI_MODEL = process.env.AI_MODEL || "";
-export const AI_FALLBACKS = (process.env.AI_FALLBACKS === undefined ? "openrouter" : process.env.AI_FALLBACKS)
+export const AI_FALLBACKS = (process.env.AI_FALLBACKS === undefined ? "openrouter,groq,gemini,cloudflare" : process.env.AI_FALLBACKS)
   .toLowerCase()
   .split(",")
   .map((s) => s.trim())

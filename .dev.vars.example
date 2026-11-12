@@ -13,8 +13,13 @@ SLACK_FULLSTACKWEBDEV_CHANNEL_ID=
 OPENCODE_API_KEY=
 OPENCODE_MODEL=glm-5.3-flash
 OPENROUTER_API_KEY=
+GROQ_API_KEY=
+GEMINI_API_KEY=
 AI_PROVIDER=opencode
-AI_FALLBACKS=openrouter
+AI_FALLBACKS=openrouter,groq,gemini,cloudflare
+# Ollama (local development only)
+OLLAMA_BASE_URL=http://localhost:11434/v1
+OLLAMA_MODEL=gemma4:e2b
 INASOFT_PAT=
 SLACK_INASOFT_CHANNEL_ID=
 # IG Reel pipeline (GitHub Actions: image gen chain — CF → Google AI Studio → HF → Pollinations)
