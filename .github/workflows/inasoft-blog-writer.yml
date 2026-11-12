@@ -58,8 +58,8 @@ jobs:
         working-directory: site
         run: npm ci --no-audit --no-fund --ignore-scripts
 
-      - name: Install Pillow (for cover generation)
-        run: pip3 install Pillow==13.0.0
+      - name: Check headless Chrome (for cover rendering)
+        run: google-chrome --version
 
       - name: Run blog writer
         working-directory: scheduler

@@ -4,6 +4,7 @@ import { mkdirSync, openSync, readSync, closeSync, rmSync, writeFileSync, exists
 import { basename, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { TEMPLATES } from "./templates.mjs";
+import { STUB_SPEC, coverAltFromSpec, coverSpecPrompt, parseCoverSpec } from "./spec.mjs";
 
 const CHROMES = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"];
 
@@ -50,4 +51,22 @@ export function renderCover({ site, spec, siteDir, outPath }) {
   if (w !== t.width * t.scale || h !== t.height * t.scale) {
     throw new Error(`cover: expected ${t.width * t.scale}x${t.height * t.scale}, got ${w}x${h}`);
   }
+}
+
+// Writer entry point: ask the AI for a cover spec (≤ 3 attempts), render it, return coverAlt.
+// Throws on failure; the writer turns that into fail() (Slack note, no PR).
+export async function generateCover({ site, article, siteDir, outPath, callModel, stub = false }) {
+  let spec = stub ? STUB_SPEC : null;
+  let errs = [];
+  for (let attempt = 1; !spec && attempt <= 3; attempt++) {
+    const hint = errs.length ? `\n\nYour previous reply was rejected: ${errs.join("; ")}. Fix these and reply with ONLY the JSON.` : "";
+    try {
+      const r = parseCoverSpec(await callModel(coverSpecPrompt({ site, title: article.title, keyword: article.keyword, body: article.body }) + hint, { maxTokens: 2048 }));
+      if (r.ok) spec = r.spec; else errs = r.errs;
+    } catch (e) { errs = [e.message]; }
+    if (!spec) console.warn(`cover spec attempt ${attempt} rejected: ${errs.join("; ")}`);
+  }
+  if (!spec) throw new Error(`cover spec generation failed after 3 attempts: ${errs.join("; ")}`.slice(0, 400));
+  renderCover({ site, spec, siteDir, outPath });
+  return coverAltFromSpec(spec);
 }
