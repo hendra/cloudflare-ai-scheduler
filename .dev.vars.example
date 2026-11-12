@@ -2,7 +2,6 @@ D1_DATABASE_ID=
 MANUAL_RUN_TOKEN=
 CF_ACCOUNT_ID=
 CF_API_TOKEN=
-GROQ_API_KEY=
 SLACK_BOT_TOKEN=
 SLACK_JOBS_CHANNEL_ID=
 SLACK_NEWS_CHANNEL_ID=
@@ -11,9 +10,15 @@ FULLSTACKWEB_PAT=
 RAILSDEV_PAT=
 SLACK_FULLSTACKWEBDEV_CHANNEL_ID=
 # AI providers
+OPENCODE_API_KEY=
+OPENCODE_MODEL=glm-5.3-flash-free
 OPENROUTER_API_KEY=
-AI_PROVIDER=openrouter
-AI_FALLBACKS=openrouter,groq,cloudflare
+GROQ_API_KEY=
+GEMINI_API_KEY=
+# Kilo AI Gateway — optional; the kilo-auto/free tier runs without a key
+KILO_API_KEY=
+AI_PROVIDER=opencode
+AI_FALLBACKS=openrouter,groq,gemini,kilo,cloudflare
 # Ollama (local development only)
 OLLAMA_BASE_URL=http://localhost:11434/v1
 OLLAMA_MODEL=gemma4:e2b
@@ -34,7 +39,8 @@ BUFFER_ORG_ID=
 CLOUDINARY_CLOUD_NAME=
 CLOUDINARY_API_KEY=
 CLOUDINARY_API_SECRET=
-
+OLLAMA_API_KEY=
+KILO_API_KEY=
 # IG Reel note: CF_ACCOUNT_ID / CF_API_TOKEN above are used automatically —
 # scripts/ig_reel_daily.py maps them to the CF_ACCOUNT/CF_TOKEN names cf_image.py expects.
 # Only set CF_ACCOUNT / CF_TOKEN if you need a separate account for the Reel pipeline.

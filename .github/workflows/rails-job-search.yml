@@ -3,7 +3,7 @@ name: rails-job-search
 # Rails — Remote Job Search → Slack #jobs
 # Runs scripts/rails-job-search.mjs: fetches Remotive + Remote OK + HN
 # "Who is hiring" (We Work Remotely is Cloudflare-gated, skipped), scores
-# candidates via the AI chain (OpenRouter preset → Groq → Cloudflare,
+# candidates via the AI chain (OpenCode Console → OpenRouter,
 # via scripts/ai-providers.mjs), and posts the digest to #jobs.
 # `prompts/rails-job-search.md` remains the human-readable spec.
 
@@ -28,10 +28,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      AI_PROVIDER: openrouter
-      AI_FALLBACKS: openrouter,groq,cloudflare
+      AI_PROVIDER: opencode
+      AI_FALLBACKS: opencode,openrouter,groq,gemini,kilo,cloudflare
       AI_MODEL: ${{ vars.AI_MODEL }}
-      GROQ_MODEL: ${{ vars.GROQ_MODEL }}
+      OPENCODE_MODEL: ${{ vars.OPENCODE_MODEL }}
+      OPENCODE_BASE_URL: ${{ vars.OPENCODE_BASE_URL }}
       DRY_RUN: ${{ inputs.dry_run || 'false' }}
     steps:
       - name: Checkout
@@ -45,10 +46,13 @@ jobs:
       - name: Run job search pipeline
         run: node scripts/rails-job-search.mjs
         env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          KILO_API_KEY: ${{ secrets.KILO_API_KEY }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_JOBS_CHANNEL_ID: ${{ secrets.SLACK_JOBS_CHANNEL_ID }}
 

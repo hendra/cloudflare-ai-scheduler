@@ -14,12 +14,12 @@ import { PROVIDERS, providerChain, callModel } from "./ai-providers.mjs";
 //   → print (DRY_RUN) or post to Slack #news via chat.postMessage
 //
 // Env: DRY_RUN=true|false; AI_PROVIDER (default openrouter); AI_FALLBACKS
-//      (default "groq,cloudflare", comma-separated, providers without
+//      (default "opencode", comma-separated, providers without
 //      credentials are skipped); AI_MODEL (overrides the primary provider's model);
-//      AI_TIMEOUT_MS (default 90000); <PROVIDER>_MODEL per provider (CLOUDFLARE_MODEL,
-//      GROQ_MODEL, CEREBRAS_MODEL, GEMINI_MODEL, OPENROUTER_MODEL, MISTRAL_MODEL).
-// Credentials: CF_ACCOUNT_ID + CF_API_TOKEN (cloudflare), GROQ_API_KEY, CEREBRAS_API_KEY, GEMINI_API_KEY,
-//      OPENROUTER_API_KEY, MISTRAL_API_KEY. SLACK_BOT_TOKEN, SLACK_NEWS_CHANNEL_ID,
+//      AI_TIMEOUT_MS (default 90000); <PROVIDER>_MODEL per provider (OPENCODE_MODEL,
+//      OPENROUTER_MODEL).
+// Credentials: OPENROUTER_API_KEY, OPENCODE_API_KEY (opencode.ai Console).
+//      SLACK_BOT_TOKEN, SLACK_NEWS_CHANNEL_ID,
 //      GH_TOKEN (fallback + gh).
 //      AI_STUB=true  -> skip all AI calls and synthesize the analysis locally
 //      (offline testing / dry runs when the free daily Neuron allocation is
@@ -221,7 +221,7 @@ function compose({ repos, fallback, trend }) {
 (async () => {
   if (!DRY_RUN && (!SLACK_BOT_TOKEN || !SLACK_NEWS_CHANNEL_ID)) { console.error("FATAL: SLACK_BOT_TOKEN and SLACK_NEWS_CHANNEL_ID required (or set DRY_RUN=true)"); process.exit(1); }
   const usable = providerChain().filter((n) => PROVIDERS[n] && PROVIDERS[n].key());
-  if (usable.length === 0 && process.env.AI_STUB !== "true") { console.error("FATAL: no AI provider in the chain has credentials (set OPENROUTER_API_KEY/GROQ_API_KEY/CF_API_TOKEN and adjust AI_PROVIDER/AI_FALLBACKS)"); process.exit(1); }
+  if (usable.length === 0 && process.env.AI_STUB !== "true") { console.error("FATAL: no AI provider in the chain has credentials (set OPENROUTER_API_KEY/OPENCODE_API_KEY and adjust AI_PROVIDER/AI_FALLBACKS)"); process.exit(1); }
   console.log(`ai: provider chain ${providerChain().join(" -> ")} (usable: ${usable.join(", ") || "none, using AI_STUB/none"})`);
   let collected;
   try { collected = await collect(); } catch (e) { await fail(`data collection failed: ${e.message}`); return; }

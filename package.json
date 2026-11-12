@@ -15,6 +15,7 @@
     "predb:migrate:remote": "npm run gen:config",
     "db:migrate:remote": "wrangler d1 migrations apply scheduler-db --remote",
     "typecheck": "tsc --noEmit",
+    "selfcheck": "node scripts/ai-providers-selfcheck.mjs",
     "setup": "bash scripts/setup.sh"
   },
   "devDependencies": {
