@@ -63,10 +63,21 @@ TODAY = NOW.date().isoformat()
 WEEK_AGO = (NOW - dt.timedelta(days=7)).date().isoformat()
 
 ROOT = pathlib.Path(".").resolve()
-KIT = ROOT / "ig-reel-kit"
+# Vendored playbook tools (cf_image.py, render_html.py, build_reel.py), committed in
+# scripts/ig-kit/ — byte-identical to the Cloudinary ig-kit as of 2026-11-12. Never
+# downloaded at runtime: executing unpinned remote code with secrets in env is unsafe.
+KIT = pathlib.Path(__file__).resolve().parent / "ig-kit"
+KIT_FILES = ("cf_image.py", "render_html.py", "build_reel.py")
 GEN = ROOT / ".ig-reel-out"
-KIT.mkdir(exist_ok=True)
 GEN.mkdir(exist_ok=True)
+
+# Content limits (prompt below + scene layout): caption <= 400 chars, 4–5 facts,
+# fact text <= 280 chars (fits the .fact box above the source line), short title, hook <= 8 words.
+CAPTION_MAX = 400
+FACTS_MIN, FACTS_MAX = 4, 5
+FACT_TEXT_MAX = 280
+FACT_TITLE_MAX = 80
+HOOK_MAX_WORDS = 8
 
 UA = "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0"
 
@@ -112,29 +123,39 @@ def fail(reason, post_id=None):
                 + (f" (Buffer post id {post_id} — reel may still publish)" if post_id else "")
                 + f" — https://github.com/{os.environ.get('GITHUB_REPOSITORY','')}/actions/runs/{os.environ.get('GITHUB_RUN_ID','')}")
         try:
-            http_json("https://slack.com/api/chat.postMessage",
-                      {"channel": SLACK_NEWS_CHANNEL_ID, "text": text},
-                      headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}, timeout=30)
-            try:
-                writeFileSync_path = pathlib.Path("failure-posted")
-                writeFileSync_path.write_text("1")
-            except Exception:
-                pass
+            resp = http_json("https://slack.com/api/chat.postMessage",
+                             {"channel": SLACK_NEWS_CHANNEL_ID, "text": text},
+                             headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"}, timeout=30)
+            # Contract: the marker means Slack really accepted the note (HTTP 200 + ok:false is common).
+            if isinstance(resp, dict) and resp.get("ok") is True:
+                try:
+                    pathlib.Path("failure-posted").write_text("1")
+                except Exception:
+                    pass
+            else:
+                err = resp.get("error") if isinstance(resp, dict) else "non-object response"
+                print(f"failure note to Slack rejected: {err}", flush=True)
         except Exception as e:
             print(f"failure note to Slack failed: {e}", flush=True)
     sys.exit(1)
 
 
-# ---------- 1. Fetch the authoritative tool scripts ----------
-def download_kit():
-    for name in ("cf_image.py", "render_html.py", "build_reel.py"):
-        dst = KIT / name
-        try:
-            blob = http(f"https://res.cloudinary.com/opqimovw/raw/upload/ig-kit/{name}", timeout=30)
-            dst.write_bytes(blob)
-            log(f"kit: {name} downloaded ({len(blob)} bytes)")
-        except Exception as e:
-            fail(f"cannot download {name} from the Cloudinary kit: {e}")
+def guard_no_placeholder_post(image_providers=()):
+    """A placeholder reel must never reach Cloudinary/Buffer."""
+    if DRY_RUN:
+        return
+    if MOCK_IMAGES:
+        fail("PLACEHOLDER_IMAGES=true is dev-only and requires DRY_RUN=true; refusing a real post")
+    if any(p == "placeholder" for p in image_providers):
+        fail("reel contains placeholder illustrations; refusing a real post")
+
+
+# ---------- 1. Vendored tool scripts (no runtime download) ----------
+def check_kit():
+    missing = [n for n in KIT_FILES if not (KIT / n).is_file()]
+    if missing:
+        fail(f"vendored kit missing in {KIT}: {', '.join(missing)}")
+    log(f"kit: using vendored scripts from {KIT}")
 
 
 # ---------- 2. Buffer: recent posts (duplicate topic guard) ----------
@@ -207,6 +228,89 @@ def fetch_candidates():
 
 
 # ---------- 4. AI: pick findings + write Indonesian script ----------
+def truncate_word(s, n):
+    """Truncate to <= n chars at a word boundary (ellipsis-free)."""
+    s = re.sub(r"\s+", " ", str(s or "")).strip()
+    if len(s) <= n:
+        return s
+    cut = s[:n]
+    m = re.search(r"^(.*)\s[^\s]*$", cut)
+    cand = (m.group(1) if m else cut).rstrip(" ,;:-–—")
+    return cand if cand else cut.rstrip()
+
+
+def check_script(data):
+    """Validate AI output. Returns (hard, soft) violation lists.
+    Hard = must not ship; soft = safely truncatable (caption/text length).
+    Trims fact overflow to limits in place."""
+    hard, soft = [], []
+    facts = data.get("facts")
+    if not isinstance(facts, list):
+        hard.append("'facts' missing or not a list")
+        facts = []
+    else:
+        if len(facts) > FACTS_MAX:
+            log(f"  validation: trimming {len(facts)} facts to {FACTS_MAX}")
+            del facts[FACTS_MAX:]
+        if len(facts) < FACTS_MIN:
+            hard.append(f"need {FACTS_MIN}-{FACTS_MAX} facts, got {len(facts)}")
+    for i, f in enumerate(facts, 1):
+        if not isinstance(f, dict):
+            hard.append(f"fact {i} is not an object")
+            continue
+        fact_txt = str(f.get("fact") or "").strip()
+        title_txt = str(f.get("title") or "").strip()
+        if not fact_txt:
+            hard.append(f"fact {i}: missing 'fact' text")
+        elif len(fact_txt) > FACT_TEXT_MAX:
+            soft.append(f"fact {i} text {len(fact_txt)} chars (> {FACT_TEXT_MAX})")
+        if not title_txt:
+            hard.append(f"fact {i}: missing 'title'")
+        elif len(title_txt) > FACT_TITLE_MAX:
+            soft.append(f"fact {i} title {len(title_txt)} chars (> {FACT_TITLE_MAX})")
+        if not str(f.get("image_prompt") or "").strip():
+            hard.append(f"fact {i}: missing 'image_prompt'")
+        try:
+            ref = int(str(f.get("ref")).strip())
+            if ref < 1:
+                raise ValueError
+        except Exception:
+            hard.append(f"fact {i}: missing/invalid 'ref'")
+    hook = str(data.get("hook") or "").strip()
+    if hook and len(hook.split()) > HOOK_MAX_WORDS:
+        soft.append(f"hook '{hook}' is {len(hook.split())} words (> {HOOK_MAX_WORDS})")
+    caption = str(data.get("caption") or "").strip()
+    if not caption:
+        hard.append("missing 'caption'")
+    elif len(caption) > CAPTION_MAX:
+        soft.append(f"caption {len(caption)} chars (> {CAPTION_MAX})")
+    return hard, soft
+
+
+def apply_length_limits(data):
+    """Safe truncations the scene layout tolerates."""
+    data["caption"] = truncate_word(data.get("caption"), CAPTION_MAX)
+    if str(data.get("hook") or "").strip():
+        data["hook"] = " ".join(str(data["hook"]).split()[:HOOK_MAX_WORDS])
+    for f in data.get("facts") or []:
+        if not isinstance(f, dict):
+            continue
+        f["fact"] = truncate_word(f.get("fact"), FACT_TEXT_MAX)
+        f["title"] = truncate_word(f.get("title"), FACT_TITLE_MAX)
+
+
+def repair_prompt(data, violations):
+    return (
+        "Output JSON baru saja, tanpa prosa. Perbaiki skenario Reel di bawah ini agar lolos validasi.\n"
+        "Pelanggaran:\n- " + "\n- ".join(violations) + "\n"
+        f"Batas wajib: hook maks {HOOK_MAX_WORDS} kata; {FACTS_MIN}–{FACTS_MAX} fakta; "
+        f"teks fakta maks {FACT_TEXT_MAX} karakter; judul fakta maks {FACT_TITLE_MAX} karakter; "
+        f"caption maks {CAPTION_MAX} karakter; setiap fakta wajib punya ref (1-based) ke daftar kandidat asli.\n"
+        "Jangan tambah/fakta baru, jangan ubah ref. Jawab hanya JSON dengan skema yang sama.\n\n"
+        + json.dumps(data, ensure_ascii=False))
+
+
+
 def ai_json(prompt, max_tokens=2600):
     """OpenRouter preset (reasoning disabled) → Groq fallback. Returns parsed JSON."""
     attempts = []
@@ -272,9 +376,19 @@ Jawab HANYA JSON dengan skema ini (tanpa prosa):
 Daftar temuan:
 {lines}"""
     data = ai_json(prompt)
+    hard, soft = check_script(data)
+    if hard or soft:
+        log("draft: validation issues: " + "; ".join(hard + soft))
+        data = ai_json(repair_prompt(data, hard + soft))
+        hard, soft = check_script(data)
+        if hard:
+            raise RuntimeError("AI output still invalid after one repair retry: " + "; ".join(hard))
+        if soft:
+            log("draft: after repair, truncating: " + "; ".join(soft))
+    apply_length_limits(data)
     facts = data.get("facts") or []
-    if not (4 <= len(facts) <= 6):
-        raise RuntimeError(f"AI returned {len(facts)} facts (need 4–6)")
+    if not (FACTS_MIN <= len(facts) <= FACTS_MAX):
+        raise RuntimeError(f"AI returned {len(facts)} facts (need {FACTS_MIN}–{FACTS_MAX})")
     return data, candidates
 
 
@@ -603,7 +717,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.parse_args()
     log(f"DRY_RUN={DRY_RUN}  PLACEHOLDER_IMAGES={MOCK_IMAGES}  topic_hint={TOPIC_HINT or '-'}")
-    download_kit()
+    check_kit()
+    guard_no_placeholder_post()
     recent = recent_post_captions()
     candidates = fetch_candidates()
     if len(candidates) < 6:
@@ -678,6 +793,7 @@ def main():
                                     "sources": sources}))
         return
 
+    guard_no_placeholder_post(image_providers)
     missing = [k for k, v in (("CLOUDINARY_API_KEY", CLOUD_KEY), ("CLOUDINARY_API_SECRET", CLOUD_SECRET),
                               ("BUFFER_ACCESS_TOKEN", BUFFER_TOKEN)) if not v]
     if missing:
