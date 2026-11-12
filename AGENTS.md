@@ -22,7 +22,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 - Pipelines (`scripts/*.mjs`): deterministic, zero-dep Node 20 scripts driven by GitHub Actions
   (`github-trending-digest.mjs`, `rails-job-search.mjs`, `railsdev-blog-writer.mjs`, `fullstackweb-blog-writer.mjs`, `inasoft-blog-writer.mjs`, `inasoft-news-digest.mjs`).
 - AI chain (all pipelines): `AI_PROVIDER` (default `opencode` — OpenCode Console, model `glm-5.3-flash-free`) → fallbacks `opencode,openrouter,groq,gemini,kilo,cloudflare` → skip providers without keys (Kilo's free tier runs keyless); OpenCode Console (`opencode.ai`) needs `OPENCODE_API_KEY` and speaks the OpenAI chat-completions API at `https://opencode.ai/inference/openai/v1`.
-- Cover generation shared via `scripts/make-cover.py` + env overrides for branding (title, badge, gradient colors).
+- Blog covers: `scripts/cover/` — one AI cover-spec JSON (`spec.mjs`), three site skins copied from each site's oldest cover (`templates.mjs`), rendered by headless Chrome (`render.mjs`, `generateCover()`). Check: `npm run cover:selfcheck`. fullstackweb covers are title-less (owner decision).
 - D1 rows enabled (5 base + 10 multi-fire clones): `github-trending-daily`, `github-trending-weekly`, `rails-job-search-daily`, `rails-job-search-daily-2000`, `railsdev-blog-writer`, `railsdev-blog-writer-1130`, `railsdev-blog-writer-1620`, `fullstackweb-blog-writer`, `fullstackweb-blog-writer-1130`, `fullstackweb-blog-writer-1620`, `inasoft-blog-writer`, `inasoft-blog-writer-1130`, `inasoft-blog-writer-1620`, `inasoft-news-digest`, `ig-reel-daily`, `ig-reel-daily-1145`, `ig-reel-daily-1635`, `ig-reel-daily-1930`.
 
 ## Non-obvious gotchas

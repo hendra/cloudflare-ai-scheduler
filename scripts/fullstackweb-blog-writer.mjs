@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 import { callModel } from "./ai-providers.mjs";
+import { generateCover } from "./cover/render.mjs";
 // FullstackWeb.dev blog writer (pilot, PR-only) — deterministic, zero dependencies.
 //
 // Flow: fetch signals (HN front page + GitHub Trending) → load existing corpus
 //   (title/slug list, blocks duplicates) → 1 AI completion picks a topic (metadata
 //   included) → 1 AI completion writes the markdown article body (hard-validated) →
-//   cover generated via Pillow (scripts/make-cover.py) → write .md + cover into the
+//   cover rendered by headless Chrome (scripts/cover/) → write .md + cover into the
 //   site checkout → `npm run build` must pass → branch → commit → push → PR →
 //   Slack #fullstackwebdev summary. Any hard failure → Slack note, NO push, NO PR.
 //
@@ -189,21 +190,6 @@ function validateArticle(a, corpusSlugs) {
   return { ok: errs.length === 0, errs, wordCount: words, links: [...new Set(links.map((l) => l.slice(2, -1)))].slice(0, 15) };
 }
 
-// ---------- cover ----------
-function makeCover(title, outPath) {
-  execFileSync("python3", [join("scripts", "make-cover.py"), title, outPath], {
-    stdio: "pipe",
-    env: {
-      ...process.env,
-      BG_RGB: "9,13,22",
-      STOP_1_RGB: "14,165,233",
-      STOP_2_RGB: "99,102,241",
-      SITE_LABEL: "fullstackweb.dev",
-      SITE_BADGE: "FULLSTACKWEB.DEV",
-    },
-  });
-}
-
 // ---------- frontmatter ----------
 function frontmatter(a) {
   const svcLines = Array.isArray(a.services) && a.services.length > 0 ? `services: [${a.services.map((x) => `"${x}"`).join(", ")}]\n` : "";
@@ -339,7 +325,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
 
   // 5) cover
   const coverPath = join(SITE_DIR, "src/assets/blog", `${article.slug}.png`);
-  try { makeCover(article.title, coverPath); console.log("cover generated:", coverPath); } catch (e) { await fail(e.message); return; }
+  try { article.coverAlt = await generateCover({ site: "fullstackweb", article, siteDir: SITE_DIR, outPath: coverPath, callModel, stub: AI_STUB }); console.log("cover generated:", coverPath); } catch (e) { await fail(e.message); return; }
 
   // 6) write .md
   const mdPath = join(SITE_DIR, "src/content/blog", `${article.slug}.md`);
