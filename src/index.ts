@@ -7,6 +7,17 @@ const json = (data: unknown, status = 200) =>
     headers: { "content-type": "application/json; charset=utf-8" }
   });
 
+// Bearer MANUAL_RUN_TOKEN check shared by every /api/* route. Constant-time comparison
+// (crypto.subtle.timingSafeEqual) so the token can't be recovered via response timing.
+function isAuthorized(request: Request, env: Env): boolean {
+  const token = env.MANUAL_RUN_TOKEN;
+  if (!token) return false;
+  const enc = new TextEncoder();
+  const got = enc.encode(request.headers.get("authorization") ?? "");
+  const want = enc.encode(`Bearer ${token}`);
+  return got.byteLength === want.byteLength && crypto.subtle.timingSafeEqual(got, want);
+}
+
 function utcMinute(date = new Date()): string {
   const d = new Date(date);
   d.setUTCSeconds(0, 0);
@@ -306,14 +317,7 @@ export default {
 
     if (url.pathname === "/api/run" && request.method === "POST") {
       // Protect manual execution with a secret token.
-      const token = env.MANUAL_RUN_TOKEN;
-
-      if (
-        !token ||
-        request.headers.get("authorization") !== `Bearer ${token}`
-      ) {
-        return json({ error: "Unauthorized" }, 401);
-      }
+      if (!isAuthorized(request, env)) return json({ error: "Unauthorized" }, 401);
 
       let body: { schedulerId?: string };
 
@@ -392,10 +396,7 @@ export default {
     }
 
     if (url.pathname === "/api/run-all" && request.method === "POST") {
-      const token = env.MANUAL_RUN_TOKEN;
-      if (!token || request.headers.get("authorization") !== `Bearer ${token}`) {
-        return json({ error: "Unauthorized" }, 401);
-      }
+      if (!isAuthorized(request, env)) return json({ error: "Unauthorized" }, 401);
 
       const parsedLimit = Number(env.MAX_JOBS_PER_DISPATCH || "10");
       const limit = Math.max(1, Math.min(25, Number.isFinite(parsedLimit) ? parsedLimit : 10));
@@ -510,10 +511,7 @@ export default {
     }
 
     if (url.pathname.startsWith("/api/executions/") && request.method === "GET") {
-      const token = env.MANUAL_RUN_TOKEN;
-      if (!token || request.headers.get("authorization") !== `Bearer ${token}`) {
-        return json({ error: "Unauthorized" }, 401);
-      }
+      if (!isAuthorized(request, env)) return json({ error: "Unauthorized" }, 401);
 
       let id = "";
       try {
@@ -547,7 +545,12 @@ export default {
       return json({ ok: true, service: "cloudflare-ai-scheduler", timestamp: new Date().toISOString() });
     }
 
-    // Read-only operational endpoints. Protect with an Access policy before exposing publicly.
+    // Read-only operational endpoints — same bearer token as the rest of /api/*
+    // (they expose job config, AI output/error text, and usage).
+    if (url.pathname.startsWith("/api/") && !isAuthorized(request, env)) {
+      return json({ error: "Unauthorized" }, 401);
+    }
+
     if (url.pathname === "/api/schedulers" && request.method === "GET") {
       const { results } = await env.DB.prepare(`
         SELECT id, name, description, enabled, job_type, cron_expression, timezone,
