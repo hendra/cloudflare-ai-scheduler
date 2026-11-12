@@ -294,16 +294,22 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   }
   if (!v.ok) {
     console.error("validation failed, retrying body with feedback:", v.errs.join("; "));
+    // Validate every retry: a regenerated body can fix one error and introduce another
+    // (e.g. reach 1500 words but drop the verification note), so feed fresh errors forward.
     const retryBody = await (async () => {
-      for (let attempt = 1; attempt <= 2; attempt++) {
+      let last = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const prompt = bodyPrompt + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues. Return ONLY the body.`;
+          const prompt = bodyPrompt + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues while still meeting EVERY requirement above (length, H2 sections, code example, verification note blockquote). Return ONLY the body.`;
           const text = await callModel(prompt, { maxTokens: 8000, expectJSON: false });
-          if (text && text.length > 1500) return text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
-          console.error(`retry body attempt ${attempt}: too short`);
+          if (!(text && text.length > 1500)) { console.error(`retry body attempt ${attempt}: too short`); continue; }
+          last = text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
+          v = validateArticle({ ...article, body: last }, corpusSlugs);
+          if (v.ok) return last;
+          console.error(`retry body attempt ${attempt} still failing: ${v.errs.join("; ")}`);
         } catch (e) { console.error(`retry body attempt ${attempt}:`, e.message); }
       }
-      return null;
+      return last;
     })();
     if (retryBody) {
       article.body = retryBody;
@@ -355,5 +361,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   const pr = execSync(`gh pr create --base main --head ${branch} --title "content: add ${article.slug}" --body-file ${prBodyPath}`, { cwd: SITE_DIR, env: { ...process.env, GH_TOKEN: FULLSTACKWEB_PAT }, stdio: "pipe" }).toString().trim();
   try { require('node:fs').unlinkSync(prBodyPath); } catch {}
   console.log("PR opened:", pr);
-  await postToSlack([`🖌️ _FullstackWeb.dev draft PR ready_\n*${article.title}*\n→ ${pr}\n${v.wordCount} words · keyword: ${article.keyword} · needs your review before merge.`]);
+  // The PR is the deliverable; a Slack summary failure (e.g. channel_not_found) must not fail the run.
+  try { await postToSlack([`🖌️ _FullstackWeb.dev draft PR ready_\n*${article.title}*\n→ ${pr}\n${v.wordCount} words · keyword: ${article.keyword} · needs your review before merge.`]); }
+  catch (e) { console.log(`::warning title=Slack summary not posted::${e.message} — PR ${pr} was opened; check the Slack channel secret / bot membership.`); }
 })().catch(async (e) => { await fail(`unexpected error: ${String(e).slice(0, 300)}`); });
