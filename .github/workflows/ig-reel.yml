@@ -1,10 +1,11 @@
 name: ig-reel
 
 # IG Reel — Interesting Facts & Knowledge → Instagram @kaliajatau.id (via Buffer)
-# Prompt 1 (prompts/ig-reel-daily.md) in executable form: deterministic RSS fetch
-# → Buffer 7-day dedup → AI picks 4–5 grounded findings (Bahasa Indonesia) →
-# HTML scenes (headless Chrome) → reel assembled from synthesised original music →
+# Deterministic RSS fetch → Buffer 7-day dedup → AI picks 4–5 grounded findings
+# (Bahasa Indonesia; AI chain: OpenRouter preset → Groq, via scripts/ig_reel_daily.py)
+# → HTML scenes (headless Chrome) → reel assembled from synthesised original music →
 # Cloudinary hosting → Buffer createPost (reel, shareNow, isAiGenerated).
+# Triggered by the Cloudflare Worker scheduler (D1 row) via workflow_dispatch.
 # DRY_RUN=true composes everything but skips the upload and post.
 # Images: provider chain cloudflare → google → huggingface → pollinations
 # (POLLINATIONS_SECRET_KEY keyed modern endpoint; fallback to classic per-IP free tier).
@@ -40,36 +41,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      DRY_RUN: ${{ inputs.dry_run }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
       TOPIC: ${{ inputs.topic }}
-      PLACEHOLDER_IMAGES: ${{ inputs.placeholder_images }}
+      PLACEHOLDER_IMAGES: ${{ inputs.placeholder_images || 'false' }}
       # scripts/ig_reel_daily.py maps CF_ACCOUNT_ID/CF_API_TOKEN → CF_ACCOUNT/CF_TOKEN automatically
-      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-      # optional image fallbacks (free tiers; skipped silently when unset):
-      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
       GOOGLE_IMAGE_MODEL: gemini-nano-banana-2.1
-      HF_TOKEN: ${{ secrets.HF_TOKEN }}
       HF_IMAGE_MODEL: black-forest-labs/FLUX.1-schnell
       IMAGE_ORDER: cloudflare,google,huggingface,pollinations
-      # Pollinations secret key (sk_…) — unlimited image API at gen.pollinations.ai (no watermark)
-      POLLINATIONS_SECRET_KEY: ${{ secrets.POLLINATIONS_SECRET_KEY }}
-      CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
-      CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
-      CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
-      BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
       BUFFER_CHANNEL_ID: ${{ vars.BUFFER_CHANNEL_ID }}
       BUFFER_ORG_ID: ${{ vars.BUFFER_ORG_ID }}
-      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-      SLACK_NEWS_CHANNEL_ID: ${{ secrets.SLACK_NEWS_CHANNEL_ID }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.11'
 
@@ -80,7 +66,7 @@ jobs:
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
-          pip install pillow numpy scipy playwright
+          pip install pillow==13.0.0 numpy==2.4.6 scipy==1.17.1 playwright==1.65.1
 
       - name: Ensure a Chrome binary for render_html.py
         run: |
@@ -93,4 +79,29 @@ jobs:
 
       - name: Run IG Reel pipeline
         run: python scripts/ig_reel_daily.py
+        env:
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          POLLINATIONS_SECRET_KEY: ${{ secrets.POLLINATIONS_SECRET_KEY }}
+          CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+          CLOUDINARY_API_KEY: ${{ secrets.CLOUDINARY_API_KEY }}
+          CLOUDINARY_API_SECRET: ${{ secrets.CLOUDINARY_API_SECRET }}
+          BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_NEWS_CHANNEL_ID: ${{ secrets.SLACK_NEWS_CHANNEL_ID }}
 
+      - name: Notify failure to Slack #news
+        if: failure() && env.DRY_RUN != 'true' && !hashFiles('failure-posted')
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_NEWS_CHANNEL_ID: ${{ secrets.SLACK_NEWS_CHANNEL_ID }}
+        run: |
+          TEXT="⚠️ IG Reel daily run failed and no note was posted — see https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "$(jq -n --arg ch "${SLACK_NEWS_CHANNEL_ID}" --arg text "${TEXT}" '{channel:$ch, text:$text}')"
