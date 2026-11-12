@@ -75,9 +75,11 @@ pattern as the body call). Failure to get a valid spec fails the run, like the b
   "diagram": {
     "nodes": [
       { "label": "Document", "sub": "title + body", "kind": "card", "lines": ["embedding  vector(768)"] }
-    ],                                     // 2–5 nodes; label ≤ 24 chars, sub ≤ 24 chars,
-                                           // kind: "card" | "accent" | "hub"; lines: ≤ 2 mono code lines
-    "edges": [[0, 1], [1, 2]]             // i < j, referencing nodes
+    ],                                     // 2–5 nodes (2–4 for fullstackweb); label ≤ 24 chars,
+                                           // sub ≤ 24 chars; kind: "card" | "accent" | "hub";
+                                           // lines: ≤ 2 mono code lines
+    "edges": [[0, 1], [1, 2]]             // i < j, referencing nodes; no duplicates;
+                                           // ≤ 2 edges may skip a node
   }
 }
 ```
@@ -88,17 +90,19 @@ pattern as the body call). Failure to get a valid spec fails the run, like the b
 - The spec prompt gets context: article title, keyword, the article's H2 section titles and the
   opening paragraph, so the diagram matches the article's subject.
 - `coverAlt` in the frontmatter is derived from the spec: `"Diagram: A → B → C"` (the site skill
-  asks `coverAlt` to describe the diagram, not the image). The topic call's free-text `coverAlt`
-  stays as fallback.
-- Validation is a pure function (`validateSpec`): rejects missing fields, over-long strings, wrong
-  node/edge counts, unknown node kinds, out-of-range edge indices, and returns a normalised spec.
+  asks `coverAlt` to describe the diagram, not the image). The topic call no longer asks for
+  `coverAlt` — the derived value replaces it.
+- Validation is a pure function (`parseCoverSpec`): rejects missing fields, wrong node/edge counts,
+  unknown node kinds, out-of-range edge indices, duplicate edges and too many skip-a-node edges;
+  over-long strings are **clamped at a word boundary** (cosmetic) instead of rejected. It returns a
+  normalised spec.
 
 **Diagram fidelity (my call).** The hand-authored site covers draw bespoke artwork (tables with mono
 code, numbered step lists, hub-and-spoke loops). The pipeline reproduces the **visual system** —
 palette, type scale, card shapes, arrow style — with a per-article diagram built from the spec's
 nodes, kinds and edges. `kind` covers the common shapes: `card` (plain box), `accent` (tinted
-highlight box, the site's step marker), `hub` (circle node); `lines` renders mono code lines inside
-a card. Bespoke per-article artwork stays out of scope — that is what "standard" buys us.
+highlight box, the site's step marker), `hub` (highlighted box / pill in the vertical skins, dot
+cloud in fullstackweb); `lines` renders mono code lines inside a card. Bespoke per-article artwork stays out of scope — that is what "standard" buys us.
 
 ### 2. Templates (one per site, in the scheduler repo)
 
@@ -122,7 +126,7 @@ a card. Bespoke per-article artwork stays out of scope — that is what "standar
   letter-spacing -3 y=350 (auto-shrink) · bar 200×8 `#2383E2` y=380 · subtitle 32px `#4A4844`
   y=452/496 · three bullets, dots r=8 at cy 583/643/703 (`#2383E2` / `#8B5CF6` / `#0E9BB8`), text
   25px `#37352F` x=170.
-- Right column x=800…1480: vertical chain of pastel rounded boxes — violet fill `#EFEBFC` stroke
+- Right column x=880…1400: vertical chain of pastel rounded boxes — violet fill `#EFEBFC` stroke
   `#8B5CF6` label 22px/700 `#6D3BD1`; teal fill `#E5F7FA` stroke `#0E9BB8` label `#0E7490`; accent
   node circle fill `#E7F0FB` stroke `#2383E2` label 28px/700 `#1F66BE` + sub 19px `#5B5A56`;
   arrows stroke `#5B5A56` 3px with marker.

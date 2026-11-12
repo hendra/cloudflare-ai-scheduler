@@ -51,6 +51,13 @@ assert.match(TEMPLATES.fullstackweb.render(amp), /#090d16/);
 assert.ok(!TEMPLATES.fullstackweb.render(amp).includes("R&amp;D Ops"), "fullstackweb is title-less");
 assert.deepEqual([TEMPLATES.fullstackweb.width, TEMPLATES.fullstackweb.scale], [1200, 2]);
 const five = parseCoverSpec(JSON.stringify({ ...good, diagram: { nodes: "ABCDE".split("").map((label) => ({ label, lines: ["x = 1", "y = 2"] })), edges: [[0, 1], [1, 2], [2, 3], [3, 4], [0, 4]] } })).spec;
+// fullstackweb draws 4 stages: a 5th node must be rejected, not silently dropped.
+const fiveNodes = { ...good, diagram: { nodes: "ABCDE".split("").map((label) => ({ label })), edges: [[0, 1], [1, 2], [2, 3], [3, 4]] } };
+assert.equal(parseCoverSpec(JSON.stringify(fiveNodes), 4).ok, false);
+assert.equal(parseCoverSpec(JSON.stringify({ ...fiveNodes, diagram: { nodes: "ABCD".split("").map((label) => ({ label })), edges: [[0, 1], [1, 2], [2, 3]] } }), 4).ok, true);
+// duplicate edges and more than 2 edges that skip a node are rejected (they overflow the canvas).
+assert.equal(parseCoverSpec(JSON.stringify({ ...good, diagram: { ...good.diagram, edges: [[0, 1], [0, 1]] } })).ok, false);
+assert.equal(parseCoverSpec(JSON.stringify({ ...good, diagram: { nodes: "ABCDE".split("").map((label) => ({ label })), edges: [[0, 1], [1, 2], [0, 2], [0, 3], [0, 4]] } })).ok, false);
 for (const t of Object.values(TEMPLATES)) assert.ok(!/NaN|undefined/.test(t.render(five)), "no NaN/undefined in output");
 
 // ---- renderer ----

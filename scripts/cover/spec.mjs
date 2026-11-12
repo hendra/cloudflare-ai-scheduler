@@ -5,6 +5,9 @@
 
 export const LIMITS = { eyebrow: 28, title: 30, subtitle: 42, bullet: 34, label: 24, sub: 24, line: 32 };
 export const KINDS = ["card", "accent", "hub"];
+// fullstackweb draws its stages side by side and has room for 4; the vertical skins take 5.
+export const MAX_NODES = { railsdev: 5, inasoft: 5, fullstackweb: 4 };
+const MAX_SIDE_EDGES = 2; // non-adjacent edges drawn as elbows beside the chain
 
 export const escapeXml = (s) =>
   String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
@@ -37,10 +40,10 @@ Opening paragraph: ${intro}
 The cover has a left text block and a right diagram of the architecture or workflow the article recommends. Keep labels short and technically true to the article. Never show prices.
 Reply with ONLY this JSON (no prose, no code fence):
 {"eyebrow":"topic in 2-4 words (<= ${LIMITS.eyebrow} chars)","title":"tool or concept name (<= ${LIMITS.title} chars)","subtitle":["line 1 (<= ${LIMITS.subtitle} chars)","line 2 (<= ${LIMITS.subtitle} chars)"],"bullets":["exactly 3 short points (<= ${LIMITS.bullet} chars each)","...","..."],"diagram":{"nodes":[{"label":"<= ${LIMITS.label} chars","sub":"optional, <= ${LIMITS.sub} chars","kind":"card|accent|hub","lines":["optional code line, <= ${LIMITS.line} chars"]}],"edges":[[0,1]]}}
-Diagram rules: 2-5 nodes in reading order; kind "accent" highlights the key step, "hub" marks a central component, "card" is a plain box; at most 2 "lines" per node (class names, commands, columns); edges are [from, to] node indexes with from < to.`;
+Diagram rules: 2-${MAX_NODES[site] || 5} nodes in reading order; kind "accent" highlights the key step, "hub" marks a central component, "card" is a plain box; at most 2 "lines" per node (class names, commands, columns); edges are [from, to] node indexes with from < to; at most ${MAX_SIDE_EDGES} edges may skip a node.`;
 }
 
-export function parseCoverSpec(raw) {
+export function parseCoverSpec(raw, maxNodes = 5) {
   const m = String(raw ?? "").match(/\{[\s\S]*\}/);
   if (!m) return { ok: false, errs: ["no JSON object in reply"] };
   let j;
@@ -53,7 +56,7 @@ export function parseCoverSpec(raw) {
   if (!Array.isArray(j.bullets) || j.bullets.length !== 3 || !j.bullets.every(str)) errs.push("bullets must be exactly 3");
   const nodes = j.diagram?.nodes;
   const edges = j.diagram?.edges ?? [];
-  if (!Array.isArray(nodes) || nodes.length < 2 || nodes.length > 5) errs.push("diagram needs 2-5 nodes");
+  if (!Array.isArray(nodes) || nodes.length < 2 || nodes.length > maxNodes) errs.push(`diagram needs 2-${maxNodes} nodes`);
   else nodes.forEach((n, i) => {
     if (!n || !str(n.label)) errs.push(`node ${i} label missing`);
     if (n?.kind !== undefined && !KINDS.includes(n.kind)) errs.push(`node ${i} kind "${n.kind}" not in ${KINDS.join("|")}`);
@@ -62,7 +65,8 @@ export function parseCoverSpec(raw) {
   const nn = Array.isArray(nodes) ? nodes.length : 0;
   if (!Array.isArray(edges) || !edges.every((e) => Array.isArray(e) && e.length === 2 && Number.isInteger(e[0]) && Number.isInteger(e[1]) && e[0] >= 0 && e[0] < e[1] && e[1] < nn)) {
     errs.push("edges must be [from, to] with 0 <= from < to < nodes");
-  }
+  } else if (new Set(edges.map(String)).size !== edges.length) errs.push("duplicate edges");
+  else if (edges.filter(([a, b]) => b !== a + 1).length > MAX_SIDE_EDGES) errs.push(`at most ${MAX_SIDE_EDGES} edges may skip a node`);
   if (errs.length) return { ok: false, errs };
   return {
     ok: true,
