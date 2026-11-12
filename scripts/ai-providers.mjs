@@ -81,7 +81,11 @@ export async function callModel(promptOrOpts, opts = {}) {
     if (!key) { console.log(`ai: skip ${name} (no credentials)`); continue; }
     const model = name === AI_PROVIDER && AI_MODEL ? AI_MODEL : p.model();
     try {
-      const payload = { model, messages, max_tokens: maxTokens, temperature, ...(p.think !== undefined ? { think: p.think } : {}), ...(p.jsonMode && expectJSON && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}), ...(name === "openrouter" ? { reasoning: { effort: process.env.OPENROUTER_REASONING_EFFORT || "none" } } : {}) };
+      // OpenRouter: the preset rejects `reasoning: { effort: "none" }` with HTTP 400
+      // ("Model call failed: invalid request"), so reasoning is excluded instead —
+      // `exclude: true` is accepted and keeps the whole token budget for the body.
+      // Set OPENROUTER_REASONING_EFFORT to send `effort` instead (low/minimal/high).
+      const payload = { model, messages, max_tokens: maxTokens, temperature, ...(p.think !== undefined ? { think: p.think } : {}), ...(p.jsonMode && expectJSON && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}), ...(name === "openrouter" ? { reasoning: process.env.OPENROUTER_REASONING_EFFORT ? { effort: process.env.OPENROUTER_REASONING_EFFORT } : { exclude: true } } : {}) };
       // OpenCode Console routes a conversation by session id (required on Go).
       const sessionId = name === "opencode" ? `ses_${crypto.randomUUID()}` : "";
       const doFetch = (body) => fetch(`${p.baseURL()}/chat/completions`, {

@@ -330,7 +330,9 @@ def ai_json(prompt, max_tokens=2600):
             {"model": "@preset/ai-scheduler",
              "messages": [{"role": "user", "content": prompt}],
              "max_tokens": max_tokens, "temperature": 0.4,
-             "reasoning": {"effort": "none"}},
+             # reasoning.effort="none" is rejected by the preset (HTTP 400);
+             # exclude:true is accepted and leaves the budget for the script.
+             "reasoning": {"exclude": True}},
             {"Authorization": f"Bearer {OPENROUTER_API_KEY}"}))
     if not attempts:
         raise RuntimeError("no AI provider credentials (OPENCODE_API_KEY / OPENROUTER_API_KEY)")
