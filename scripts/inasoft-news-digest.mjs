@@ -10,9 +10,9 @@
 //   DRY_RUN=true            Everything except the Slack post (preview)
 //   SLACK_BOT_TOKEN         Slack bot token (xoxb-…)
 //   SLACK_NEWS_CHANNEL_ID   Channel ID for #news
-//   AI_PROVIDER             openrouter|groq|cloudflare|… (default openrouter)
+//   AI_PROVIDER             openrouter|opencode|… (default openrouter)
 //   AI_FALLBACKS            comma-separated fallbacks
-//   OPENROUTER_API_KEY / GROQ_API_KEY / CF_*
+//   OPENROUTER_API_KEY / OPENCODE_API_KEY
 //
 // Exit: 0 = delivered (posted or printed), 1 = failure (Slack note attempted).
 

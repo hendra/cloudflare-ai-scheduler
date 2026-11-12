@@ -1,51 +1,45 @@
 // Shared AI provider configuration for all scripts in this repo.
-// Production uses OpenRouter (preset `@preset/ai-scheduler`) with Groq and CF as fallbacks.
-// Local development uses Ollama (`gemma4:e2b` by default; override with OLLAMA_MODEL).
+// Primary: OpenCode Console (opencode.ai) — OpenAI-compatible chat-completions
+// at `https://opencode.ai/inference/go/openai/v1` (Go plan) or
+// `https://opencode.ai/inference/openai/v1` (pay-as-you-go).
+// Fallback: OpenRouter (preset `@preset/ai-scheduler`).
 // Never commit API keys — pass them via environment variables or .dev.vars (gitignored).
 //
 // Env:
-//   AI_PROVIDER    primary provider (default "openrouter")
-//   AI_FALLBACKS   comma-separated fallbacks (default "groq,cloudflare" when unset;
+//   AI_PROVIDER    primary provider (default "opencode")
+//   AI_FALLBACKS   comma-separated fallbacks (default "openrouter" when unset;
 //                  empty string forces no fallbacks). Providers without credentials
 //                  are skipped.
 //   AI_MODEL       model override for the PRIMARY provider only; fallbacks always
-//                  use their own <PROVIDER>_MODEL default (an OpenRouter preset id
-//                  is meaningless to Groq/CF).
+//                  use their own <PROVIDER>_MODEL default.
 //   AI_TIMEOUT_MS  per-request timeout in milliseconds (default 90000; covers long
 //                  article bodies). On timeout the provider is skipped and the
 //                  chain falls through to the next one.
-//   <PROVIDER>_MODEL  per-provider model override (CLOUDFLARE_MODEL, GROQ_MODEL,
-//                  OPENROUTER_MODEL, GEMINI_MODEL, CEREBRAS_MODEL, MISTRAL_MODEL,
-//                  OLLAMA_MODEL).
+//   OPENCODE_API_KEY   OpenCode Console API key (oc_sk_…).
+//   OPENCODE_MODEL     Console model (default "glm-5.3-flash" — "GLM-5.3-Flash").
+//   OPENCODE_BASE_URL  Console base (default "https://opencode.ai/inference/go/openai/v1"
+//                      — Go plan; pay-as-you-go is "https://opencode.ai/inference/openai/v1").
+//   OPENROUTER_API_KEY / OPENROUTER_MODEL  OpenRouter provider.
 
-// Model defaults are chosen so a fallback provider can still satisfy the blog
-// writers' 1500-word body gate: gpt-oss-20b lands at ~1150 words, llama-3.3-70b
-// at ~450. gpt-oss-120b lands at ~1900-2250 words on both providers.
 export const PROVIDERS = {
-  cloudflare: { name: "cloudflare", baseURL: () => `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID || ""}/ai/v1`, key: () => process.env.CF_API_TOKEN || "", model: () => process.env.CLOUDFLARE_MODEL || "@cf/openai/gpt-oss-120b" },
-  groq:       { name: "groq",       baseURL: () => "https://api.groq.com/openai/v1", key: () => process.env.GROQ_API_KEY || "", model: () => process.env.GROQ_MODEL || "openai/gpt-oss-120b", jsonMode: true },
+  opencode:   { name: "opencode",   baseURL: () => process.env.OPENCODE_BASE_URL || "https://opencode.ai/inference/go/openai/v1", key: () => process.env.OPENCODE_API_KEY || "", model: () => process.env.OPENCODE_MODEL || "glm-5.3-flash" },
   openrouter: { name: "openrouter", baseURL: () => "https://openrouter.ai/api/v1",  key: () => process.env.OPENROUTER_API_KEY    || "", model: () => process.env.OPENROUTER_MODEL  || "@preset/ai-scheduler", jsonMode: false },
-  gemini:     { name: "gemini",     baseURL: () => "https://generativelanguage.googleapis.com/v1beta/openai", key: () => process.env.GEMINI_API_KEY || "", model: () => process.env.GEMINI_MODEL || "gemini-2.5-flash", jsonMode: true },
-  cerebras:   { name: "cerebras",   baseURL: () => "https://api.cerebras.ai/v1", key: () => process.env.CEREBRAS_API_KEY || "", model: () => process.env.CEREBRAS_MODEL || "llama-3.3-70b", jsonMode: true },
-  mistral:    { name: "mistral",    baseURL: () => "https://api.mistral.ai/v1", key: () => process.env.MISTRAL_API_KEY || "", model: () => process.env.MISTRAL_MODEL || "mistral-small-latest", jsonMode: true },
-  ollama:     { name: "ollama",     baseURL: () => process.env.OLLAMA_BASE_URL || "http://localhost:11434/v1", key: () => process.env.OLLAMA_API_KEY || "ollama", model: () => process.env.OLLAMA_MODEL || "gemma4:e2b", think: false },
 };
 
-export const AI_PROVIDER = (process.env.AI_PROVIDER || "openrouter").toLowerCase();
+export const AI_PROVIDER = (process.env.AI_PROVIDER || "opencode").toLowerCase();
 export const AI_MODEL = process.env.AI_MODEL || "";
-export const AI_FALLBACKS = (process.env.AI_FALLBACKS === undefined ? "groq,cloudflare" : process.env.AI_FALLBACKS)
+export const AI_FALLBACKS = (process.env.AI_FALLBACKS === undefined ? "openrouter" : process.env.AI_FALLBACKS)
   .toLowerCase()
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
 export const AI_TIMEOUT_MS = Math.max(1, parseInt(process.env.AI_TIMEOUT_MS, 10) || 90_000);
 
-// Transient rate limits (HTTP 429) are worth waiting out: Groq's free tier is
-// 8000 output tokens/min, so a second article body inside the same minute
-// 429s. Groq sends `retry-after` (seconds) and `x-ratelimit-reset-tokens`
-// (seconds until the token window resets). OpenRouter's *daily* free-model cap
-// 429 carries no retry hint, so it falls through to the next provider at once
-// instead of waiting hours.
+// Transient rate limits (HTTP 429) are worth waiting out when the provider
+// says when to come back: `retry-after` (seconds) and
+// `x-ratelimit-reset-tokens` (seconds until the token window resets).
+// OpenRouter's *daily* free-model cap 429 carries no retry hint, so it falls
+// through to the next provider at once instead of waiting hours.
 const RATE_WAIT_CAP_MS = 70_000;
 const MAX_RATE_WAITS = 2;
 
@@ -84,13 +78,19 @@ export async function callModel(promptOrOpts, opts = {}) {
     const p = PROVIDERS[name];
     if (!p) { errors.push(`${name}: unknown provider`); continue; }
     const key = p.key();
-    if (!key && name !== "ollama") { console.log(`ai: skip ${name} (no credentials)`); continue; }
+    if (!key) { console.log(`ai: skip ${name} (no credentials)`); continue; }
     const model = name === AI_PROVIDER && AI_MODEL ? AI_MODEL : p.model();
     try {
       const payload = { model, messages, max_tokens: maxTokens, temperature, ...(p.think !== undefined ? { think: p.think } : {}), ...(p.jsonMode && expectJSON && !forceNoJsonMode ? { response_format: { type: "json_object" } } : {}), ...(name === "openrouter" ? { reasoning: { effort: process.env.OPENROUTER_REASONING_EFFORT || "none" } } : {}) };
+      // OpenCode Console routes a conversation by session id (required on Go).
+      const sessionId = name === "opencode" ? `ses_${crypto.randomUUID()}` : "";
       const doFetch = (body) => fetch(`${p.baseURL()}/chat/completions`, {
         method: "POST",
-        headers: { "Authorization": `Bearer ${p.key()}`, "Content-Type": "application/json" },
+        headers: {
+          "Authorization": `Bearer ${p.key()}`,
+          "Content-Type": "application/json",
+          ...(sessionId ? { "x-opencode-session": sessionId } : {}),
+        },
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(AI_TIMEOUT_MS),
       });

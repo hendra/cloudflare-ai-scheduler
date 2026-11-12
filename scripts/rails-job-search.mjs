@@ -9,9 +9,9 @@ import { PROVIDERS, providerChain, callModel } from "./ai-providers.mjs";
 //   print (DRY_RUN) or post to Slack #jobs via chat.postMessage.
 //
 // Env: DRY_RUN=true|false; AI_STUB=true (offline testing); AI_PROVIDER
-//   (default openrouter); AI_FALLBACKS (default groq,cloudflare); AI_MODEL
+//   (default openrouter); AI_FALLBACKS (default opencode); AI_MODEL
 //   (primary provider only); <PROVIDER>_MODEL. SLACK_BOT_TOKEN, SLACK_JOBS_CHANNEL_ID,
-//   GH_TOKEN, CF_ACCOUNT_ID, CF_API_TOKEN, GROQ_API_KEY, …
+//   GH_TOKEN, OPENROUTER_API_KEY, OPENCODE_API_KEY, …
 // Exit: 0 = digest (or failure note) posted/printed; 1 = failure (a ⚠️ note is
 //   posted when possible). NEVER posts a digest with invented jobs.
 

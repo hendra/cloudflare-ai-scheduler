@@ -9,8 +9,8 @@ hosting → Buffer createPost (Instagram reel).
 Env (see .github/workflows/ig-reel.yml):
   DRY_RUN=true            Everything except the Cloudinary upload + Buffer post
   CF_ACCOUNT, CF_TOKEN    Cloudflare Workers AI (images) — required for real images
-  OPENROUTER_API_KEY      text brain (preset @preset/ai-scheduler, reasoning.effort=none)
-  GROQ_API_KEY            fallback brain
+  OPENCODE_API_KEY        text brain (opencode.ai Console, model glm-5.3-flash)
+  OPENROUTER_API_KEY      fallback brain (preset @preset/ai-scheduler, reasoning.effort=none)
   BUFFER_ACCESS_TOKEN     optional in dry run, required in real run
   BUFFER_CHANNEL_ID       default 6aed5544e29c69a1717ba62e (playbook)
   BUFFER_ORG_ID           default 6aed53e7ec5c7c6d73f3e437 (playbook)
@@ -49,7 +49,9 @@ CF_ACCOUNT = (os.environ.get("CF_ACCOUNT", "") or os.environ.get("CF_ACCOUNT_ID"
 CF_TOKEN = (os.environ.get("CF_TOKEN", "") or os.environ.get("CF_API_TOKEN", "")).strip()
 os.environ["CF_ACCOUNT"], os.environ["CF_TOKEN"] = CF_ACCOUNT, CF_TOKEN
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
+OPENCODE_API_KEY = os.environ.get("OPENCODE_API_KEY", "").strip()
+OPENCODE_MODEL = (os.environ.get("OPENCODE_MODEL", "") or "glm-5.3-flash").strip()
+OPENCODE_BASE_URL = (os.environ.get("OPENCODE_BASE_URL", "https://opencode.ai/inference/go/openai/v1") or "").rstrip("/")
 CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME", "opqimovw").strip()
 CLOUD_KEY = os.environ.get("CLOUDINARY_API_KEY", "").strip()
 CLOUD_SECRET = os.environ.get("CLOUDINARY_API_SECRET", "").strip()
@@ -312,8 +314,16 @@ def repair_prompt(data, violations):
 
 
 def ai_json(prompt, max_tokens=2600):
-    """OpenRouter preset (reasoning disabled) → Groq fallback. Returns parsed JSON."""
+    """OpenCode Console (opencode.ai) → OpenRouter fallback. Returns parsed JSON."""
     attempts = []
+    if OPENCODE_API_KEY:
+        attempts.append((
+            f"{OPENCODE_BASE_URL}/chat/completions",
+            {"model": OPENCODE_MODEL,
+             "messages": [{"role": "user", "content": prompt}],
+             "max_tokens": max_tokens, "temperature": 0.4},
+            {"Authorization": f"Bearer {OPENCODE_API_KEY}",
+             "x-opencode-session": "ses_ig_reel_daily"}))
     if OPENROUTER_API_KEY:
         attempts.append((
             "https://openrouter.ai/api/v1/chat/completions",
@@ -322,15 +332,8 @@ def ai_json(prompt, max_tokens=2600):
              "max_tokens": max_tokens, "temperature": 0.4,
              "reasoning": {"effort": "none"}},
             {"Authorization": f"Bearer {OPENROUTER_API_KEY}"}))
-    if GROQ_API_KEY:
-        attempts.append((
-            "https://api.groq.com/openai/v1/chat/completions",
-            {"model": "openai/gpt-oss-20b",
-             "messages": [{"role": "user", "content": prompt}],
-             "max_tokens": max_tokens, "temperature": 0.4},
-            {"Authorization": f"Bearer {GROQ_API_KEY}"}))
     if not attempts:
-        raise RuntimeError("no AI provider credentials (OPENROUTER_API_KEY / GROQ_API_KEY)")
+        raise RuntimeError("no AI provider credentials (OPENCODE_API_KEY / OPENROUTER_API_KEY)")
     errors = []
     for url, body, headers in attempts:
         try:
