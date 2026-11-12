@@ -119,6 +119,8 @@ function stubArticle() {
 
 // ---------- metadata helpers ----------
 const DESC_MAX_CHARS = 180; // validation limit for description (prompt targets 120-160)
+const MIN_BODY_WORDS = 1500; // hard body-length gate, shared by generation and validation
+const countWords = (t) => String(t || "").trim().split(/\s+/).filter(Boolean).length;
 // Clamp to max chars at a word boundary; hard cut if there is no decent boundary.
 function clampAtWord(s, max) {
   const t = String(s || "").trim();
@@ -166,8 +168,8 @@ function validateArticle(a, corpusSlugs) {
   req(h2 >= 4, `only ${h2} H2 sections (need >= 4)`);
   const fences = (a.body.match(/^```/gm) || []).length;
   req(fences % 2 === 0, "unbalanced code fences");
-  const words = a.body.trim().split(/\s+/).length;
-  req(words >= 1500, `only ${words} words (need >= 1500)`);
+  const words = countWords(a.body);
+  req(words >= MIN_BODY_WORDS, `only ${words} words (need >= ${MIN_BODY_WORDS})`);
   const bodyNoFences = String(a.body || "").split(/```/).filter((_, i) => i % 2 === 0).join("\n");
   req(!/lorem(?:\s|_)ipsum|\{placeholder\}|\[insert/i.test(bodyNoFences), "placeholder token in body");
   // fullstackwebdev-site schema: category is z.string() (no enum), but it lands in YAML
@@ -262,11 +264,14 @@ ${existingLinks}
 - Be concrete: real file paths, real flags, real package names. Generic AI/placeholder advice is not acceptable.
 Return ONLY the article body as markdown: the opening paragraph and "##" sections. No title, no frontmatter, no preamble, no trailing notes.`;
   const body = AI_STUB ? stubArticle().body : await (async () => {
+    let lastWords = 0;
     for (let attempt = 1; attempt <= 3; attempt++) {
+      const hint = attempt > 1 ? `\n\nYour previous attempt was too short (${lastWords} words). Write at least ${MIN_BODY_WORDS} words. Return ONLY the markdown body.` : "";
       try {
-        const text = await callModel(bodyPrompt + (attempt > 1 ? "\n\nYour previous attempt failed. Return ONLY the markdown body." : ""), { maxTokens: 8000, expectJSON: false });
-        if (text && text.length > 1500) return text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
-        console.error(`body attempt ${attempt}: too short (${text?.length} chars)`);
+        const text = await callModel(bodyPrompt + hint, { maxTokens: 8000, expectJSON: false });
+        lastWords = countWords(text);
+        if (lastWords >= MIN_BODY_WORDS) return text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
+        console.error(`body attempt ${attempt}: too short (${lastWords} words, need >= ${MIN_BODY_WORDS})`);
       } catch (e) { console.error(`body attempt ${attempt}:`, e.message); }
     }
     return null;
@@ -307,7 +312,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
         try {
           const prompt = bodyPrompt + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues while still meeting EVERY requirement above (length, H2 sections, code example, verification note blockquote). Return ONLY the body.`;
           const text = await callModel(prompt, { maxTokens: 8000, expectJSON: false });
-          if (!(text && text.length > 1500)) { console.error(`retry body attempt ${attempt}: too short`); continue; }
+          if (countWords(text) < MIN_BODY_WORDS) { console.error(`retry body attempt ${attempt}: too short`); continue; }
           last = text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
           v = validateArticle({ ...article, body: last }, corpusSlugs);
           if (v.ok) return last;

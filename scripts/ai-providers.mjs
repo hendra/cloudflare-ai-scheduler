@@ -18,9 +18,12 @@
 //                  OPENROUTER_MODEL, GEMINI_MODEL, CEREBRAS_MODEL, MISTRAL_MODEL,
 //                  OLLAMA_MODEL).
 
+// Model defaults are chosen so a fallback provider can still satisfy the blog
+// writers' 1500-word body gate: gpt-oss-20b lands at ~1150 words, llama-3.3-70b
+// at ~450. gpt-oss-120b lands at ~1900-2250 words on both providers.
 export const PROVIDERS = {
-  cloudflare: { name: "cloudflare", baseURL: () => `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID || ""}/ai/v1`, key: () => process.env.CF_API_TOKEN || "", model: () => process.env.CLOUDFLARE_MODEL || "@cf/meta/llama-3.3-70b-instruct-fp8-fast" },
-  groq:       { name: "groq",       baseURL: () => "https://api.groq.com/openai/v1", key: () => process.env.GROQ_API_KEY || "", model: () => process.env.GROQ_MODEL || "openai/gpt-oss-20b", jsonMode: true },
+  cloudflare: { name: "cloudflare", baseURL: () => `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID || ""}/ai/v1`, key: () => process.env.CF_API_TOKEN || "", model: () => process.env.CLOUDFLARE_MODEL || "@cf/openai/gpt-oss-120b" },
+  groq:       { name: "groq",       baseURL: () => "https://api.groq.com/openai/v1", key: () => process.env.GROQ_API_KEY || "", model: () => process.env.GROQ_MODEL || "openai/gpt-oss-120b", jsonMode: true },
   openrouter: { name: "openrouter", baseURL: () => "https://openrouter.ai/api/v1",  key: () => process.env.OPENROUTER_API_KEY    || "", model: () => process.env.OPENROUTER_MODEL  || "@preset/ai-scheduler", jsonMode: false },
   gemini:     { name: "gemini",     baseURL: () => "https://generativelanguage.googleapis.com/v1beta/openai", key: () => process.env.GEMINI_API_KEY || "", model: () => process.env.GEMINI_MODEL || "gemini-2.5-flash", jsonMode: true },
   cerebras:   { name: "cerebras",   baseURL: () => "https://api.cerebras.ai/v1", key: () => process.env.CEREBRAS_API_KEY || "", model: () => process.env.CEREBRAS_MODEL || "llama-3.3-70b", jsonMode: true },
@@ -36,6 +39,23 @@ export const AI_FALLBACKS = (process.env.AI_FALLBACKS === undefined ? "groq,clou
   .map((s) => s.trim())
   .filter(Boolean);
 export const AI_TIMEOUT_MS = Math.max(1, parseInt(process.env.AI_TIMEOUT_MS, 10) || 90_000);
+
+// Transient rate limits (HTTP 429) are worth waiting out: Groq's free tier is
+// 8000 output tokens/min, so a second article body inside the same minute
+// 429s. Groq sends `retry-after` (seconds) and `x-ratelimit-reset-tokens`
+// (seconds until the token window resets). OpenRouter's *daily* free-model cap
+// 429 carries no retry hint, so it falls through to the next provider at once
+// instead of waiting hours.
+const RATE_WAIT_CAP_MS = 70_000;
+const MAX_RATE_WAITS = 2;
+
+function rateLimitWaitMs(res) {
+  const secs = Math.max(
+    parseFloat(res.headers.get("retry-after") || "") || 0,
+    parseFloat(res.headers.get("x-ratelimit-reset-tokens") || "") || 0,
+  );
+  return secs > 0 ? Math.min(secs * 1000, RATE_WAIT_CAP_MS) : 0;
+}
 
 export function providerChain() {
   const chain = [AI_PROVIDER];
@@ -75,6 +95,15 @@ export async function callModel(promptOrOpts, opts = {}) {
         signal: AbortSignal.timeout(AI_TIMEOUT_MS),
       });
       let res = await doFetch(payload);
+      let waits = 0;
+      while (!res.ok && res.status === 429 && waits < MAX_RATE_WAITS) {
+        const wait = rateLimitWaitMs(res);
+        if (!wait) break; // no retry hint (e.g. a daily quota) — fall through now
+        console.log(`ai: ${p.name} rate limited (429); waiting ${Math.round(wait / 1000)}s`);
+        await new Promise((r) => setTimeout(r, wait));
+        res = await doFetch(payload);
+        waits++;
+      }
       if (!res.ok) {
         const errText = (await res.text()).slice(0, 400);
         if (p.jsonMode && expectJSON && !forceNoJsonMode && errText.includes("json_validate_failed")) {
