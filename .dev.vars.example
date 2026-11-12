@@ -40,7 +40,6 @@ CLOUDINARY_CLOUD_NAME=
 CLOUDINARY_API_KEY=
 CLOUDINARY_API_SECRET=
 OLLAMA_API_KEY=
-KILO_API_KEY=
 # IG Reel note: CF_ACCOUNT_ID / CF_API_TOKEN above are used automatically —
 # scripts/ig_reel_daily.py maps them to the CF_ACCOUNT/CF_TOKEN names cf_image.py expects.
 # Only set CF_ACCOUNT / CF_TOKEN if you need a separate account for the Reel pipeline.
