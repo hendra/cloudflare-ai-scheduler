@@ -306,6 +306,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
           last = text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
           v = validateArticle({ ...article, body: last }, corpusSlugs);
           if (v.ok) return last;
+          if (v.errs.every(isMetaErr)) { console.error("retry body: only metadata errors remain; a body rewrite cannot fix them"); break; }
           console.error(`retry body attempt ${attempt} still failing: ${v.errs.join("; ")}`);
         } catch (e) { console.error(`retry body attempt ${attempt}:`, e.message); }
       }
