@@ -2,7 +2,8 @@
 // Primary: OpenCode Console (opencode.ai) — OpenAI-compatible chat-completions
 // at `https://opencode.ai/inference/openai/v1` (pay-as-you-go, needs credits on
 // the workspace) or `https://opencode.ai/inference/go/openai/v1` (Go plan).
-// Fallbacks: OpenRouter (preset `@preset/ai-scheduler`) → Groq → Gemini → Cloudflare.
+// Fallbacks: OpenRouter (preset `@preset/ai-scheduler`) → Groq → Gemini → Kilo →
+// Cloudflare.
 // Never commit API keys — pass them via environment variables or .dev.vars (gitignored).
 //
 // Env:
@@ -23,6 +24,10 @@
 //   OPENROUTER_API_KEY / OPENROUTER_MODEL  OpenRouter provider.
 //   GROQ_API_KEY / GROQ_MODEL              Groq provider.
 //   GEMINI_API_KEY (or GOOGLE_API_KEY) / GEMINI_MODEL   Gemini provider.
+//   KILO_API_KEY / KILO_MODEL   Kilo AI Gateway provider (base
+//                  "https://ai-gateway.kilo.ai/api/v1", model "kilo-auto/free").
+//                  The free tier works without a key (200 requests/hour per IP);
+//                  a key only raises limits.
 //   CF_ACCOUNT_ID / CF_API_TOKEN / CLOUDFLARE_MODEL     Cloudflare Workers AI provider.
 //   OLLAMA_BASE_URL / OLLAMA_MODEL  local Ollama provider (skipped when unset).
 
@@ -56,6 +61,16 @@ export const PROVIDERS = {
     model: () => process.env.GEMINI_MODEL || "gemini-3.5-flash",
     jsonMode: true,
   },
+  kilo: {
+    name: "kilo",
+    baseURL: () =>
+      process.env.KILO_BASE_URL || "https://ai-gateway.kilo.ai/api/v1",
+    key: () => process.env.KILO_API_KEY || "",
+    model: () => process.env.KILO_MODEL || "kilo-auto/free",
+    jsonMode: false,
+    // Free tier works anonymously (200 requests/hour per IP); a key only raises limits.
+    noAuth: true,
+  },
   cloudflare: {
     name: "cloudflare",
     baseURL: () =>
@@ -78,7 +93,7 @@ export const AI_PROVIDER = (
 export const AI_MODEL = process.env.AI_MODEL || "";
 export const AI_FALLBACKS = (
   process.env.AI_FALLBACKS === undefined
-    ? "openrouter,groq,gemini,cloudflare"
+    ? "openrouter,groq,gemini,kilo,cloudflare"
     : process.env.AI_FALLBACKS
 )
   .toLowerCase()
@@ -155,7 +170,7 @@ export async function callModel(promptOrOpts, opts = {}) {
       continue;
     }
     const key = p.key();
-    if (!key) {
+    if (!key && !p.noAuth) {
       console.log(`ai: skip ${name} (no credentials)`);
       continue;
     }
@@ -188,7 +203,7 @@ export async function callModel(promptOrOpts, opts = {}) {
         fetch(`${p.baseURL()}/chat/completions`, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${p.key()}`,
+            ...(key ? { Authorization: `Bearer ${key}` } : {}),
             "Content-Type": "application/json",
             ...(sessionId ? { "x-opencode-session": sessionId } : {}),
           },

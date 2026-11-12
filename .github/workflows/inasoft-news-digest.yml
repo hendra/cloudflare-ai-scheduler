@@ -28,7 +28,7 @@ jobs:
     timeout-minutes: 15
     env:
       AI_PROVIDER: opencode
-      AI_FALLBACKS: opencode,openrouter,groq,gemini,cloudflare
+      AI_FALLBACKS: opencode,openrouter,groq,gemini,kilo,cloudflare
       AI_MODEL: ${{ vars.AI_MODEL }}
       OPENCODE_MODEL: ${{ vars.OPENCODE_MODEL }}
       OPENCODE_BASE_URL: ${{ vars.OPENCODE_BASE_URL }}
@@ -52,6 +52,7 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          KILO_API_KEY: ${{ secrets.KILO_API_KEY }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
 
       - name: Notify Slack failure

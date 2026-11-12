@@ -16,7 +16,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler — and, since late 2026
 
 Pipelines are deterministic. Most are zero-dependency Node 20 scripts (one file each, plus `scripts/ai-providers.mjs` / `scripts/make-cover.py`); the IG Reel is a Python orchestrator (`scripts/ig_reel_daily.py`; pip deps installed in the workflow). No agent tool-calling; 1–2 LLM completions per run.
 
-**Production default model: OpenCode Console `glm-5.3-flash-free`** (opencode.ai), fallbacks `openrouter` (preset `@preset/ai-scheduler`) → `groq` → `gemini` → `cloudflare`.
+**Production default model: OpenCode Console `glm-5.3-flash-free`** (opencode.ai), fallbacks `openrouter` (preset `@preset/ai-scheduler`) → `groq` → `gemini` → `kilo` → `cloudflare`.
 
 ## Architecture
 
@@ -25,7 +25,7 @@ Two dispatch paths share the D1 `schedulers` table:
 1. **Worker dispatcher** (this repo, `src/index.ts`): cron → D1 due rows → Queue → `executeJob` → Workers AI / RSS / HTTP / `github_actions_trigger` → D1 history.
 2. **GitHub Actions pipelines** (`scripts/*.mjs` called from `.github/workflows/*.yml`): `workflow_dispatch` only, invoked by the Worker scheduler (D1 `schedulers` rows where `job_type = github_actions_trigger`). They are **not** routed through the Worker's queue.
 
-AI provider chain (all pipelines): `AI_PROVIDER` (default `opencode`) → `AI_FALLBACKS` (`openrouter,groq,gemini,cloudflare`) → skip providers without credentials. OpenCode Console speaks the OpenAI chat-completions API at `https://opencode.ai/inference/openai/v1` (pay-as-you-go; Go plan = `https://opencode.ai/inference/go/openai/v1`) and needs `OPENCODE_API_KEY` (`oc_sk_…`).
+AI provider chain (all pipelines): `AI_PROVIDER` (default `opencode`) → `AI_FALLBACKS` (`openrouter,groq,gemini,kilo,cloudflare`) → skip providers without credentials (Kilo's free tier needs no key). OpenCode Console speaks the OpenAI chat-completions API at `https://opencode.ai/inference/openai/v1` (pay-as-you-go; Go plan = `https://opencode.ai/inference/go/openai/v1`) and needs `OPENCODE_API_KEY` (`oc_sk_…`).
 
 ## Setup
 

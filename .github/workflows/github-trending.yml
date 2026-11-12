@@ -30,7 +30,7 @@ jobs:
     timeout-minutes: 20
     env:
       AI_PROVIDER: opencode
-      AI_FALLBACKS: opencode,openrouter,groq,gemini,cloudflare
+      AI_FALLBACKS: opencode,openrouter,groq,gemini,kilo,cloudflare
       AI_MODEL: ${{ vars.AI_MODEL }}
       DRY_RUN: ${{ inputs.dry_run || 'false' }}
     steps:
@@ -53,6 +53,7 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          KILO_API_KEY: ${{ secrets.KILO_API_KEY }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_NEWS_CHANNEL_ID: ${{ secrets.SLACK_NEWS_CHANNEL_ID }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
