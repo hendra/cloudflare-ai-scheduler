@@ -9,15 +9,15 @@ import { PROVIDERS, providerChain, callModel } from "./ai-providers.mjs";
 //   → fallback: GitHub search API via `gh` (labelled "fallback: newly created
 //     repos by stars") → for each repo fetch README (best-effort, 4 KB cap)
 //     and, in weekly mode only, license + latest release via `gh api` (best-effort)
-//   → ONE Workers AI completion (OpenAI-compatible chat endpoint, plain string
-//     content — Workers AI rejects array/null content) → compose mrkdwn
+//   → ONE completion from the AI provider chain (OpenAI-compatible, plain string
+//     content) → compose mrkdwn
 //   → print (DRY_RUN) or post to Slack #news via chat.postMessage
 //
-// Env: DRY_RUN=true|false; AI_PROVIDER (default cloudflare); AI_FALLBACKS
-//      (default "groq,gemini,cerebras,openrouter,mistral", comma-separated,
-//      providers without credentials are skipped); AI_MODEL (overrides primary);
-//      <PROVIDER>_MODEL per provider (CLOUDFLARE_MODEL, GROQ_MODEL,
-//      CEREBRAS_MODEL, GEMINI_MODEL, OPENROUTER_MODEL, MISTRAL_MODEL).
+// Env: DRY_RUN=true|false; AI_PROVIDER (default openrouter); AI_FALLBACKS
+//      (default "groq,cloudflare", comma-separated, providers without
+//      credentials are skipped); AI_MODEL (overrides the primary provider's model);
+//      AI_TIMEOUT_MS (default 90000); <PROVIDER>_MODEL per provider (CLOUDFLARE_MODEL,
+//      GROQ_MODEL, CEREBRAS_MODEL, GEMINI_MODEL, OPENROUTER_MODEL, MISTRAL_MODEL).
 // Credentials: CF_ACCOUNT_ID + CF_API_TOKEN (cloudflare), GROQ_API_KEY, CEREBRAS_API_KEY, GEMINI_API_KEY,
 //      OPENROUTER_API_KEY, MISTRAL_API_KEY. SLACK_BOT_TOKEN, SLACK_NEWS_CHANNEL_ID,
 //      GH_TOKEN (fallback + gh).
@@ -27,19 +27,16 @@ import { PROVIDERS, providerChain, callModel } from "./ai-providers.mjs";
 // Exit: 0 = digest (or failure note) posted or fully handled; 1 = unhandled error
 //       (workflow failure step posts a generic ⚠️ only if we didn't post one).
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
+import { safeMrkdwn, slackLink, postSlack, postSlackParts } from "./slack.mjs";
 
 const DRY_RUN = String(process.env.DRY_RUN || "false") === "true";
-const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || "";
-const CF_API_TOKEN = process.env.CF_API_TOKEN || "";
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
 const SLACK_NEWS_CHANNEL_ID = process.env.SLACK_NEWS_CHANNEL_ID || "";
-const AI_MODEL = process.env.AI_MODEL || ""; // overrides the primary provider's model
-// Provider chain: AI_PROVIDER (default cloudflare) then AI_FALLBACKS in order;
-// providers without credentials are skipped. Per-provider model overrides:
-// Provider model overrides: CLOUDFLARE_MODEL, GROQ_MODEL, CEREBRAS_MODEL,
-// GEMINI_MODEL, OPENROUTER_MODEL, MISTRAL_MODEL.
+// Provider chain: AI_PROVIDER (default openrouter) then AI_FALLBACKS in order;
+// providers without credentials are skipped. Model overrides: AI_MODEL (primary
+// only) or per-provider <PROVIDER>_MODEL.
 const CATEGORIES = ["AI/LLM","Agents/MCP","Dev Tools","Web/Frontend","Backend","Infra/DevOps","Data","Security","Other"];
 // Weekly mode (WEEKLY=true): fetches github.com/trending?since=weekly, labels the
 // digest "Top 10 of the Week", and uses the previous Monday–Sunday window in Asia/Jakarta.
@@ -64,7 +61,7 @@ const headerLink = WEEKLY
   : "<https://github.com/trending?since=daily|github.com/trending>";
 const repoMetaLine = (r) => {
   if (!r.license && !r.release) return "";
-  return `\n📄 ${r.license || "license not shown"}${r.release ? ` · 🏷️ ${r.release.tag} (${r.release.date || "date unknown"})` : ""}`;
+  return `\n📄 ${safeMrkdwn(r.license || "license not shown")}${r.release ? ` · 🏷️ ${safeMrkdwn(r.release.tag)} (${safeMrkdwn(r.release.date || "date unknown")})` : ""}`;
 };
 
 const strip = (s) => s.replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
@@ -74,10 +71,9 @@ function fail(msg) {
   console.error("FATAL:", msg);
   const note = `⚠️ _GitHub Trending — ${digestTitle}_ could not be produced. ${msg}`.slice(0, 500);
   if (DRY_RUN) { console.error("dry run — not posting failure note to Slack"); process.exit(1); }
-  return postToSlack([note], true).then(() => {
-    try { writeFileSync("failure-posted", "1"); } catch {}
-    process.exit(1);
-  }).catch(() => process.exit(1));
+  // failure-posted only when Slack actually accepted the note (workflow contract).
+  return postSlack({ token: SLACK_BOT_TOKEN, channel: SLACK_NEWS_CHANNEL_ID, text: note })
+    .then((r) => { if (r.ok) { try { writeFileSync("failure-posted", "1"); } catch {} } else console.error("failure note rejected by Slack:", r.error); process.exit(1); });
 }
 
 async function fetchText(url, { ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36", headers = {}, timeout = 30000 } = {}) {
@@ -130,8 +126,9 @@ async function collectFallback() {
     ? `created:${since}..${weekEnd.toISOString().slice(0, 10)}`
     : `created:>=${since}`;
   try {
-    const out = execSync(
-      `gh api "search/repositories?q=${created}&sort=stars&order=desc&per_page=10" --jq '.items[] | [.full_name, (.description // ""), (.stargazers_count|tostring), (.forks_count|tostring), (.language // "unknown")] | @tsv'`,
+    const out = execFileSync(
+      "gh",
+      ["api", `search/repositories?q=${created}&sort=stars&order=desc&per_page=10`, "--jq", '.items[] | [.full_name, (.description // ""), (.stargazers_count|tostring), (.forks_count|tostring), (.language // "unknown")] | @tsv'],
       { encoding: "utf8", timeout: 60000 }
     );
     const repos = out.trim().split("\n").filter(Boolean).map((line) => {
@@ -150,11 +147,11 @@ async function collectFallback() {
 function enrichRepoApi(r) {
   if (!WEEKLY) return;
   try {
-    const lic = execSync(`gh api repos/${r.owner}/${r.name} --jq '.license.spdx_id // ""'`, { encoding: "utf8", timeout: 30000 }).trim();
+    const lic = execFileSync("gh", ["api", `repos/${r.owner}/${r.name}`, "--jq", '.license.spdx_id // ""'], { encoding: "utf8", timeout: 30000 }).trim();
     r.license = lic && lic !== "NOASSERTION" ? lic : null;
   } catch { r.license = null; }
   try {
-    const rel = execSync(`gh api repos/${r.owner}/${r.name}/releases/latest --jq '[.tag_name // "", .published_at // ""] | @tsv'`, { encoding: "utf8", timeout: 30000 }).trim();
+    const rel = execFileSync("gh", ["api", `repos/${r.owner}/${r.name}/releases/latest`, "--jq", '[.tag_name // "", .published_at // ""] | @tsv'], { encoding: "utf8", timeout: 30000 }).trim();
     const [tag, published] = rel.split("\t");
     r.release = tag ? { tag, date: (published || "").slice(0, 10) } : null;
   } catch { r.release = null; }
@@ -193,7 +190,7 @@ ${lines}`;
     if (!m) { console.error(`ai: attempt ${attempt}: no JSON object found`); continue; }
     try { parsed = JSON.parse(m[0]); break; } catch (e) { console.error(`ai: attempt ${attempt}: JSON parse failed: ${e.message}`); }
   }
-  if (!parsed) throw new Error("AI returned invalid JSON twice");
+  if (!parsed) throw new Error("AI returned invalid JSON after 2 attempts");
   const byName = new Map((parsed.repos || []).map((r) => [r.name, r]));
   const enriched = repos.map((r) => {
     const a = byName.get(`${r.owner}/${r.name}`) || {};
@@ -211,33 +208,20 @@ function compose({ repos, fallback, trend }) {
   const header = fallback
     ? `⚠️ _GitHub Trending — ${digestTitle} (fallback: newly created repos by stars)_\n${dateLine} | 🔗 ${headerLink}\n`
     : `${WEEKLY ? "📊" : "🔥"} _GitHub Trending — ${digestTitle}_\n${dateLine} | 🔗 ${headerLink}\n`;
-  const sections = repos.map((r, i) => {
-    const stars = r.stars != null ? `⭐ ${r.stars.toLocaleString()}${r.today != null ? ` (+${r.today.toLocaleString()} ${gainedLabel})` : ""}` : "⭐ n/a";
-    const forks = r.forks != null ? `🍴 ${r.forks.toLocaleString()}` : "🍴 n/a";
-    return `━━━━━━━━━━━━━━━━━━━━\n_${i + 1}. <${r.url}|${r.owner}/${r.name}>_ · \`${r.language}\` · ${r.category}\n${stars} · ${forks}${repoMetaLine(r)}\n${r.what}\n💡 ${r.why}`;
-  });
-  const tail = `━━━━━━━━━━━━━━━━━━━━\n📈 _${trendTitle}_\n${trend}\n\n🤖 _Automated ${footerKind} GitHub trending digest_`;
-  return { header, full: [header, sections.join("\n\n"), tail].join("\n\n") };
+  const sectionLine = (r, i) =>
+    `_${i + 1}. ${slackLink(r.url, `${r.owner}/${r.name}`)}_ · \`${safeMrkdwn(r.language)}\` · ${safeMrkdwn(r.category)}\n⭐ ${r.stars != null ? `${r.stars.toLocaleString()}` : "n/a"}${r.today != null ? ` (+${r.today.toLocaleString()} ${gainedLabel})` : ""} · 🍴 ${r.forks != null ? r.forks.toLocaleString() : "n/a"}${repoMetaLine(r)}\n${safeMrkdwn(r.what)}\n💡 ${safeMrkdwn(r.why)}`;
+  const sections = repos.map((r, i) => `━━━━━━━━━━━━━━━━━━━━\n${sectionLine(r, i)}`);
+  const tail = `━━━━━━━━━━━━━━━━━━━━\n📈 _${trendTitle}_\n${safeMrkdwn(trend)}\n\n🤖 _Automated ${footerKind} GitHub trending digest_`;
+  return { header, full: [header, sections.join("\n\n"), tail].join("\n\n"), sectionLine };
 }
 
-async function postToSlack(messages, isFailureNote = false) {
-  for (const text of messages) {
-    const res = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${SLACK_BOT_TOKEN}`, "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ channel: SLACK_NEWS_CHANNEL_ID, text }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (!body.ok) throw new Error(`Slack post failed: ${body.error || res.status}`);
-  }
-  console.log(`Slack post${isFailureNote ? " (failure note)" : ""}: ok (${messages.length} message(s))`);
-}
+
 
 // ---------- main ----------
 (async () => {
   if (!DRY_RUN && (!SLACK_BOT_TOKEN || !SLACK_NEWS_CHANNEL_ID)) { console.error("FATAL: SLACK_BOT_TOKEN and SLACK_NEWS_CHANNEL_ID required (or set DRY_RUN=true)"); process.exit(1); }
   const usable = providerChain().filter((n) => PROVIDERS[n] && PROVIDERS[n].key());
-  if (usable.length === 0 && process.env.AI_STUB !== "true") { console.error("FATAL: no AI provider in the chain has credentials (set CF_API_TOKEN or e.g. GITHUB_MODELS_TOKEN/GROQ_API_KEY/GEMINI_API_KEY and adjust AI_PROVIDER/AI_FALLBACKS)"); process.exit(1); }
+  if (usable.length === 0 && process.env.AI_STUB !== "true") { console.error("FATAL: no AI provider in the chain has credentials (set OPENROUTER_API_KEY/GROQ_API_KEY/CF_API_TOKEN and adjust AI_PROVIDER/AI_FALLBACKS)"); process.exit(1); }
   console.log(`ai: provider chain ${providerChain().join(" -> ")} (usable: ${usable.join(", ") || "none, using AI_STUB/none"})`);
   let collected;
   try { collected = await collect(); } catch (e) { await fail(`data collection failed: ${e.message}`); return; }
@@ -245,11 +229,11 @@ async function postToSlack(messages, isFailureNote = false) {
   for (const r of repos) { r.readme = await fetchReadme(r.owner, r.name).catch(() => ""); enrichRepoApi(r); }
   let analysis;
   try { analysis = await analyze(repos); } catch (e) { console.error("AI analysis failed:", e.message); await fail(`AI analysis failed: ${e.message}`); return; }
-  const { header, full } = compose({ repos: analysis.repos, fallback, trend: analysis.trend });
+  const { header, full, sectionLine } = compose({ repos: analysis.repos, fallback, trend: analysis.trend });
   const SLACK_LIMIT = 3500;
   const parts = full.length <= SLACK_LIMIT ? [full] : [
-    [header, analysis.repos.slice(0, 5).map((r, i) => `_${i + 1}. <${r.url}|${r.owner}/${r.name}>_ · \`${r.language}\` · ${r.category}\n⭐ ${r.stars?.toLocaleString?.() ?? "n/a"}${r.today != null ? ` (+${r.today.toLocaleString()} ${gainedLabel})` : ""} · 🍴 ${r.forks?.toLocaleString?.() ?? "n/a"}${repoMetaLine(r)}\n${r.what}\n💡 ${r.why}`).join("\n\n")].join("\n\n"),
-    [analysis.repos.slice(5).map((r, i) => `_${i + 6}. <${r.url}|${r.owner}/${r.name}>_ · \`${r.language}\` · ${r.category}\n⭐ ${r.stars?.toLocaleString?.() ?? "n/a"}${r.today != null ? ` (+${r.today.toLocaleString()} ${gainedLabel})` : ""} · 🍴 ${r.forks?.toLocaleString?.() ?? "n/a"}${repoMetaLine(r)}\n${r.what}\n💡 ${r.why}`).join("\n\n"), `━━━━━━━━━━━━━━━━━━━━\n📈 _${trendTitle}_\n` + analysis.trend + `\n\n🤖 _Automated ${footerKind} GitHub trending digest_`].join("\n\n"),
+    [header, analysis.repos.slice(0, 5).map((r, i) => sectionLine(r, i)).join("\n\n")].join("\n\n"),
+    [analysis.repos.slice(5).map((r, i) => sectionLine(r, i + 5)).join("\n\n"), `━━━━━━━━━━━━━━━━━━━━\n📈 _${trendTitle}_\n` + safeMrkdwn(analysis.trend) + `\n\n🤖 _Automated ${footerKind} GitHub trending digest_`].join("\n\n"),
   ];
   if (DRY_RUN) {
     console.log("=== DRY RUN — message(s) that would be posted to #news ===");
@@ -257,6 +241,18 @@ async function postToSlack(messages, isFailureNote = false) {
     console.log("=== end dry run; source used:", fallback ? "search API (fallback)" : "github.com/trending", "| repos:", analysis.repos.length, "===");
     process.exit(0);
   }
-  await postToSlack(parts);
-  console.log(JSON.stringify({ event: WEEKLY ? "github-trending-weekly-posted" : "github-trending-posted", date: WEEKLY ? `${wibDateStart}–${wibDateEnd}` : wibISO, repos: analysis.repos.length, fallback, parts: parts.length }));
+  const r = await postSlackParts({ token: SLACK_BOT_TOKEN, channel: SLACK_NEWS_CHANNEL_ID, parts });
+  if (!r.ok) {
+    console.error(`Slack post failed: ${r.error} (${r.posted} of ${parts.length} part(s) accepted)`);
+    if (r.posted > 0) {
+      // Channel already saw a partial digest — make the gap explicit in-channel.
+      const note = `⚠️ _GitHub Trending — ${digestTitle}_ posting failed after part ${r.posted} of ${parts.length} — the digest above is incomplete. ${r.error}`.slice(0, 500);
+      const nr = await postSlack({ token: SLACK_BOT_TOKEN, channel: SLACK_NEWS_CHANNEL_ID, text: note });
+      if (nr.ok) { try { writeFileSync("failure-posted", "1"); } catch {} }
+      process.exit(1);
+    }
+    await fail(`Slack post failed: ${r.error}`);
+    return;
+  }
+  console.log(JSON.stringify({ event: WEEKLY ? "github-trending-weekly-posted" : "github-trending-posted", date: WEEKLY ? `${wibDateStart}–${wibDateEnd}` : wibISO, repos: analysis.repos.length, fallback, parts: r.posted }));
 })().catch((e) => fail(`unexpected error: ${String(e).slice(0, 300)}`));

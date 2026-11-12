@@ -18,6 +18,7 @@
 
 import { writeFileSync } from "node:fs";
 import { callModel, providerChain, PROVIDERS } from "./ai-providers.mjs";
+import { safeMrkdwn, slackLink, postSlack, postSlackParts } from "./slack.mjs";
 
 const DRY_RUN = String(process.env.DRY_RUN || "false") === "true";
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
@@ -29,8 +30,7 @@ const decodeEntities = (s) => String(s).replace(/&#(x[0-9a-fA-F]+|\d+);/g, (m, n
   return cp ? String.fromCodePoint(cp) : m;
 });
 const strip = (s) => decodeEntities(String(s || "")).replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
-// Slack mrkdwn: AI prose must not contain angle brackets — they break the link syntax | <…|…>
-const safeMrkdwn = (s) => String(s || "").replace(/[<>]/g, "").trim();
+// Slack mrkdwn escaping for AI/scraped prose lives in ./slack.mjs (escapes &,<,>).
 
 async function fetchText(url, { timeout = 30000, ua = "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0" } = {}) {
   const ctrl = new AbortController();
@@ -115,15 +115,9 @@ async function fail(reason) {
   const note = `⚠️ _INASOFT DAILY TECH & AI NEWS DIGEST_ could not be produced. ${String(reason).slice(0, 300)}`;
   if (DRY_RUN) { console.error("dry run — not posting failure note to Slack"); process.exit(1); }
   if (!SLACK_BOT_TOKEN || !SLACK_NEWS_CHANNEL_ID) process.exit(1);
-  try {
-    const res = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${SLACK_BOT_TOKEN}`, "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ channel: SLACK_NEWS_CHANNEL_ID, text: note }),
-    });
-    const j = await res.json().catch(() => ({}));
-    if (j.ok) { try { writeFileSync("failure-posted", "1"); } catch {} }
-  } catch {}
+  // failure-posted only when Slack actually accepted the note (workflow contract).
+  const r = await postSlack({ token: SLACK_BOT_TOKEN, channel: SLACK_NEWS_CHANNEL_ID, text: note });
+  if (r.ok) { try { writeFileSync("failure-posted", "1"); } catch {} } else console.error("failure note rejected by Slack:", r.error);
   process.exit(1);
 }
 
@@ -176,8 +170,8 @@ ${lines}`;
     const idx = parseInt(s.ref, 10) - 1;
     const cand = all[idx];
     if (cand === undefined) await fail(`AI returned invalid ref ${s.ref}`);
-    if (seenRefs.has(s.ref)) await fail(`AI repeated ref ${s.ref} across categories`);
-    seenRefs.add(s.ref);
+    if (seenRefs.has(idx)) await fail(`AI repeated ref ${s.ref} across categories`);
+    seenRefs.add(idx);
     const cat = byCat.get(s.category);
     if (cat) await fail(`duplicate category ${s.category}`);
     const c = CATEGORIES.find(c => c.key === s.category);
@@ -192,7 +186,7 @@ ${lines}`;
   const header = `🚀 _INASOFT DAILY TECH & AI NEWS DIGEST_\n📅 _Date:_ ${wib} (Asia/Jakarta)\n🌍 _Coverage:_ Latest trending developments in AI, AI Engineering, Software Development & Technology.\n\n`;
   const body = ordered.map((s, i) => {
     const c = CATEGORIES[i];
-    return `━━━━━━━━━━━━━━━━━━━━\n\n${c.emoji} _${i + 1}. ${c.label}_\n_📰 ${safeMrkdwn(s.headline)}_\n${safeMrkdwn(s.summary)}\n\n💡 _Why It Matters:_\n${safeMrkdwn(s.why)}\n\n🔗 _Source:_ <${s.url}|${safeMrkdwn(s.source)}> · ${safeMrkdwn(s.date || "date unavailable")}\n`;
+    return `━━━━━━━━━━━━━━━━━━━━\n\n${c.emoji} _${i + 1}. ${c.label}_\n_📰 ${safeMrkdwn(s.headline)}_\n${safeMrkdwn(s.summary)}\n\n💡 _Why It Matters:_\n${safeMrkdwn(s.why)}\n\n🔗 _Source:_ ${slackLink(s.url, s.source)} · ${safeMrkdwn(s.date || "date unavailable")}\n`;
   });
   const tail = `\n━━━━━━━━━━━━━━━━━━━━\n\n🎯 _INASOFT INSIGHT OF THE DAY_\n${insight}\n\n━━━━━━━━━━━━━━━━━━━━\n\n🤖 _Powered by AI | Curated for the INASOFT Engineering Team_`;
 
@@ -214,16 +208,20 @@ ${lines}`;
     console.error("SLACK_BOT_TOKEN and SLACK_NEWS_CHANNEL_ID required to post");
     process.exit(1);
   }
-  for (const text of parts) {
-    const res = await fetch("https://slack.com/api/chat.postMessage", {
-      method: "POST",
-      headers: { "Authorization": `Bearer ${SLACK_BOT_TOKEN}`, "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ channel: SLACK_NEWS_CHANNEL_ID, text }),
-    });
-    const body2 = await res.json().catch(() => ({}));
-    if (!body2.ok) { console.error("Slack post failed:", body2.error || res.status); process.exit(1); }
-    console.log(`posted (part) to #news ts ${body2.ts}`);
+  const r = await postSlackParts({ token: SLACK_BOT_TOKEN, channel: SLACK_NEWS_CHANNEL_ID, parts });
+  if (!r.ok) {
+    console.error(`Slack post failed: ${r.error} (${r.posted} of ${parts.length} part(s) accepted)`);
+    if (r.posted > 0) {
+      // Channel already saw a partial digest — make the gap explicit in-channel.
+      const note = `⚠️ _INASOFT DAILY TECH & AI NEWS DIGEST_ posting failed after part ${r.posted} of ${parts.length} — the digest above is incomplete. ${r.error}`.slice(0, 500);
+      const nr = await postSlack({ token: SLACK_BOT_TOKEN, channel: SLACK_NEWS_CHANNEL_ID, text: note });
+      if (nr.ok) { try { writeFileSync("failure-posted", "1"); } catch {} }
+      process.exit(1);
+    }
+    await fail(`Slack post failed: ${r.error}`);
+    return;
   }
+  console.log(`posted (${r.posted} part(s)) to #news`);
 }
 
 main().catch(async (e) => { await fail(`unexpected error: ${String(e?.message || e).slice(0, 300)}`); });
