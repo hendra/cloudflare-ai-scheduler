@@ -91,7 +91,8 @@ def http(url, *, data=None, headers=None, timeout=60, method=None):
 
 def http_json(url, payload, headers=None, timeout=120):
     body = json.dumps(payload).encode()
-    hdrs = {"Content-Type": "application/json", **(headers or {})}
+    # Explicit UA: Groq (Cloudflare-fronted) 403s urllib's default "Python-urllib/x" UA (error 1010).
+    hdrs = {"Content-Type": "application/json", "User-Agent": UA, **(headers or {})}
     raw = http(url, data=body, headers=hdrs, timeout=timeout)
     return json.loads(raw)
 

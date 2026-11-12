@@ -148,12 +148,16 @@ Candidates:
 ${lines}`;
 
   console.log("asking AI…");
-  let parsed;
-  try {
-    const raw = await callModel(prompt, { maxTokens: 3000, expectJSON: true, temperature: 0.4 });
-    const m = raw.match(/\{[\s\S]*\}/);
-    parsed = JSON.parse(m ? m[0] : raw);
-  } catch (e) { fail(`AI selection failed: ${String(e).slice(0, 220)}`); }
+  // The preset occasionally emits malformed JSON (e.g. `"category="X"`), so retry before giving up.
+  let parsed, lastErr;
+  for (let attempt = 1; attempt <= 3 && !parsed; attempt++) {
+    try {
+      const raw = await callModel(prompt + (attempt > 1 ? "\n\nYour previous reply was not valid JSON. Reply with ONLY the JSON object." : ""), { maxTokens: 3000, expectJSON: true, temperature: 0.4 });
+      const m = raw.match(/\{[\s\S]*\}/);
+      parsed = JSON.parse(m ? m[0] : raw);
+    } catch (e) { lastErr = e; console.error(`AI selection attempt ${attempt} failed: ${String(e).slice(0, 160)}`); }
+  }
+  if (!parsed) { fail(`AI selection failed after 3 attempts: ${String(lastErr).slice(0, 220)}`); return; }
 
   // 3) ground + validate
   const stories = parsed.stories || [];
