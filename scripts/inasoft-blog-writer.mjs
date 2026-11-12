@@ -48,8 +48,17 @@ const SERVICE_VALUES = [
   "jasa-pembuatan-sistem-erp",
   "jasa-pembuatan-aplikasi-mobile",
 ];
-const CATEGORY_VALUES = ["ai-engineering", "software-engineering", "panduan-bisnis", "cloud-devops"];
-const SUBCATEGORY_VALUES = ["ai-agents", "rag", "mcp", "ai-automation", "llm-engineering", "ruby-on-rails", "backend", "frontend", "database", "perencanaan-proyek", "saas", "modernisasi-sistem", "devops", "container", "cloud"];
+// Mirrors inasoft-site src/lib/categories.ts — the schema refines that the subcategory belongs to the category.
+const SUBCATEGORIES_BY_CATEGORY = {
+  "ai-engineering": ["ai-agents", "rag", "mcp", "ai-automation", "llm-engineering"],
+  "software-engineering": ["ruby-on-rails", "backend", "frontend", "database"],
+  "panduan-bisnis": ["perencanaan-proyek", "saas", "modernisasi-sistem"],
+  "cloud-devops": ["devops", "container", "cloud"],
+};
+const CATEGORY_VALUES = Object.keys(SUBCATEGORIES_BY_CATEGORY);
+const SUBCATEGORY_VALUES = Object.values(SUBCATEGORIES_BY_CATEGORY).flat();
+const categoryOf = (sub) => CATEGORY_VALUES.find((c) => SUBCATEGORIES_BY_CATEGORY[c].includes(sub));
+const SEO_TITLE_MAX = 50; // inasoft-site schema: seoTitle.max(50)
 const PILLAR_VALUES = ["software-bisnis", "ai-untuk-bisnis", "pengembangan-software", "tutorial-teknis"];
 const wib = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const strip = (s) => String(s || "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
@@ -196,14 +205,23 @@ function validateArticle(a, corpusSlugs) {
     console.warn("category: fallback applied ->", a.category);
   }
   if (!SUBCATEGORY_VALUES.includes(a.subcategory)) {
-    a.subcategory = a.category === "ai-engineering" ? "llm-engineering" : "backend";
+    a.subcategory = SUBCATEGORIES_BY_CATEGORY[a.category][0];
     console.warn("subcategory: fallback applied ->", a.subcategory);
+  } else if (categoryOf(a.subcategory) !== a.category) {
+    // The subcategory is the more specific choice; derive the category from it.
+    console.warn(`category: "${a.category}" does not own subcategory "${a.subcategory}" -> ${categoryOf(a.subcategory)}`);
+    a.category = categoryOf(a.subcategory);
   }
   if (!PILLAR_VALUES.includes(a.pillar)) {
     a.pillar = "pengembangan-software";
     console.warn("pillar: fallback applied ->", a.pillar);
   }
-  if (!a.seoTitle) a.seoTitle = String(a.title || "").slice(0, 50);
+  if (!a.seoTitle) a.seoTitle = clampAtWord(a.title, SEO_TITLE_MAX);
+  else if (a.seoTitle.length > SEO_TITLE_MAX) {
+    const clamped = clampAtWord(a.seoTitle, SEO_TITLE_MAX);
+    console.warn(`seoTitle clamped: ${a.seoTitle.length}c -> ${clamped.length}c`);
+    a.seoTitle = clamped;
+  }
   if (!a.lang) a.lang = "id";
   req(!corpusSlugs.includes(a.slug), "slug already exists");
   req((() => {
@@ -229,6 +247,8 @@ function validateArticle(a, corpusSlugs) {
   req(/catatan verifikasi|verification note/i.test(a.body), "no verification note");
   req(CATEGORY_VALUES.includes(a.category), `category "${a.category}" not in allowed list`);
   req(SUBCATEGORY_VALUES.includes(a.subcategory), `subcategory "${a.subcategory}" not in allowed list`);
+  req(categoryOf(a.subcategory) === a.category, `subcategory "${a.subcategory}" does not belong to category "${a.category}"`);
+  req(String(a.seoTitle || "").length <= SEO_TITLE_MAX, `seoTitle ${String(a.seoTitle || "").length}c > ${SEO_TITLE_MAX}`);
   req(PILLAR_VALUES.includes(a.pillar), `pillar "${a.pillar}" not in allowed list`);
   req(!a.service || SERVICE_VALUES.includes(a.service), `service "${a.service}" not in allowed list`);
   const links = a.body.match(/\]\((https?:\/\/[^)\s]+)\)/g) || [];
@@ -283,7 +303,7 @@ function frontmatter(a) {
   // 2) topic selection
   const topicPrompt = `You pick ONE blog topic for INASOFT (inasoft.id) — Indonesian IT company for software development, AI engineering, and digital transformation; readers: business owners and tech managers in Indonesia; pillars: AI engineering, modern software development, business software, cloud & DevOps. Pick the signal with the strongest, most durable angle for that audience.
 Reply with ONLY this JSON (no prose):
-{"topic":"short topic (Bahasa Indonesia)","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"<= 50 chars","description":"120-160 chars","slug":"kebab-case-slug","lang":"id","service":"one of: ${SERVICE_VALUES.join("|")}","category":"one of: ${CATEGORY_VALUES.join("|")}","subcategory":"one of: ${SUBCATEGORY_VALUES.join("|")} (must belong to category)","pillar":"one of: ${PILLAR_VALUES.join("|")}","coverAlt":"what the cover diagram shows"}
+{"topic":"short topic (Bahasa Indonesia)","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"<= 50 chars","description":"120-160 chars","slug":"kebab-case-slug","lang":"id","service":"one of: ${SERVICE_VALUES.join("|")}","category":"one of: ${CATEGORY_VALUES.join("|")}","subcategory":"must belong to the chosen category — ${Object.entries(SUBCATEGORIES_BY_CATEGORY).map(([c, subs]) => `${c}: ${subs.join("|")}`).join("; ")}","pillar":"one of: ${PILLAR_VALUES.join("|")}","coverAlt":"what the cover diagram shows"}
 Avoid all of these existing posts: ${corpus.slice(0, 80).map((c) => c.title).join(" | ")}
 Signals:
 ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.slice(0, 160)} (${s.signals})`).join("\n")}`;
