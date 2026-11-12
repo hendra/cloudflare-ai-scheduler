@@ -120,7 +120,7 @@ function clampAtWord(s, max) {
   const base = at >= 40 ? cut.slice(0, at) : t.slice(0, max);
   return base.trim().replace(/[\s.,;:!?—–-]+$/u, "");
 }
-const META_KEYS = ["title", "seoTitle", "description", "keyword", "slug", "service", "coverAlt"];
+const META_KEYS = ["title", "seoTitle", "description", "keyword", "slug", "service"];
 const META_ERR = /^(title length|seoTitle|description|slug format|slug already exists|keyword)/;
 const isMetaErr = (e) => META_ERR.test(e);
 
@@ -185,7 +185,7 @@ function frontmatter(a) {
 
   // 2) topic selection
   const topicPrompt = `You pick ONE blog topic for RailsDev.io (railsdev.io) — senior Rails consultancy in Indonesia/English; readers: business owners and senior developers; pillars: rails, ai-engineering, modern full-stack, devtools, open source. Pick the signal with the strongest, most durable angle for that audience.
-Reply with ONLY this JSON (no prose): {"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"<= 49 chars","description":"120-160 chars","slug":"kebab-case-slug","service":"${SERVICE_VALUES.join("|")}","coverAlt":"what the cover diagram shows"}
+Reply with ONLY this JSON (no prose): {"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"<= 49 chars","description":"120-160 chars","slug":"kebab-case-slug","service":"${SERVICE_VALUES.join("|")}"}
 Avoid all of these existing posts: ${corpus.slice(0, 80).map((c) => c.title).join(" | ")}
 Signals:
 ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.slice(0, 160)} (${s.signals})`).join("\n")}`;
@@ -242,7 +242,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     console.error("metadata validation failed, requesting metadata fix:", v.errs.join("; "));
     try {
       const metaNow = Object.fromEntries(META_KEYS.map((k) => [k, article[k]]));
-      const fixPrompt = `You previously produced this blog metadata JSON for railsdev.io:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style\n- seoTitle: at most 49 chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- service: one of ${SERVICE_VALUES.join(" | ")}\n- coverAlt: short diagram description\nOutput ONLY the JSON object, no prose.`;
+      const fixPrompt = `You previously produced this blog metadata JSON for railsdev.io:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style\n- seoTitle: at most 49 chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- service: one of ${SERVICE_VALUES.join(" | ")}\nOutput ONLY the JSON object, no prose.`;
       const fixed = parseJSONObject(await callModel(fixPrompt, { maxTokens: 2048 }));
       if (fixed && typeof fixed === "object") {
         for (const k of META_KEYS) if (typeof fixed[k] === "string" && fixed[k].trim()) article[k] = fixed[k].trim();

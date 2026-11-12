@@ -4,7 +4,7 @@ import { mkdirSync, openSync, readSync, closeSync, rmSync, writeFileSync, exists
 import { basename, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { TEMPLATES } from "./templates.mjs";
-import { STUB_SPEC, coverAltFromSpec, coverSpecPrompt, parseCoverSpec } from "./spec.mjs";
+import { MAX_NODES, STUB_SPEC, coverAltFromSpec, coverSpecPrompt, parseCoverSpec } from "./spec.mjs";
 
 const CHROMES = ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"];
 
@@ -29,6 +29,9 @@ export function renderCover({ site, spec, siteDir, outPath }) {
   if (!t) throw new Error(`cover: unknown site "${site}"`);
   const chrome = findChrome();
   if (!chrome) throw new Error("cover: headless Chrome not found (google-chrome/chromium)");
+  if (!existsSync(join(resolve(siteDir), "node_modules/@fontsource-variable/inter"))) {
+    console.warn(`cover: ${siteDir}/node_modules/@fontsource-variable/inter missing — falling back to system fonts`);
+  }
   const srcDir = join(resolve(siteDir), ".cover-src");
   const src = join(srcDir, `${basename(outPath, extname(outPath))}.${t.ext}`);
   mkdirSync(srcDir, { recursive: true });
@@ -36,6 +39,8 @@ export function renderCover({ site, spec, siteDir, outPath }) {
   const out = resolve(outPath);
   rmSync(out, { force: true });
   try {
+    // --no-sandbox: Ubuntu 24.04 runners block the user namespaces Chrome's sandbox needs. Safe here:
+    // the page is a local file with escaped text and a fixed script.
     execFileSync(chrome, [
       "--headless=new", "--hide-scrollbars", "--no-sandbox", "--disable-gpu", "--virtual-time-budget=3000",
       `--window-size=${t.width},${t.height}`, `--force-device-scale-factor=${t.scale}`,
@@ -61,7 +66,7 @@ export async function generateCover({ site, article, siteDir, outPath, callModel
   for (let attempt = 1; !spec && attempt <= 3; attempt++) {
     const hint = errs.length ? `\n\nYour previous reply was rejected: ${errs.join("; ")}. Fix these and reply with ONLY the JSON.` : "";
     try {
-      const r = parseCoverSpec(await callModel(coverSpecPrompt({ site, title: article.title, keyword: article.keyword, body: article.body }) + hint, { maxTokens: 2048 }));
+      const r = parseCoverSpec(await callModel(coverSpecPrompt({ site, title: article.title, keyword: article.keyword, body: article.body }) + hint, { maxTokens: 2800 }), MAX_NODES[site]);
       if (r.ok) spec = r.spec; else errs = r.errs;
     } catch (e) { errs = [e.message]; }
     if (!spec) console.warn(`cover spec attempt ${attempt} rejected: ${errs.join("; ")}`);

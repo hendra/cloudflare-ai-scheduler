@@ -44,12 +44,16 @@ function stack(nodes, { top, bottom, minGap = 40, maxGap = 64 }) {
 // Arrows: [i, i+1] straight down the middle; longer edges as elbows on the right side.
 function chainArrows(boxes, edges, { cx, right, cls }) {
   let k = 0;
+  // ponytail: at most 2 edges may skip a node (parseCoverSpec rejects more); they are drawn as
+  // elbows beside the chain. Upgrade path: route long edges inside the gap between boxes.
+  const side = new Set(edges.filter(([a, b]) => b !== a + 1).slice(0, 2).map(([a, b]) => `${a}-${b}`));
   return edges.map(([a, b]) => {
     const A = boxes[a], B = boxes[b];
     if (b === a + 1) return `<path class="${cls}" d="M${cx} ${A.y + A.h} V${B.y - 8}"/>`;
+    if (!side.has(`${a}-${b}`)) return "";
     const ex = right + 24 + 14 * k++;
     return `<path class="${cls}" d="M${right} ${A.y + A.h / 2} H${ex} V${B.y + B.h / 2} H${right + 8}"/>`;
-  }).join("\n  ");
+  }).filter(Boolean).join("\n  ");
 }
 
 // Text rows inside a box: label, optional sub, optional mono code lines.
