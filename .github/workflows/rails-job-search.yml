@@ -3,7 +3,7 @@ name: rails-job-search
 # Rails — Remote Job Search → Slack #jobs
 # Runs scripts/rails-job-search.mjs: fetches Remotive + Remote OK + HN
 # "Who is hiring" (We Work Remotely is Cloudflare-gated, skipped), scores
-# candidates via the AI chain (OpenRouter preset → Groq → Cloudflare,
+# candidates via the AI chain (OpenCode Console → OpenRouter,
 # via scripts/ai-providers.mjs), and posts the digest to #jobs.
 # `prompts/rails-job-search.md` remains the human-readable spec.
 

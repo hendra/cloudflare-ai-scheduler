@@ -32,6 +32,7 @@ jobs:
       AI_PROVIDER: opencode
       AI_FALLBACKS: opencode,openrouter
       AI_MODEL: ${{ vars.AI_MODEL }}
+      OPENCODE_MODEL: ${{ vars.OPENCODE_MODEL }}
       DRY_RUN: ${{ inputs.dry_run || 'false' }}
     steps:
       - name: Checkout

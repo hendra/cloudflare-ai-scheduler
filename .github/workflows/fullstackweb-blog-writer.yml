@@ -5,7 +5,7 @@ name: fullstackweb-blog-writer
 # Generates one draft article per run, opens a PR on hendra/fullstackwebdev-site,
 # notifies #fullstackwebdev, and leaves merge to a human. Triggered by the Cloudflare Worker
 # scheduler (D1 row) via workflow_dispatch; AI via scripts/ai-providers.mjs
-# (OpenRouter preset → Groq → Cloudflare).
+# (OpenCode Console → OpenRouter).
 
 on:
   workflow_dispatch:

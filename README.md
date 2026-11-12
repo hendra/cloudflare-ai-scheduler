@@ -16,7 +16,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler — and, since late 2026
 
 Pipelines are deterministic. Most are zero-dependency Node 20 scripts (one file each, plus `scripts/ai-providers.mjs` / `scripts/make-cover.py`); the IG Reel is a Python orchestrator (`scripts/ig_reel_daily.py`; pip deps installed in the workflow). No agent tool-calling; 1–2 LLM completions per run.
 
-**Production default model: OpenRouter `@preset/ai-scheduler`** with fallbacks `openrouter,groq,cloudflare`. Local development: **Ollama `gemma4:e2b`** (configurable via `OLLAMA_*`).
+**Production default model: OpenCode Console `glm-5.3-flash`** (opencode.ai) with fallback `openrouter` (preset `@preset/ai-scheduler`).
 
 ## Architecture
 
@@ -25,7 +25,7 @@ Two dispatch paths share the D1 `schedulers` table:
 1. **Worker dispatcher** (this repo, `src/index.ts`): cron → D1 due rows → Queue → `executeJob` → Workers AI / RSS / HTTP / `github_actions_trigger` → D1 history.
 2. **GitHub Actions pipelines** (`scripts/*.mjs` called from `.github/workflows/*.yml`): `workflow_dispatch` only, invoked by the Worker scheduler (D1 `schedulers` rows where `job_type = github_actions_trigger`). They are **not** routed through the Worker's queue.
 
-AI provider chain (all pipelines): `AI_PROVIDER` (default `openrouter`) → `AI_FALLBACKS` (`openrouter,groq,cloudflare`) → skip providers without credentials; retry without `response_format` on Groq `json_validate_failed`.
+AI provider chain (all pipelines): `AI_PROVIDER` (default `opencode`) → `AI_FALLBACKS` (`openrouter`) → skip providers without credentials. OpenCode Console speaks the OpenAI chat-completions API at `https://opencode.ai/inference/go/openai/v1` and needs `OPENCODE_API_KEY` (`oc_sk_…`).
 
 ## Setup
 
@@ -80,7 +80,7 @@ npx wrangler d1 execute scheduler-db --remote --command \
 - **`prompts/1.md` originally contained a plaintext Cloudflare API token.** It was scrubbed before any commit; treat the token as compromised — rotate it if you haven't already.
 - `GITHUB_PAT` is used for workflow dispatch; site repos use `RAILSDEV_PAT` / `FULLSTACKWEB_PAT` / `INASOFT_PAT` scoped to contents+PRs of those repos only.
 - Slack tokens are bot tokens (`xoxb-…`) with `chat:write`; `not_allowed_token_type` means wrong token type / scope / missing invite.
-- Production OpenRouter key (`@preset/ai-scheduler`) lives only in GitHub Actions secrets and local `.dev.vars`.
+- Production OpenCode Console key (`OPENCODE_API_KEY`) and the OpenRouter fallback key live only in GitHub Actions secrets and local `.dev.vars`.
 
 ## Migration status map
 

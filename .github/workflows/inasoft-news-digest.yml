@@ -2,7 +2,7 @@ name: inasoft-news-digest
 
 # INASOFT daily technology/AI digest → Slack #news
 # scripts/inasoft-news-digest.mjs composes the digest via the AI chain
-# (OpenRouter preset → Groq → Cloudflare, via scripts/ai-providers.mjs).
+# (OpenCode Console → OpenRouter, via scripts/ai-providers.mjs).
 # Triggered by the Cloudflare Worker scheduler (D1 row, cron '30 2 * * *')
 # via workflow_dispatch.
 

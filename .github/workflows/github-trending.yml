@@ -2,7 +2,7 @@ name: github-trending
 
 # GitHub Trending — Daily Top 10 → Slack #news
 # scripts/github-trending-digest.mjs fetches the trending page (regex parse),
-# fetches READMEs, calls the AI chain (OpenRouter preset → Groq → Cloudflare,
+# fetches READMEs, calls the AI chain (OpenCode Console → OpenRouter,
 # via scripts/ai-providers.mjs) and posts to Slack. Triggered by the Cloudflare
 # Worker scheduler (D1 row) via workflow_dispatch. No agent tool-calling.
 # Note: `prompts/github-trending-daily.md` remains the human-readable spec for

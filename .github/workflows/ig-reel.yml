@@ -2,7 +2,7 @@ name: ig-reel
 
 # IG Reel — Interesting Facts & Knowledge → Instagram @kaliajatau.id (via Buffer)
 # Deterministic RSS fetch → Buffer 7-day dedup → AI picks 4–5 grounded findings
-# (Bahasa Indonesia; AI chain: OpenRouter preset → Groq, via scripts/ig_reel_daily.py)
+# (Bahasa Indonesia; AI chain: OpenCode Console → OpenRouter, via scripts/ig_reel_daily.py)
 # → HTML scenes (headless Chrome) → reel assembled from synthesised original music →
 # Cloudinary hosting → Buffer createPost (reel, shareNow, isAiGenerated).
 # Triggered by the Cloudflare Worker scheduler (D1 row) via workflow_dispatch.

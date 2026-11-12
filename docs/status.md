@@ -60,7 +60,7 @@ npx wrangler d1 execute scheduler-db --remote --command \
 
 **Worker secrets** (`wrangler secret put`): `GITHUB_PAT` (dispatch), `MANUAL_RUN_TOKEN`.
 
-**Local `.dev.vars`** (gitignored): `D1_DATABASE_ID`, `MANUAL_RUN_TOKEN`, `OPENROUTER_API_KEY` (local testing), `OPENCODE_API_KEY` / `OPENCODE_MODEL`, ;  for the IG Reel locally also `BUFFER_ACCESS_TOKEN`, `CLOUDINARY_*`, `POLLINATIONS_SECRET_KEY`, `GOOGLE_API_KEY`, `HF_TOKEN`. Template: `.dev.vars.example`.
+**Local `.dev.vars`** (gitignored): `D1_DATABASE_ID`, `MANUAL_RUN_TOKEN`, `OPENROUTER_API_KEY` (local testing), `OPENCODE_API_KEY` / `OPENCODE_MODEL`; for the IG Reel locally also `BUFFER_ACCESS_TOKEN`, `CLOUDINARY_*`, `POLLINATIONS_SECRET_KEY`, `GOOGLE_API_KEY`, `HF_TOKEN`. Template: `.dev.vars.example`.
 
 ## Operational gotchas (learned the hard way)
 
