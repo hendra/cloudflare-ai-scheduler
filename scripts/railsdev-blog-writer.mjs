@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-import { PROVIDERS, providerChain, callModel } from "./ai-providers.mjs";
+import { callModel } from "./ai-providers.mjs";
 // RailsDev blog writer (pilot, PR-only) — deterministic, zero dependencies.
 //
 // Flow: fetch signals (HN front page + GitHub Trending) → load existing corpus
-//   (title/slug list, blocks duplicates) → 1 AI completion picks a topic →
-//   1 AI completion writes the article (JSON, hard-validated) → ImageMagick
-//   text-on-brand cover → write .md + cover into the site checkout →
-//   `astro check && astro build` must pass → branch → commit → push → PR →
+//   (title/slug list, blocks duplicates) → 1 AI completion picks a topic (metadata
+//   included) → 1 AI completion writes the markdown article body (hard-validated) →
+//   cover generated via Pillow (scripts/make-cover.py) → write .md + cover into the
+//   site checkout → `npm run build` must pass → branch → commit → push → PR →
 //   Slack #railsdev summary. Any hard failure → Slack note, NO push, NO PR.
 //
 // Env:
@@ -19,9 +19,9 @@ import { PROVIDERS, providerChain, callModel } from "./ai-providers.mjs";
 //   PUBLIC_FORMSPREE_FORM_ID  (astro env schema requires it at build time)
 // Exit: 0 ok (PR opened or dry-run printed), 1 failure (Slack note attempted).
 
-import { readFileSync, readdirSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { execFileSync, execSync } from "node:child_process";
-import { join, basename } from "node:path";
+import { join } from "node:path";
 
 const DRY_RUN = String(process.env.DRY_RUN || "false") === "true";
 const AI_STUB = process.env.AI_STUB === "true";
@@ -29,12 +29,7 @@ const SITE_DIR = process.env.SITE_DIR || "railsdev-site";
 const RAILSDEV_PAT = process.env.RAILSDEV_PAT || "";
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
 const SLACK_CHANNEL = process.env.SLACK_RAILSDEV_CHANNEL_ID || "";
-const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID || "";
-const CF_API_TOKEN = process.env.CF_API_TOKEN || "";
-const AI_MODEL = process.env.AI_MODEL || "";
-
 const SERVICE_VALUES = ["MVP Build", "Rails Upgrade", "Custom Module", "AI Integration", "Code Audit"];
-const wib = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const strip = (s) => String(s || "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
 
 // ---------- tiny helpers ----------
@@ -57,24 +52,29 @@ async function headOk(url) {
 }
 async function fail(msg) {
   console.error("FATAL:", msg);
-  try { await postToSlack([`⚠️ _RailsDev blog writer failed:_ ${msg}`.slice(0, 500)]); try { writeFileSync("failure-posted", "1"); } catch {} } catch {}
+  try {
+    // Only claim failure-posted when Slack actually accepted the note; the
+    // workflow falls back to its own note otherwise.
+    const posted = await postToSlack([`⚠️ _RailsDev blog writer failed:_ ${msg}`.slice(0, 500)]);
+    if (posted) { try { writeFileSync("failure-posted", "1"); } catch {} }
+  } catch {}
   process.exit(1);
 }
 
+// Returns true only when every message was accepted by Slack. In DRY_RUN or with
+// missing credentials it logs and returns false (nothing was really posted).
 async function postToSlack(messages) {
-  if (DRY_RUN || !SLACK_BOT_TOKEN || !SLACK_CHANNEL) { messages.forEach((m) => console.log("[dry] slack:", m.slice(0, 120))); return; }
+  if (DRY_RUN || !SLACK_BOT_TOKEN || !SLACK_CHANNEL) { messages.forEach((m) => console.log("[dry] slack:", m.slice(0, 120))); return false; }
   for (const text of messages) {
     const res = await fetch("https://slack.com/api/chat.postMessage", { method: "POST", headers: { "Authorization": `Bearer ${SLACK_BOT_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify({ channel: SLACK_CHANNEL, text }) });
     const body = await res.json().catch(() => ({}));
     if (!body.ok) throw new Error(`Slack post failed: ${body.error || res.status}`);
   }
   console.log(`Slack post: ok (${messages.length})`);
+  return true;
 }
 
 // ---------- AI ----------
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const AI_CALL_SPACING_MS = 5000;
-
 function parseJSONObject(raw) { const m = String(raw).match(/\{[\s\S]*\}/); if (!m) return null; try { return JSON.parse(m[0]); } catch { return null; } }
 
 // ---------- signals ----------
@@ -142,7 +142,6 @@ function validateArticle(a, corpusSlugs) {
   req(fences % 2 === 0, "unbalanced code fences");
   const words = a.body.trim().split(/\s+/).length;
   req(words >= 1500, `only ${words} words (need >= 1500)`);
-  for (const line of String(a.body || "").split("\n")) { /* fences-aware scan */ }
   const bodyNoFences = String(a.body || "").split(/```/).filter((_, i) => i % 2 === 0).join("\n");
   req(!/lorem(?:\s|_)ipsum|\{placeholder\}|\[insert/i.test(bodyNoFences), "placeholder token in body");
   const kw = a.keyword || "";
@@ -206,7 +205,6 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
 
   // 3) article body (metadata already produced in the topic call)
   const existingLinks = corpus.slice(0, 40).map((c) => `/blog/${c.slug} — ${c.title}`).join("\n");
-  const existingSlugs = corpusSlugs;
   const bodyPrompt = `Write the body of one RailsDev.io (railsdev.io) blog article in English: first person, senior-Rails-consultant voice — practical, specific, opinionated, honest about uncertainty.
 Topic: ${topic.topic}. Keyword: "${meta.keyword}". Angle: ${topic.angle}. Title: ${meta.title}.
 Requirements:
@@ -311,17 +309,23 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   // 8) commit + PR (skipped in DRY_RUN)
   if (DRY_RUN) { console.log("=== DRY RUN — would open PR ==="); console.log(`title: content: add ${article.slug}`); console.log(`branch: blog/${article.slug}`); console.log(`description: ${article.description}`); return; }
   if (!RAILSDEV_PAT) await fail("RAILSDEV_PAT not set");
-  const git = (args) => execSync(`git ${args}`, { cwd: SITE_DIR, stdio: "pipe", env: { ...process.env, GH_TOKEN: RAILSDEV_PAT } }).toString();
+  const gitEnv = { ...process.env, GH_TOKEN: RAILSDEV_PAT };
+  const git = (args) => execFileSync("git", args, { cwd: SITE_DIR, stdio: "pipe", env: gitEnv }).toString();
   const prBodyPath = join(SITE_DIR, ".pr-body.md");
   const branch = `blog/${article.slug}`;
-  try { git(`checkout -B ${branch}`); } catch (e) { await fail(`git checkout: ${String(e.message).slice(0, 200)}`); return; }
-  git("add src/content/blog src/assets/blog");
-  git(`-c user.name="railsdev-bot" -c user.email="bot@railsdev.io" commit -m "content: add ${article.slug}"`);
-  git(`push -u origin ${branch}`);
+  // Refuse to clobber an existing remote branch (could be a human's review edits); fail early instead.
+  try {
+    const remote = git(["ls-remote", "--heads", "origin", branch]).trim();
+    if (remote) { await fail(`remote branch ${branch} already exists (likely from a previous run); refusing to force-push — delete it or resolve the slug collision yourself, then re-run`); return; }
+  } catch { /* ls-remote itself failed; let push report the real error */ }
+  try { git(["checkout", "-B", branch]); } catch (e) { await fail(`git checkout: ${String(e.message).slice(0, 200)}`); return; }
+  git(["add", "src/content/blog", "src/assets/blog"]);
+  git(["-c", "user.name=railsdev-bot", "-c", "user.email=bot@railsdev.io", "commit", "-m", `content: add ${article.slug}`]);
+  git(["push", "-u", "origin", branch]);
   const prBody = `## Summary\n- Article: **${article.title}** (keyword: ${article.keyword}, ~${v.wordCount} words)\n- Service angle: ${article.service || "(none)"}\n- Generated by the railsdev-blog-writer pilot pipeline from signals + corpus review; **requires human review before merge**.\n\n## Sources\n- Topic from signals; external links in the article are HEAD-verified.\n\n## Validation\n- [x] astro check && astro build passed\n- [x] description ${article.description.length}c · seoTitle ${article.seoTitle.length}c · keyword in title/desc\n- [x] ${v.links.length} external links HEAD-checked (${dead} dead)\n- [ ] **Human: verify version numbers, code examples run, and the voice matches the site.**\n\nDO NOT MERGE WITHOUT REVIEW.`;
   writeFileSync(prBodyPath, prBody);
-  const pr = execSync(`gh pr create --base main --head ${branch} --title "content: add ${article.slug}" --body-file ${prBodyPath}`, { cwd: SITE_DIR, env: { ...process.env, GH_TOKEN: RAILSDEV_PAT }, stdio: "pipe" }).toString().trim();
-  try { require('node:fs').unlinkSync(prBodyPath); } catch {}
+  const pr = execFileSync("gh", ["pr", "create", "--base", "main", "--head", branch, "--title", `content: add ${article.slug}`, "--body-file", prBodyPath], { cwd: SITE_DIR, env: gitEnv, stdio: "pipe" }).toString().trim();
+  try { unlinkSync(prBodyPath); } catch {}
   console.log("PR opened:", pr);
   // The PR is the deliverable; a Slack summary failure (e.g. channel_not_found) must not fail the run.
   try { await postToSlack([`🖌️ _RailsDev draft PR ready_\n*${article.title}*\n→ ${pr}\n${v.wordCount} words · keyword: ${article.keyword} · needs your review before merge.`]); }
