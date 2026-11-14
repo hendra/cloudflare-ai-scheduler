@@ -1,10 +1,13 @@
 name: ig-reel
 
 # IG Reel — Interesting Facts & Knowledge → Instagram @kaliajatau.id (via Buffer)
-# Deterministic RSS fetch → Buffer 7-day dedup → AI picks 4–5 grounded findings
-# (Bahasa Indonesia; AI chain: OpenCode Console → OpenRouter, via scripts/ig_reel_daily.py)
-# → HTML scenes (headless Chrome) → reel assembled from synthesised original music →
-# Cloudinary hosting → Buffer createPost (reel, shareNow, isAiGenerated).
+# Single-story cinematic Reel: RSS fetch (feeds interleaved) → Buffer 7-day dedup (28 posts) →
+# AI shortlists 3 findings → fetch the top article → AI writes ONE story only from its text
+# (Bahasa Indonesia, every number checked; AI chain OpenCode → OpenRouter → Groq → Kilo → Cloudflare)
+# → 4 cinematic illustrations → animated HTML scenes captured frame-by-frame + composed
+# beat-synced music (scripts/ig_reel/) → Cloudinary hosting → Buffer createPost
+# (reel, shareNow, isAiGenerated, cover = frame 0). Spec:
+# docs/superpowers/specs/2026-11-15-ig-reel-cinematic-redesign-design.md
 # Triggered by the Cloudflare Worker scheduler (D1 row) via workflow_dispatch.
 # DRY_RUN=true composes everything but skips the upload and post.
 # Images: provider chain cloudflare → google → huggingface → pollinations
@@ -61,14 +64,16 @@ jobs:
 
       - name: Install system deps
         run: |
-          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-inter fonts-dejavu-core
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-inter fonts-dejavu-core fonts-noto-color-emoji
+          # CTA/payoff emoji render as tofu boxes without this font — fail early instead of posting them
+          fc-list | grep -qi "Noto Color Emoji" || { echo "::error::Noto Color Emoji font missing"; exit 1; }
 
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
           pip install pillow==13.0.0 numpy==2.4.6 scipy==1.17.1 playwright==1.65.1
 
-      - name: Ensure a Chrome binary for render_html.py
+      - name: Ensure a Chrome binary (scene capture)
         run: |
           if ! command -v google-chrome; then
             python -m playwright install --with-deps chromium
@@ -97,8 +102,20 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_NEWS_CHANNEL_ID: ${{ secrets.SLACK_NEWS_CHANNEL_ID }}
 
+      - name: Upload dry-run Reel for review
+        if: always() && env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ig-reel-dry-run
+          path: |
+            .ig-reel-out/ig_reel.mp4
+            .ig-reel-out/frames_sample/*.jpg
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Notify failure to Slack #news
-        if: failure() && env.DRY_RUN != 'true' && !hashFiles('failure-posted')
+        # cancelled() too: a run killed by timeout-minutes is 'cancelled', not 'failure', and fail() never ran
+        if: (failure() || cancelled()) && env.DRY_RUN != 'true' && !hashFiles('failure-posted')
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_NEWS_CHANNEL_ID: ${{ secrets.SLACK_NEWS_CHANNEL_ID }}
