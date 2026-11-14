@@ -132,4 +132,51 @@ evil["beats"][0]["text"] = "<script>alert(1)</script> teks"
 ctx = scene_html("context", evil, IMGS, META)
 assert "<script>alert" not in ctx and "&lt;script&gt;" in ctx
 
+# ---------- render (needs playwright + Chrome + ffmpeg) ----------
+import json  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import time  # noqa: E402
+
+try:
+    import playwright  # noqa: F401
+    HAVE_RENDER = HAVE_NUMPY and bool(shutil.which("ffmpeg")) and bool(shutil.which("ffprobe"))
+except ImportError:
+    HAVE_RENDER = False
+if not HAVE_RENDER:
+    print("selfcheck: playwright/ffmpeg/numpy missing — render section skipped")
+else:
+    from ig_reel.reel import render_reel
+
+    work = pathlib.Path(tempfile.mkdtemp())
+    imgs = {}
+    for k, color in zip((1, 2, 3, 4), ("0x1d3557", "0x6a040f", "0x264653", "0x3c096c")):
+        imgs[k] = work / f"img{k}.jpg"
+        subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"color=c={color}:s=1080x1920",
+                        "-frames:v", "1", str(imgs[k])], check=True)
+    longest = copy.deepcopy(STORY)
+    longest["hook"] = "Menyamping Menakjubkan Mengerikan Berbahaya Misterius Raksasa Planet"
+    longest["hook_highlight"] = ["Mengerikan Berbahaya"]
+    for b in longest["beats"]:
+        b["text"] = (b["text"] + " " + "kata " * 40)[:120].strip()
+        if b["highlight"] and b["highlight"] not in b["text"]:
+            b["highlight"] = ""
+    longest["cta"] = ("Kirim ke teman yang suka luar angkasa dan sains 🚀 " + "x" * 20)[:60]
+    t0 = time.time()
+    out = work / "reel.mp4"
+    res = render_reel(longest, imgs, {"source": "NASA", "date": "12 Nov 2026", "handle": "@kaliajatau.id"},
+                      "2026-11-16-0730", out)
+    took = time.time() - t0
+    assert res["overflow"] == [], res["overflow"]
+    probe = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(out)],
+                                      capture_output=True, text=True, check=True).stdout)
+    v = next(s for s in probe["streams"] if s["codec_type"] == "video")
+    assert (v["width"], v["height"], v["r_frame_rate"]) == (1080, 1920, "30/1"), v
+    assert any(s["codec_type"] == "audio" for s in probe["streams"])
+    assert abs(float(probe["format"]["duration"]) - 28.6) < 0.15, probe["format"]["duration"]
+    assert res["hook_visible_at_0"] is True
+    samples = sorted((out.parent / "frames_sample").glob("*.jpg"))
+    assert len(samples) == 6, samples
+    print(f"selfcheck: rendered {res['frames']} frames in {took:.1f}s ({res['frames'] / took:.1f} fps) → {out}")
+
 print("ig_reel selfcheck: all assertions passed")
