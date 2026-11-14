@@ -358,9 +358,12 @@ Artikel:
     data = ai_json(prompt)
     if not isinstance(data, dict):
         raise RuntimeError("AI story is not a JSON object")
-    hard, soft = check_story(data, article)
-    if hard or soft:
-        log("story: validation issues: " + "; ".join(hard + soft))
+    years = set(re.findall(r"\b(?:19|20)\d{2}\b", str(cand.get("date") or "")))
+    hard, soft = check_story(data, article, extra_allowed=years)
+    if soft:
+        log("story: truncating: " + "; ".join(soft))
+    if hard:  # soft-only issues are truncated below; a repair call could only make them worse
+        log("story: validation issues: " + "; ".join(hard))
         fix = ("Perbaiki JSON cerita di bawah agar lolos validasi. Pelanggaran:\n- " + "\n- ".join(hard + soft)
                + "\nTetap HANYA pakai informasi dari artikel; hapus angka yang tidak ada di artikel. "
                + "Jawab hanya JSON dengan skema yang sama.\n\nJSON:\n" + json.dumps(data, ensure_ascii=False)
@@ -368,7 +371,7 @@ Artikel:
         data = ai_json(fix)
         if not isinstance(data, dict):
             raise RuntimeError("AI story repair is not a JSON object")
-        hard, soft = check_story(data, article)
+        hard, soft = check_story(data, article, extra_allowed=years)
         if hard:
             raise RuntimeError("; ".join(hard))
     apply_story_limits(data)

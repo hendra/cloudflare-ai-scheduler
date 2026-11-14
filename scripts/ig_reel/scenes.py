@@ -81,6 +81,7 @@ def _beat_text(text, highlight, hl_at):
     if highlight and highlight in text:
         pre, post = text.split(highlight, 1)
         a, t = _words(pre, REVEAL_START)
+        hl_at = max(hl_at, t + WORD_STAGGER)  # never sweep before the highlighted words appear
         hl_words = "".join(f"<span>{_esc(w)}</span>" for w in re.findall(r"\S+\s*", highlight))
         b = (f'<span class="hl" style="animation-delay:{t:.3f}s"><span class="hlbox" '
              f'style="animation-delay:{hl_at:.3f}s"></span><span class="hltext" '
@@ -92,15 +93,22 @@ def _beat_text(text, highlight, hl_at):
 
 
 def _highlight_hook(hook, phrases):
-    out = _esc(hook)
-    for p in phrases or []:
-        p = _esc(str(p).strip())
-        if not p:
-            continue
-        m = re.search(re.escape(p), out, re.I)
-        if m:
-            out = out[:m.start()] + "<em>" + m.group(0) + "</em>" + out[m.end():]
-    return out
+    """Wrap whole-word, case-insensitive matches of each phrase in <em>. Matching runs on the
+    raw hook and the HTML is built once, so phrases can never hit tags or entities."""
+    if isinstance(phrases, str):
+        phrases = [phrases]
+    spans = []
+    for p in phrases if isinstance(phrases, list) else []:
+        p = str(p).strip()
+        m = re.search(r"(?<!\w)" + re.escape(p) + r"(?!\w)", hook, re.I) if p else None
+        if m and not any(m.start() < e and s < m.end() for s, e in spans):
+            spans.append((m.start(), m.end()))
+    out, pos = [], 0
+    for s, e in sorted(spans):
+        out += [_esc(hook[pos:s]), "<em>", _esc(hook[s:e]), "</em>"]
+        pos = e
+    out.append(_esc(hook[pos:]))
+    return "".join(out)
 
 
 def scene_html(kind, story, images, meta):

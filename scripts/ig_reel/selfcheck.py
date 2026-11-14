@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from ig_reel.story import (  # noqa: E402
-    build_caption, check_story, extract_article_text, format_date_id, interleave, numbers_in,
+    apply_story_limits, build_caption, check_story, extract_article_text, format_date_id, interleave, numbers_in,
 )
 
 # ---------- story ----------
@@ -108,6 +108,37 @@ assert format_date_id("2026-05-03T10:00:00Z") == "3 Mei 2026"
 assert format_date_id("") == "tanggal tidak tercantum"
 assert format_date_id("sometime soon") == "sometime soon"
 
+# --- review fixes ---
+# Proper nouns / loanwords in otherwise Indonesian copy must not be flagged as English.
+for hook_ok in ("Teleskop James Webb", "Robot NASA temukan virus Mars", "Black hole raksasa", "Planet ini hujan kaca"):
+    t = copy.deepcopy(STORY); t["hook"] = hook_ok
+    h, _ = check_story(t, ARTICLE + " James Webb Space Telescope NASA robot virus Mars black hole")
+    assert not any("Indonesia" in x for x in h), (hook_ok, h)
+for hl_ok in ("WASP-127b", "James Webb Space Telescope"):
+    t = copy.deepcopy(STORY); t["beats"][0]["text"] = f"Teleskop mengamati {hl_ok} dari jauh."; t["beats"][0]["highlight"] = hl_ok
+    h, _ = check_story(t, ARTICLE + " James Webb Space Telescope")
+    assert not any("Indonesia" in x for x in h), (hl_ok, h)
+# Indonesian scale words: "33 ribu" = 33,000; "1,5 miliar" must NOT match "1.5 million".
+scaled = copy.deepcopy(STORY); scaled["caption"]["body"] = "Sekitar 33 ribu orang ikut studi ini."
+assert check_story(scaled, ARTICLE + " About 33,000 people took part.")[0] == [], check_story(scaled, ARTICLE + " About 33,000 people took part.")[0]
+scaled["caption"]["body"] = "Biayanya 1,5 miliar dolar."
+assert any("1500000000" in x for x in check_story(scaled, ARTICLE + " It cost 1.5 million dollars.")[0])
+scaled["caption"]["body"] = "Biayanya 1,5 juta dolar."
+assert check_story(scaled, ARTICLE + " It cost 1.5 million dollars.")[0] == []
+# CTA numbers are checked; extra allowed numbers (e.g. the article's year) are accepted.
+cta_num = copy.deepcopy(STORY); cta_num["cta"] = "90% orang belum tahu ini 🚀"
+assert any("90" in x for x in check_story(cta_num, ARTICLE)[0])
+yr = copy.deepcopy(STORY); yr["caption"]["body"] = "Temuan tahun 2026 ini mengejutkan."
+assert check_story(yr, ARTICLE, extra_allowed={"2026"})[0] == []
+# hook_highlight given as a string (model slip) is coerced, not iterated char by char.
+hs = copy.deepcopy(STORY); hs["hook_highlight"] = "hujan kaca"
+assert check_story(hs, ARTICLE)[0] == []
+apply_story_limits(hs)
+assert hs["hook_highlight"] == ["hujan kaca"], hs["hook_highlight"]
+# A numeric highlight must not crash apply_story_limits.
+nh = copy.deepcopy(STORY); nh["beats"][1]["highlight"] = 8700
+apply_story_limits(nh)
+
 cap = build_caption(copy.deepcopy(STORY), "NASA", "https://x")
 assert cap.startswith("Bayangkan hujan kaca"), cap
 assert "Sumber: NASA (https://x)" in cap
@@ -170,6 +201,21 @@ twist = scene_html("twist", copy.deepcopy(STORY), IMGS, META)
 assert 'class="hl"' in twist and "8.700" in twist.split('class="hl"')[1].split("</span></span>")[0]
 visible = re.sub(r"<[^>]+>", "", twist)
 assert "8.700 km/jam — sekitar" in visible, "space after the highlight must survive"
+# Hook highlight: a string must not produce tag fragments; a short phrase must not colour part of a word.
+hs_html = scene_html("hook", dict(copy.deepcopy(STORY), hook="Meteor jatuh di kota", hook_highlight="meteor"), IMGS, META)
+hook_h1 = hs_html.split('class="hook-text safe">')[1].split("</h1>")[0]
+assert hook_h1 == "<em>Meteor</em> jatuh di kota", hook_h1
+hs_html = scene_html("hook", dict(copy.deepcopy(STORY), hook="Planet ini hujan kaca", hook_highlight=["kaca", "a"]), IMGS, META)
+hook_h1 = hs_html.split('class="hook-text safe">')[1].split("</h1>")[0]
+assert hook_h1 == "Planet ini hujan <em>kaca</em>", hook_h1
+# Highlight sweep never starts before the highlighted words have appeared.
+late = copy.deepcopy(STORY)
+late["beats"][1]["text"] = "Satu dua tiga empat lima enam tujuh delapan sembilan sepuluh sebelas dua belas tiga belas lalu 8.700 km/jam."
+late["beats"][1]["highlight"] = "8.700 km/jam"
+lt = scene_html("twist", late, IMGS, META)
+hl_delay = float(lt.split('class="hl" style="animation-delay:')[1].split("s")[0])
+box_delay = float(lt.split('class="hlbox" style="animation-delay:')[1].split("s")[0])
+assert box_delay >= hl_delay, (hl_delay, box_delay)
 cta = scene_html("cta", copy.deepcopy(STORY), IMGS, META)
 assert FOLLOW_LINE in cta and "Kirim ke teman" in cta
 evil = copy.deepcopy(STORY)

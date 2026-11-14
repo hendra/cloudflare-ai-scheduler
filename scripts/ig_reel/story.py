@@ -5,6 +5,7 @@ Grounding rule: every number the AI writes must appear in the fetched article te
 """
 import datetime as _dt
 import email.utils as _eu
+from decimal import Decimal, InvalidOperation
 import html as _html
 import re
 
@@ -106,14 +107,31 @@ def looks_english(text):
     return en_hits >= 2 and en_hits > sum(w in _ID_WORDS for w in words)
 
 
-def hook_copied_from_article(hook, article_text):
-    """A short hook has too few function words to judge; an English hook is mostly words
-    lifted straight from the English article, an Indonesian one mostly is not."""
-    words = [w for w in _words_of(hook) if len(w) >= 3]
-    if not words:
+def copied_from_article(text, article_text, min_words):
+    """A short field has too few function words to judge; English copy is mostly ordinary
+    words lifted straight from the English article. Proper nouns (capitalised after the
+    first token, e.g. "James Webb") and tokens with digits ("WASP-127b") are ignored, and
+    fields with fewer than `min_words` ordinary words are not judged at all."""
+    words = []
+    for i, tok in enumerate(str(text).split()):
+        w = tok.strip(".,;:!?\"'()[]—-…")
+        if not w or any(ch.isdigit() for ch in w) or (i > 0 and w[:1].isupper()):
+            continue
+        w = w.lower()
+        if len(w) >= 3 and w.isalpha():
+            words.append(w)
+    if len(words) < min_words:
         return False
     article_words = set(_words_of(article_text))
-    return sum(w in article_words for w in words) / len(words) >= 0.6
+    return sum(w in article_words for w in words) / len(words) >= 0.75
+
+
+def hook_phrases(data):
+    """hook_highlight as a list (models sometimes return a single string)."""
+    hl = data.get("hook_highlight")
+    if isinstance(hl, str):
+        hl = [hl]
+    return [str(p).strip() for p in (hl if isinstance(hl, list) else []) if str(p).strip()]
 
 
 def _norm_number(raw):
@@ -126,8 +144,29 @@ def _norm_number(raw):
     return out
 
 
-def numbers_in(text):
-    return {_norm_number(m) for m in re.findall(r"\d+(?:[.,]\d+)*", str(text))}
+_SCALES = {"ribu": 10 ** 3, "thousand": 10 ** 3, "juta": 10 ** 6, "million": 10 ** 6,
+           "miliar": 10 ** 9, "milyar": 10 ** 9, "billion": 10 ** 9, "triliun": 10 ** 12, "trillion": 10 ** 12}
+_NUM_RE = re.compile(r"(\d+(?:[.,]\d+)*)(?:\s*(" + "|".join(_SCALES) + r")\b)?", re.I)
+
+
+def numbers_in(text, keep_raw=True):
+    """Normalised numbers in `text`. "33 ribu" / "33 thousand" also yield 33000. With
+    keep_raw=False (story side) a scaled number yields ONLY its scaled value, so
+    "1,5 miliar" can't be licensed by an article's "1.5 million"."""
+    out = set()
+    for raw, scale in _NUM_RE.findall(str(text)):
+        value = _norm_number(raw)
+        if scale:
+            try:
+                scaled = Decimal(value) * _SCALES[scale.lower()]
+                out.add(format(scaled.quantize(Decimal(1)) if scaled == scaled.to_integral() else scaled.normalize(), "f"))
+            except InvalidOperation:
+                pass
+            if keep_raw:
+                out.add(value)
+        else:
+            out.add(value)
+    return out
 
 
 def _story_texts(data):
@@ -137,11 +176,13 @@ def _story_texts(data):
             texts += [str(b.get("text") or ""), str(b.get("highlight") or "")]
     cap = data.get("caption") if isinstance(data.get("caption"), dict) else {}
     texts += [str(cap.get(k) or "") for k in ("opener", "body", "question", "save_line")]
+    texts += [str(data.get("cta") or "")] + hook_phrases(data)
     return texts
 
 
-def check_story(data, article_text):
-    """Returns (hard, soft). Hard = must not ship; soft = safely truncatable."""
+def check_story(data, article_text, extra_allowed=()):
+    """Returns (hard, soft). Hard = must not ship; soft = safely truncatable.
+    extra_allowed: numbers known from outside the article text (e.g. the RSS date's year)."""
     hard, soft = [], []
     hook = str(data.get("hook") or "").strip()
     if not hook:
@@ -164,7 +205,7 @@ def check_story(data, article_text):
             hard.append(f"beat {i + 1}: missing 'text'")
         elif len(text) > BEAT_MAX:
             soft.append(f"beat {i + 1} text {len(text)} chars (> {BEAT_MAX})")
-        hl = str(b.get("highlight") or "").strip()
+        hl = str(b.get("highlight") if b.get("highlight") is not None else "").strip()
         if hl and hl not in text:
             hard.append(f"beat {i + 1}: highlight {hl!r} is not an exact substring of its text")
 
@@ -197,13 +238,13 @@ def check_story(data, article_text):
 
     # Language: judged per field — one Indonesian caption must not carry English beats.
     lang_errs = []
-    if hook and (looks_english(hook) or hook_copied_from_article(hook, article_text)):
+    if hook and (looks_english(hook) or copied_from_article(hook, article_text, 3)):
         lang_errs.append("hook")
     for i, b in enumerate(beats):
         if isinstance(b, dict) and looks_english(b.get("text")):
             lang_errs.append(f"beat {i + 1}")
-        hl = str(b.get("highlight") or "") if isinstance(b, dict) else ""
-        if hl and (looks_english(hl) or hook_copied_from_article(hl, article_text)):
+        hl = str(b.get("highlight") if b.get("highlight") is not None else "") if isinstance(b, dict) else ""
+        if hl and (looks_english(hl) or copied_from_article(hl, article_text, 2)):
             lang_errs.append(f"beat {i + 1} highlight")
     if cta and looks_english(cta):
         lang_errs.append("cta")
@@ -217,8 +258,8 @@ def check_story(data, article_text):
     if lang_errs:
         hard.append("must be written in Bahasa Indonesia, not English: " + ", ".join(dict.fromkeys(lang_errs)))
 
-    allowed = numbers_in(article_text)
-    invented = sorted({n for t in _story_texts(data) for n in numbers_in(t)} - allowed)
+    allowed = numbers_in(article_text) | {str(n) for n in extra_allowed}
+    invented = sorted({n for t in _story_texts(data) for n in numbers_in(t, keep_raw=False)} - allowed)
     if invented:
         hard.append("numbers not found in the article text (do not invent numbers): " + ", ".join(invented))
     return hard, soft
@@ -234,11 +275,14 @@ def _truncate(s, n):
 
 def apply_story_limits(data):
     data["hook"] = " ".join(str(data.get("hook") or "").split()[:HOOK_MAX_WORDS])
+    hook_l = data["hook"].lower()
+    data["hook_highlight"] = [p for p in hook_phrases(data)
+                              if re.search(r"(?<!\w)" + re.escape(p.lower()) + r"(?!\w)", hook_l)]
     for b in data.get("beats") or []:
         if isinstance(b, dict):
             text = _truncate(b.get("text"), BEAT_MAX)
-            if b.get("highlight") and b["highlight"] not in text:
-                b["highlight"] = ""
+            hl = str(b.get("highlight") if b.get("highlight") is not None else "").strip()
+            b["highlight"] = hl if hl and hl in text else ""
             b["text"] = text
     data["cta"] = _truncate(data.get("cta"), CTA_MAX)
     if isinstance(data.get("caption"), dict):

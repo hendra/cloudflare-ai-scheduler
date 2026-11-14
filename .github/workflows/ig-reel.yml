@@ -112,7 +112,8 @@ jobs:
           retention-days: 7
 
       - name: Notify failure to Slack #news
-        if: failure() && env.DRY_RUN != 'true' && !hashFiles('failure-posted')
+        # cancelled() too: a run killed by timeout-minutes is 'cancelled', not 'failure', and fail() never ran
+        if: (failure() || cancelled()) && env.DRY_RUN != 'true' && !hashFiles('failure-posted')
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_NEWS_CHANNEL_ID: ${{ secrets.SLACK_NEWS_CHANNEL_ID }}
