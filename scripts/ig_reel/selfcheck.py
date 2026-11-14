@@ -5,6 +5,7 @@ skipped with a notice when they are missing.
 """
 import copy
 import pathlib
+import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
@@ -104,5 +105,31 @@ if HAVE_NUMPY:
         b = compose(s2, 46, tmp / "y.wav")
         variants.append((a["key"], a["progression"]) != (b["key"], b["progression"]))
     assert any(variants), "slots on the same day should not all share a track"
+
+# ---------- scenes ----------
+from ig_reel.scenes import FOLLOW_LINE, scene_html  # noqa: E402
+from ig_reel.timeline import SCENE_BEATS  # noqa: E402
+
+IMGS = {k: pathlib.Path(f"/tmp/img{k}.jpg") for k in (1, 2, 3, 4)}
+META = {"source": "NASA", "date": "12 Nov 2026", "handle": "@kaliajatau.id", "progress_from": 0.0, "progress_to": 0.1}
+assert FOLLOW_LINE == "Ikuti @kaliajatau.id buat fakta gila berikutnya"
+for kind, _ in SCENE_BEATS:
+    h = scene_html(kind, copy.deepcopy(STORY), IMGS, META)
+    assert "@font-face" in h and "Anton" in h and re.search(r'class="[^"]*\bsafe\b', h), kind
+    if kind in ("context", "twist", "why", "payoff"):
+        assert "Sumber: NASA · 12 Nov 2026" in h, kind
+hook = scene_html("hook", copy.deepcopy(STORY), IMGS, META)
+assert "hujan kaca" in hook.lower() and "hook-text" in hook
+assert "<em>hujan kaca</em>" in hook.lower(), "hook highlight words must be wrapped"
+hook_rule = hook.split(".hook-text {")[1].split("}")[0]
+assert "animation" not in hook_rule, "hook text must be fully visible at t=0 (cover)"
+twist = scene_html("twist", copy.deepcopy(STORY), IMGS, META)
+assert 'class="hl"' in twist and "8.700" in twist.split('class="hl"')[1].split("</span></span>")[0]
+cta = scene_html("cta", copy.deepcopy(STORY), IMGS, META)
+assert FOLLOW_LINE in cta and "Kirim ke teman" in cta
+evil = copy.deepcopy(STORY)
+evil["beats"][0]["text"] = "<script>alert(1)</script> teks"
+ctx = scene_html("context", evil, IMGS, META)
+assert "<script>alert" not in ctx and "&lt;script&gt;" in ctx
 
 print("ig_reel selfcheck: all assertions passed")
