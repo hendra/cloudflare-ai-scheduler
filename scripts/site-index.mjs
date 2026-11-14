@@ -16,9 +16,14 @@ const reason = (e) => String(e?.message || e).replace(/\s+/g, " ").slice(0, 150)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const get = (url, init = {}) => fetch(url, { redirect: "follow", signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), ...init });
 
-// First <loc> whose last non-empty path segment is exactly `slug` (not a substring match).
-export function matchSitemapLoc(xml, slug) {
-  for (const [, loc] of String(xml).matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)) {
+const locsOf = (xml) => [...String(xml).matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/g)].map((m) => m[1]);
+
+// First <loc> whose last non-empty path segment is exactly `slug` (not a substring match)
+// and that is not in `knownLocs` — a page live before the merge (e.g. a pillar/category
+// page sharing the slug) must never be mistaken for the new article.
+export function matchSitemapLoc(xml, slug, knownLocs = new Set()) {
+  for (const loc of locsOf(xml)) {
+    if (knownLocs.has(loc)) continue;
     try {
       const segs = new URL(loc).pathname.split("/").filter(Boolean);
       if (segs[segs.length - 1] === slug) return loc;
@@ -27,12 +32,21 @@ export function matchSitemapLoc(xml, slug) {
   return null;
 }
 
-async function waitForLive(siteUrl, slug, waitMs, pollMs) {
+// Locs in the live sitemap right now. Call BEFORE merging and pass the result to
+// indexArticle as knownLocs. Never throws; empty set if the sitemap can't be read.
+export async function sitemapLocs(siteUrl) {
+  try {
+    const res = await get(`${siteUrl}/sitemap-0.xml`, { headers: { "cache-control": "no-cache" } });
+    return new Set(res.ok ? locsOf(await res.text()) : []);
+  } catch { return new Set(); }
+}
+
+async function waitForLive(siteUrl, slug, knownLocs, waitMs, pollMs) {
   const deadline = Date.now() + waitMs;
   for (;;) {
     try {
       const res = await get(`${siteUrl}/sitemap-0.xml`, { headers: { "cache-control": "no-cache" } });
-      const url = res.ok ? matchSitemapLoc(await res.text(), slug) : null;
+      const url = res.ok ? matchSitemapLoc(await res.text(), slug, knownLocs) : null;
       if (url && (await get(url)).status === 200) return url;
     } catch { /* deploy in progress / transient network error: keep polling */ }
     if (Date.now() + pollMs > deadline) return null;
@@ -80,8 +94,8 @@ async function submitGoogleSitemap(siteUrl, saJson) {
   return `failed: sitemaps.submit HTTP ${res.status}`;
 }
 
-export async function indexArticle({ siteUrl, slug, indexNowKey, env, waitMs = 600000, pollMs = 30000 }) {
-  const url = await waitForLive(siteUrl, slug, waitMs, pollMs);
+export async function indexArticle({ siteUrl, slug, indexNowKey, env, knownLocs = new Set(), waitMs = 600000, pollMs = 30000 }) {
+  const url = await waitForLive(siteUrl, slug, knownLocs, waitMs, pollMs);
   if (!url) {
     const s = `skipped: not live after ${Math.round(waitMs / 60000) || "<1"} min`;
     return { url: null, live: false, bing: s, google: s };
