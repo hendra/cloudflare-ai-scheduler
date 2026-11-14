@@ -70,6 +70,7 @@ jobs:
         working-directory: scheduler
         run: node scripts/fullstackweb-blog-writer.mjs
         env:
+          GSC_SERVICE_ACCOUNT_JSON: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON }} # this step only; stripped from the site build env
           FULLSTACKWEB_PAT: ${{ secrets.FULLSTACKWEB_PAT }}
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

@@ -2,6 +2,7 @@
 import { callModel } from "./ai-providers.mjs";
 import { generateCover } from "./cover/render.mjs";
 import { mergePr } from "./site-pr.mjs";
+import { indexArticle, sitemapLocs } from "./site-index.mjs";
 // INASOFT blog writer (PR + auto-merge) — deterministic, zero dependencies.
 //
 // Flow: fetch signals (HN front page + GitHub Trending) → load existing corpus
@@ -28,6 +29,8 @@ import { join } from "node:path";
 const DRY_RUN = String(process.env.DRY_RUN || "false") === "true";
 const AI_STUB = process.env.AI_STUB === "true";
 const SITE_DIR = process.env.SITE_DIR || "inasoft-site";
+const SITE_URL = "https://inasoft.id";
+const INDEXNOW_KEY = "3817864a76ab43dab819179b3d2f933f"; // public key file: https://inasoft.id/3817864a76ab43dab819179b3d2f933f.txt
 const INASOFT_PAT = process.env.INASOFT_PAT || "";
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
 const SLACK_CHANNEL = process.env.SLACK_INASOFT_CHANNEL_ID || "";
@@ -425,7 +428,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
 
   // 7) build must pass
   console.log("running astro check && astro build …");
-  try { execSync("npm run build", { cwd: SITE_DIR, stdio: "pipe", timeout: 600000, env: { ...process.env } }); }
+  try { execSync("npm run build", { cwd: SITE_DIR, stdio: "pipe", timeout: 600000, env: { ...process.env, GSC_SERVICE_ACCOUNT_JSON: undefined } }); }
   catch (e) {
     const raw = String(e.stdout || "") + String(e.stderr || "");
     const lines = raw.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
@@ -455,12 +458,16 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   const pr = execFileSync("gh", ["pr", "create", "--base", "main", "--head", branch, "--title", `content: add ${article.slug}`, "--body-file", prBodyPath], { cwd: SITE_DIR, env: gitEnv, stdio: "pipe" }).toString().trim();
   try { unlinkSync(prBodyPath); } catch {}
   console.log("PR opened:", pr);
+  const knownLocs = await sitemapLocs(SITE_URL); // snapshot before merge: only a NEW loc counts as the article
   const m = mergePr(pr, { env: gitEnv });
   if (m.merged) console.log("PR merged:", pr);
   else console.log(`::warning title=Auto-merge failed::${m.error} — PR ${pr} left open; merge it by hand.`);
+  // Indexing never fails the run: the article is already published.
+  const ix = m.merged ? await indexArticle({ siteUrl: SITE_URL, slug: article.slug, indexNowKey: INDEXNOW_KEY, env: process.env, knownLocs }) : null;
+  if (ix) console.log("indexing:", JSON.stringify(ix));
   // The PR (merged or open) is the deliverable; a Slack summary failure (e.g. channel_not_found) must not fail the run.
   try { await postToSlack([m.merged
-    ? `🖌️ _INASOFT article published_\n*${article.title}*\n→ ${pr}\n${v.wordCount} words · keyword: ${article.keyword}`
+    ? `🖌️ _INASOFT article published_\n*${article.title}*\n→ ${pr}\n${v.wordCount} words · keyword: ${article.keyword}\n${ix.live ? `🔎 ${ix.url} · Bing: ${ix.bing} · Google sitemap: ${ix.google}` : `🔎 not live after 10 min — search engines not notified. Once it is deployed: \`node scripts/site-index.mjs ${SITE_URL} ${article.slug} ${INDEXNOW_KEY}\``}`
     : `🖌️ _INASOFT PR opened — auto-merge failed_\n*${article.title}*\n→ ${pr}\n${m.error}\nMerge it by hand.`]); }
   catch (e) { console.log(`::warning title=Slack summary not posted::${e.message} — PR ${pr} was opened; check the Slack channel secret / bot membership.`); }
 })().catch(async (e) => { await fail(`unexpected error: ${String(e).slice(0, 300)}`); });
