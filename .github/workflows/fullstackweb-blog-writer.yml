@@ -1,9 +1,9 @@
 name: fullstackweb-blog-writer
 
 # FullstackWeb.dev blog writer
-# PR-ONLY — never auto-merges. Spec: prompts/fullstackweb-blog.md
-# Generates one draft article per run, opens a PR on hendra/fullstackwebdev-site,
-# notifies #fullstackwebdev, and leaves merge to a human. Triggered by the Cloudflare Worker
+# Auto-merges its PR once astro build passes. Spec: prompts/fullstackweb-blog.md
+# Generates one article per run, opens and auto-merges a PR on hendra/fullstackwebdev-site,
+# notifies #fullstackwebdev. Merge failure leaves the PR open. Triggered by the Cloudflare Worker
 # scheduler (D1 row) via workflow_dispatch; AI via scripts/ai-providers.mjs
 # (OpenCode Console → OpenRouter).
 

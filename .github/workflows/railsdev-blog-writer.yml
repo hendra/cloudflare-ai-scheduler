@@ -1,9 +1,9 @@
 name: railsdev-blog-writer
 
 # RailsDev.io blog writer
-# PR-ONLY — never auto-merges. Spec: docs/superpowers/specs/2026-11-11-railsdev-blog-writer-design.md
-# Generates one draft article per run, opens a PR on hendra/railsdev-site,
-# notifies #railsdev, and leaves merge to a human. Triggered by the Cloudflare Worker
+# Auto-merges its PR once astro build passes. Spec: docs/superpowers/specs/2026-11-11-railsdev-blog-writer-design.md
+# Generates one article per run, opens and auto-merges a PR on hendra/railsdev-site,
+# notifies #railsdev. Merge failure leaves the PR open. Triggered by the Cloudflare Worker
 # scheduler (D1 row) via workflow_dispatch; AI via scripts/ai-providers.mjs
 # (OpenCode Console → OpenRouter).
 

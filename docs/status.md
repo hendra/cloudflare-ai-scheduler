@@ -39,9 +39,9 @@ npx wrangler d1 execute scheduler-db --remote --command \
 | `github-trending-weekly` | `.github/workflows/github-trending-weekly.yml` | weekly top-10 → #news |
 | `rails-job-search` | `.github/workflows/rails-job-search.yml` | daily jobs digest → #jobs |
 | `inasoft-news-digest` | `.github/workflows/inasoft-news-digest.yml` | daily tech/AI digest → #news |
-| `railsdev-blog-writer` | `.github/workflows/railsdev-blog-writer.yml` | draft PR on railsdev-site |
-| `fullstackweb-blog-writer` | `.github/workflows/fullstackweb-blog-writer.yml` | draft PR on fullstackwebdev-site |
-| `inasoft-blog-writer` | `.github/workflows/inasoft-blog-writer.yml` | Bahasa Indonesia draft PR on inasoft-site |
+| `railsdev-blog-writer` | `.github/workflows/railsdev-blog-writer.yml` | auto-merged PR on railsdev-site |
+| `fullstackweb-blog-writer` | `.github/workflows/fullstackweb-blog-writer.yml` | auto-merged PR on fullstackwebdev-site |
+| `inasoft-blog-writer` | `.github/workflows/inasoft-blog-writer.yml` | auto-merged Bahasa Indonesia PR on inasoft-site |
 | `ig-reel` | `.github/workflows/ig-reel.yml` | Interesting Facts Reel → IG @kaliajatau.id via Buffer |
 
 ## Secrets inventory (names only)
