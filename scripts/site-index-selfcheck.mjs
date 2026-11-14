@@ -1,5 +1,7 @@
-// Self-check for scripts/site-index.mjs. Hits the live railsdev.io sitemap; never pings
-// search engines (INDEXNOW_DRY) and never uses real Google credentials.
+// Self-check for scripts/site-index.mjs. Never pings search engines (INDEXNOW_DRY) and never
+// uses real Google credentials. NEEDS NETWORK: it reads the live railsdev.io sitemaps and
+// expects the article `rails-monitoring-uptime-kuma` to exist — if that article is ever
+// renamed/removed, swap in another live railsdev slug.
 import assert from "node:assert/strict";
 import { matchSitemapLoc, indexArticle, sitemapLocs } from "./site-index.mjs";
 
@@ -29,5 +31,33 @@ const before = await sitemapLocs("https://railsdev.io");
 assert.ok(before.has("https://railsdev.io/blog/rails-monitoring-uptime-kuma"));
 const preexisting = await indexArticle({ ...live, env: { INDEXNOW_DRY: "1" }, knownLocs: before, waitMs: 1000, pollMs: 500 });
 assert.equal(preexisting.live, false);
+
+// Google responses, stubbed (no real credentials): Restricted access → clear skip;
+// API errors keep Google's error.message.
+{
+  const { generateKeyPairSync } = await import("node:crypto");
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const sa = JSON.stringify({ client_email: "t@x.iam.gserviceaccount.com", private_key: privateKey.export({ type: "pkcs8", format: "pem" }) });
+  const realFetch = globalThis.fetch;
+  const json = (status, body) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  const stub = (sites, putStatus = 200) => async (url, init) => {
+    const u = String(url);
+    if (u.startsWith("https://oauth2.googleapis.com/token")) return json(200, { access_token: "tok" });
+    if (u.endsWith("/webmasters/v3/sites")) return json(200, { siteEntry: sites });
+    if (init?.method === "PUT") return json(putStatus, { error: { message: "User does not have sufficient permission" } });
+    return realFetch(url, init);
+  };
+  try {
+    globalThis.fetch = stub([{ siteUrl: "sc-domain:railsdev.io", permissionLevel: "siteRestrictedUser" }]);
+    let r = await indexArticle({ ...live, env: { INDEXNOW_DRY: "1", GSC_SERVICE_ACCOUNT_JSON: sa } });
+    assert.match(r.google, /^skipped: service account has Restricted access/);
+    globalThis.fetch = stub([{ siteUrl: "sc-domain:railsdev.io", permissionLevel: "siteFullUser" }], 403);
+    r = await indexArticle({ ...live, env: { INDEXNOW_DRY: "1", GSC_SERVICE_ACCOUNT_JSON: sa } });
+    assert.equal(r.google, "failed: sitemaps.submit HTTP 403 User does not have sufficient permission");
+    globalThis.fetch = stub([{ siteUrl: "sc-domain:railsdev.io", permissionLevel: "siteOwner" }]);
+    r = await indexArticle({ ...live, env: { INDEXNOW_DRY: "1", GSC_SERVICE_ACCOUNT_JSON: sa } });
+    assert.equal(r.google, "ok");
+  } finally { globalThis.fetch = realFetch; }
+}
 
 console.log("site-index selfcheck: all assertions passed");

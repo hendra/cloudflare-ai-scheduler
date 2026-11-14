@@ -467,7 +467,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   if (ix) console.log("indexing:", JSON.stringify(ix));
   // The PR (merged or open) is the deliverable; a Slack summary failure (e.g. channel_not_found) must not fail the run.
   try { await postToSlack([m.merged
-    ? `🖌️ _INASOFT article published_\n*${article.title}*\n→ ${pr}\n${v.wordCount} words · keyword: ${article.keyword}\n🔎 ${ix.url || "(not live yet)"} · Bing: ${ix.bing} · Google sitemap: ${ix.google}`
+    ? `🖌️ _INASOFT article published_\n*${article.title}*\n→ ${pr}\n${v.wordCount} words · keyword: ${article.keyword}\n${ix.live ? `🔎 ${ix.url} · Bing: ${ix.bing} · Google sitemap: ${ix.google}` : `🔎 not live after 10 min — search engines not notified. Once it is deployed: \`node scripts/site-index.mjs ${SITE_URL} ${article.slug} ${INDEXNOW_KEY}\``}`
     : `🖌️ _INASOFT PR opened — auto-merge failed_\n*${article.title}*\n→ ${pr}\n${m.error}\nMerge it by hand.`]); }
   catch (e) { console.log(`::warning title=Slack summary not posted::${e.message} — PR ${pr} was opened; check the Slack channel secret / bot membership.`); }
 })().catch(async (e) => { await fail(`unexpected error: ${String(e).slice(0, 300)}`); });
