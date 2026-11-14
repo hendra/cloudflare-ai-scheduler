@@ -69,4 +69,40 @@ assert cap.startswith("Bayangkan hujan kaca"), cap
 assert "Sumber: NASA (https://x)" in cap
 assert cap.rstrip().splitlines()[-1] == "#Sains #Astronomi #FaktaUnik #NASA #LuarAngkasa"
 
+# ---------- timeline ----------
+from ig_reel.timeline import scene_starts, total_frames  # noqa: E402
+
+assert total_frames() == 828, total_frames()
+assert scene_starts() == [0, 5, 15, 25, 33, 39], scene_starts()
+
+# ---------- music (needs numpy/scipy) ----------
+import tempfile  # noqa: E402
+
+try:
+    import numpy  # noqa: F401
+    from scipy.io import wavfile
+    HAVE_NUMPY = True
+except ImportError:
+    HAVE_NUMPY = False
+    print("selfcheck: numpy/scipy missing — music section skipped")
+
+if HAVE_NUMPY:
+    from ig_reel.music import compose
+
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    info = compose("2026-11-16-0730", 46, tmp / "a.wav")
+    assert abs(info["seconds"] - 28.6) < 0.01, info
+    sr, data = wavfile.read(tmp / "a.wav")
+    assert data.ndim == 2 and data.shape[1] == 2 and abs(len(data) / sr - 28.6) < 0.01
+    assert abs(data).max() / 32767 <= 0.9, abs(data).max()
+    compose("2026-11-16-0730", 46, tmp / "b.wav")
+    assert (tmp / "a.wav").read_bytes() == (tmp / "b.wav").read_bytes(), "same seed must give identical audio"
+    pairs = [(f"2026-11-1{d}-0730", f"2026-11-1{d}-1130") for d in range(6, 10)]
+    variants = []
+    for s1, s2 in pairs:
+        a = compose(s1, 46, tmp / "x.wav")
+        b = compose(s2, 46, tmp / "y.wav")
+        variants.append((a["key"], a["progression"]) != (b["key"], b["progression"]))
+    assert any(variants), "slots on the same day should not all share a track"
+
 print("ig_reel selfcheck: all assertions passed")
