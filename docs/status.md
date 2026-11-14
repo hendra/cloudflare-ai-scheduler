@@ -1,6 +1,6 @@
 # Production status — Cloudflare AI Scheduler
 
-**Last updated:** 2026-11-12 — hardening pass after full code review: `/api/*` routes all require the bearer token; dispatcher claims execution rows (queue re-delivery safe); overdue runs >15 min skipped and re-armed from `now`; migration `0018_production_state` brings the D1 rows in line with production (all 18 `github_actions_trigger`, `enabled=1`); pipeline scripts fail jobs only when Slack accepts the failure note (`failure-posted` contract); IG kit vendored into `scripts/ig-kit/`; pip/actions pinned. Also: `github-trending-weekly` enabled 2026-11-11 (Mon 07:10 WIB); **`ig-reel-daily` enabled (08:15 WIB), first Reel confirmed `sent` (https://www.instagram.com/reel/DflBHH1jFFC/)**; image fallback chain added.
+**Last updated:** 2026-11-15 — blog writers 4× daily (07:30/11:30/16:30/19:30 WIB, one cron-list row per site, migration `0019`; `-1130`/`-1620` clones removed) and their PRs auto-merge after `astro build` passes. Earlier, 2026-11-12 — hardening pass after full code review: `/api/*` routes all require the bearer token; dispatcher claims execution rows (queue re-delivery safe); overdue runs >15 min skipped and re-armed from `now`; migration `0018_production_state` brings the D1 rows in line with production (all 18 `github_actions_trigger`, `enabled=1`); pipeline scripts fail jobs only when Slack accepts the failure note (`failure-posted` contract); IG kit vendored into `scripts/ig-kit/`; pip/actions pinned. Also: `github-trending-weekly` enabled 2026-11-11 (Mon 07:10 WIB); **`ig-reel-daily` enabled (08:15 WIB), first Reel confirmed `sent` (https://www.instagram.com/reel/DflBHH1jFFC/)**; image fallback chain added.
 **Purpose:** what is running, where secrets live, and the non-obvious fixes that make it work.
 If you change something here, update this file.
 
@@ -12,15 +12,9 @@ If you change something here, update this file.
 | `github-trending-weekly` | 1 | `10 0 * * 1` | Mon 07:10 | `2026-11-16T00:10:00.000Z` | #news |
 | `rails-job-search-daily` | 1 | `45 23 * * *` | 06:45 | `2026-11-10T23:45:00.000Z` | #jobs |
 | `rails-job-search-daily-2000` | 1 | `0 13 * * *` | 20:00 | `2026-11-11T13:00:00.000Z` | #jobs |
-| `railsdev-blog-writer` | 1 | `45 0 * * *` | 07:45 | `2026-11-11T00:45:00.000Z` | railsdev-site PR |
-| `railsdev-blog-writer-1130` | 1 | `30 4 * * *` | 11:30 | `2026-11-11T04:30:00.000Z` | railsdev-site PR |
-| `railsdev-blog-writer-1620` | 1 | `20 9 * * *` | 16:20 | `2026-11-11T09:20:00.000Z` | railsdev-site PR |
-| `fullstackweb-blog-writer` | 1 | `45 0 * * *` | 07:45 | `2026-11-11T00:45:00.000Z` | fullstackwebdev-site PR |
-| `fullstackweb-blog-writer-1130` | 1 | `30 4 * * *` | 11:30 | `2026-11-11T04:30:00.000Z` | fullstackwebdev-site PR |
-| `fullstackweb-blog-writer-1620` | 1 | `20 9 * * *` | 16:20 | `2026-11-11T09:20:00.000Z` | fullstackwebdev-site PR |
-| `inasoft-blog-writer` | 1 | `45 0 * * *` | 07:45 | `2026-11-11T00:45:00.000Z` | inasoft-site PR |
-| `inasoft-blog-writer-1130` | 1 | `30 4 * * *` | 11:30 | `2026-11-11T04:30:00.000Z` | inasoft-site PR |
-| `inasoft-blog-writer-1620` | 1 | `20 9 * * *` | 16:20 | `2026-11-11T09:20:00.000Z` | inasoft-site PR |
+| `railsdev-blog-writer` | 1 | `30 0,4,9,12 * * *` | 07:30/11:30/16:30/19:30 | `2026-11-16T00:30:00.000Z` | railsdev-site PR (auto-merged) |
+| `fullstackweb-blog-writer` | 1 | `30 0,4,9,12 * * *` | 07:30/11:30/16:30/19:30 | `2026-11-16T00:30:00.000Z` | fullstackwebdev-site PR (auto-merged) |
+| `inasoft-blog-writer` | 1 | `30 0,4,9,12 * * *` | 07:30/11:30/16:30/19:30 | `2026-11-16T00:30:00.000Z` | inasoft-site PR (auto-merged) |
 | `inasoft-news-digest` | 1 | `30 2 * * *` | 09:30 | `2026-11-11T02:30:00.000Z` | #news |
 | `ig-reel-daily` | 1 | `15 1 * * *` | 08:15 | `2026-11-11T01:15:00.000Z` | ig-reel GHA workflow → Instagram |
 | `ig-reel-daily-1145` | 1 | `45 4 * * *` | 11:45 | `2026-11-11T04:45:00.000Z` | ig-reel → Instagram |
