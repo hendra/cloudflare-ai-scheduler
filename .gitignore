@@ -7,3 +7,6 @@ __pycache__/
 wrangler.jsonc
 ig-reel-kit/
 .ig-reel-out/
+
+# superpowers scratch (brainstorm mockups, plan ledgers)
+.superpowers/
