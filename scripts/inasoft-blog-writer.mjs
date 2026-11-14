@@ -455,7 +455,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   const pr = execFileSync("gh", ["pr", "create", "--base", "main", "--head", branch, "--title", `content: add ${article.slug}`, "--body-file", prBodyPath], { cwd: SITE_DIR, env: gitEnv, stdio: "pipe" }).toString().trim();
   try { unlinkSync(prBodyPath); } catch {}
   console.log("PR opened:", pr);
-  const m = mergePr(pr, { cwd: SITE_DIR, env: gitEnv });
+  const m = mergePr(pr, { env: gitEnv });
   if (m.merged) console.log("PR merged:", pr);
   else console.log(`::warning title=Auto-merge failed::${m.error} — PR ${pr} left open; merge it by hand.`);
   // The PR (merged or open) is the deliverable; a Slack summary failure (e.g. channel_not_found) must not fail the run.
