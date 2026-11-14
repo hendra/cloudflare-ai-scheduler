@@ -2,12 +2,14 @@
 
 Layers: detuned-saw pad (one chord per bar), sub pulse on every beat, soft kick + offbeat
 hat from bar 2, plucked arpeggio from the twist to the CTA, a riser into the twist and
-impact hits on the twist and CTA downbeats. Key and chord progression come from small
-pools seeded by `seed` (date + slot), so the four daily Reels don't share a track while a
-given seed always renders byte-identical audio.
+impact hits on the twist and CTA downbeats. pick_track() maps a "YYYY-MM-DD-HHMM" seed to
+one of 24 key × progression combinations: the date picks a starting point and the slot
+(morning / midday / afternoon / evening) steps through consecutive combinations, so the
+four daily Reels always get four different tracks; a given seed renders byte-identical audio.
 """
 import hashlib
 import random
+import re
 
 import numpy as np
 from scipy.io import wavfile
@@ -24,6 +26,21 @@ PROGRESSIONS = [
     ["i", "VII", "VI", "VII"],
 ]
 TAIL_S = 1.0
+COMBOS = [(k, i) for k in sorted(KEYS) for i in range(len(PROGRESSIONS))]
+
+
+def pick_track(seed):
+    """(key name, progression tuple) for a seed; distinct for the 4 slots of one day."""
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})-(\d{2})\d{2}$", str(seed))
+    if m:
+        hour = int(m.group(2))
+        slot = 0 if hour < 10 else 1 if hour < 14 else 2 if hour < 18 else 3
+        base = int(hashlib.sha256(m.group(1).encode()).hexdigest()[:8], 16) % len(COMBOS)
+        idx = (base + slot) % len(COMBOS)
+    else:
+        idx = random.Random(seed).randrange(len(COMBOS))
+    key, prog = COMBOS[idx]
+    return key, tuple(PROGRESSIONS[prog])
 
 
 def _hz(midi):
@@ -51,11 +68,10 @@ def _add(buf, start_s, sig, sr):
 
 
 def compose(seed, beats, out_wav, bpm=BPM, sr=44100):
-    rnd = random.Random(seed)
     rng = np.random.default_rng(int(hashlib.sha256(seed.encode()).hexdigest()[:12], 16))
-    key_name = rnd.choice(sorted(KEYS))
+    key_name, prog = pick_track(seed)
+    prog = list(prog)
     root = KEYS[key_name]
-    prog = rnd.choice(PROGRESSIONS)
 
     beat = 60 / bpm
     bar = 4 * beat

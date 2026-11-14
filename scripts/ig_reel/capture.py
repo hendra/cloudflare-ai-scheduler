@@ -41,6 +41,14 @@ class Capturer:
         self._browser.close()
         self._pw.stop()
 
+    def measure(self, html_path, at_ms):
+        """Overflowing .safe elements once every animation has settled at `at_ms`."""
+        page = self._page
+        page.goto(pathlib.Path(html_path).resolve().as_uri(), wait_until="load")
+        page.evaluate(_SETUP_JS)
+        page.evaluate(_SEEK_JS, at_ms)
+        return page.evaluate(_OVERFLOW_JS, SAFE)
+
     def capture(self, html_path, n_frames, out_dir, start_index):
         """Writes out_dir/fNNNNN.jpg for frames start_index…start_index+n_frames-1.
         Returns {"frames", "overflow", "hook_visible_at_0"}."""

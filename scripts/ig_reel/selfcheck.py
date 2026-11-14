@@ -21,6 +21,7 @@ assert [c["title"] for c in interleave([[{"title": "Same"}], [{"title": "same"},
 html = "<nav><p>menu</p></nav><script>x</script><p>Para one.</p><p>Para &amp; two.</p>"
 assert extract_article_text(html) == "Para one.\nPara & two.", extract_article_text(html)
 assert len(extract_article_text("<nav>" + "<p>menu item</p>" * 200 + "</nav>")) < 800
+assert extract_article_text('<form id="aspnetForm"><p>Body inside a form.</p></form>') == "Body inside a form."
 
 assert numbers_in("8.700 km/jam, 1,5 kali, 2026") == {"8700", "1.5", "2026"}, numbers_in("8.700 km/jam, 1,5 kali, 2026")
 assert numbers_in("8,700 mph and 1.5 times") == {"8700", "1.5"}
@@ -172,13 +173,12 @@ if HAVE_NUMPY:
     assert abs(data).max() / 32767 <= 0.9, abs(data).max()
     compose("2026-11-16-0730", 46, tmp / "b.wav")
     assert (tmp / "a.wav").read_bytes() == (tmp / "b.wav").read_bytes(), "same seed must give identical audio"
-    pairs = [(f"2026-11-1{d}-0730", f"2026-11-1{d}-1130") for d in range(6, 10)]
-    variants = []
-    for s1, s2 in pairs:
-        a = compose(s1, 46, tmp / "x.wav")
-        b = compose(s2, 46, tmp / "y.wav")
-        variants.append((a["key"], a["progression"]) != (b["key"], b["progression"]))
-    assert any(variants), "slots on the same day should not all share a track"
+    from ig_reel.music import pick_track
+    for day in range(1, 31):
+        combos = [pick_track(f"2026-11-{day:02d}-{hm}") for hm in ("0815", "1145", "1635", "1930")]
+        assert len(set(combos)) == 4, (day, combos)
+    assert pick_track("2026-11-16-0815") == pick_track("2026-11-16-0815")
+    assert pick_track("2026-11-16-0815") != pick_track("2026-11-17-0815") or pick_track("2026-11-18-0815") != pick_track("2026-11-16-0815")
 
 # ---------- scenes ----------
 from ig_reel.scenes import FOLLOW_LINE, scene_html  # noqa: E402
@@ -201,6 +201,10 @@ twist = scene_html("twist", copy.deepcopy(STORY), IMGS, META)
 assert 'class="hl"' in twist and "8.700" in twist.split('class="hl"')[1].split("</span></span>")[0]
 visible = re.sub(r"<[^>]+>", "", twist)
 assert "8.700 km/jam — sekitar" in visible, "space after the highlight must survive"
+for kind in ("context", "twist", "why", "payoff", "cta"):
+    assert "scenein" not in scene_html(kind, copy.deepcopy(STORY), IMGS, META), f"{kind}: cuts are hard cuts on the beat"
+small = scene_html("payoff", copy.deepcopy(STORY), IMGS, dict(META, font_scale=0.8))
+assert "--fs: 0.8" in small or "--fs:0.8" in small, "font_scale must reach the CSS"
 # Hook highlight: a string must not produce tag fragments; a short phrase must not colour part of a word.
 hs_html = scene_html("hook", dict(copy.deepcopy(STORY), hook="Meteor jatuh di kota", hook_highlight="meteor"), IMGS, META)
 hook_h1 = hs_html.split('class="hook-text safe">')[1].split("</h1>")[0]
@@ -268,6 +272,13 @@ else:
     assert res["hook_visible_at_0"] is True
     samples = sorted((out.parent / "frames_sample").glob("*.jpg"))
     assert len(samples) == 6, samples
+    wide = copy.deepcopy(STORY)
+    # past the 120-char limit on purpose: proves the step-down engages instead of failing the post
+    wide["beats"][3]["text"] = " ".join(["MMMMMMMM", "WWWWWWWW"] * 13)
+    from ig_reel.reel import fit_scales
+    with __import__("ig_reel.capture", fromlist=["Capturer"]).Capturer() as cap:
+        scales = fit_scales(cap, wide, imgs, {"source": "NASA", "date": "12 Nov 2026", "handle": "@kaliajatau.id"}, work)
+    assert scales["payoff"] < 1.0 and scales["hook"] == 1.0, scales
     print(f"selfcheck: rendered {res['frames']} frames in {took:.1f}s ({res['frames'] / took:.1f} fps) → {out}")
 
 print("ig_reel selfcheck: all assertions passed")

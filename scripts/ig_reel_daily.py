@@ -14,6 +14,8 @@ Env (see .github/workflows/ig-reel.yml):
   OPENCODE_API_KEY        text brain (opencode.ai Console, model glm-5.3-flash-free)
   OPENROUTER_API_KEY      fallback brain (preset @preset/ai-scheduler, reasoning excluded)
   GROQ_API_KEY            fallback brain (openai/gpt-oss-20b)
+  KILO_API_KEY            optional; Kilo AI Gateway fallback runs keyless (200 req/h/IP) without it
+  CF_ACCOUNT, CF_TOKEN    also the last text fallback (Cloudflare Workers AI @cf/openai/gpt-oss-120b)
   BUFFER_ACCESS_TOKEN     optional in dry run, required in real run
   BUFFER_CHANNEL_ID       default 6aed5544e29c69a1717ba62e (playbook)
   BUFFER_ORG_ID           default 6aed53e7ec5c7c6d73f3e437 (playbook)
@@ -25,11 +27,9 @@ report). Never ship a placeholder run as a real post.
 
 Usage: python3 scripts/ig_reel_daily.py
 """
-import argparse
 import base64
 import datetime as dt
 import hashlib
-import hmac
 import json
 import os
 import pathlib
@@ -38,6 +38,7 @@ import subprocess
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 
@@ -67,14 +68,13 @@ BUFFER_ORG = (os.environ.get("BUFFER_ORG_ID", "") or "6aed53e7ec5c7c6d73f3e437")
 WIB = dt.timezone(dt.timedelta(hours=7), "WIB")
 NOW = dt.datetime.now(WIB)
 TODAY = NOW.date().isoformat()
-WEEK_AGO = (NOW - dt.timedelta(days=7)).date().isoformat()
 
 ROOT = pathlib.Path(".").resolve()
 # Vendored playbook tools (cf_image.py, render_html.py, build_reel.py), committed in
 # scripts/ig-kit/ — byte-identical to the Cloudinary ig-kit as of 2026-11-12. Never
 # downloaded at runtime: executing unpinned remote code with secrets in env is unsafe.
 KIT = pathlib.Path(__file__).resolve().parent / "ig-kit"
-KIT_FILES = ("cf_image.py", "render_html.py", "build_reel.py")
+KIT_FILES = ("cf_image.py",)  # the only kit tool still called (images); the Reel renders via scripts/ig_reel/
 GEN = ROOT / ".ig-reel-out"
 GEN.mkdir(exist_ok=True)
 
@@ -325,9 +325,22 @@ Jawab HANYA JSON: {{"refs": [nomor terbaik, kedua, ketiga]}}"""
     return refs[:3]
 
 
+ARTICLE_MAX_BYTES = 2_000_000
+
+
 def fetch_article(cand):
-    raw = http(cand["link"], timeout=25)
-    page = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+    """Article page text. Only http(s), only HTML, at most 2 MB read (RSS links are data)."""
+    link = str(cand.get("link") or "")
+    if urllib.parse.urlsplit(link).scheme not in ("http", "https"):
+        raise RuntimeError(f"refusing non-http(s) article link: {link[:80]}")
+    req = urllib.request.Request(link, headers={"User-Agent": UA, "Accept": "text/html,application/xhtml+xml"})
+    with urllib.request.urlopen(req, timeout=25) as r:
+        ctype = r.headers.get("Content-Type", "")
+        if "html" not in ctype.lower():
+            raise RuntimeError(f"article is not HTML ({ctype or 'no content-type'})")
+        raw = r.read(ARTICLE_MAX_BYTES)
+        charset = r.headers.get_content_charset() or "utf-8"
+    page = raw.decode(charset, "replace")
     text = extract_article_text(page)[:ARTICLE_PROMPT_MAX]
     if cand.get("desc") and cand["desc"] not in text:
         text = cand["desc"] + "\n" + text
@@ -379,7 +392,7 @@ Artikel:
 
 
 # ---------- 5. Illustrations + scenes ----------
-def make_placeholder(path, label, seed):
+def make_placeholder(path, seed):
     from PIL import Image, ImageDraw
     img = Image.new("RGB", (768, 1360), (15, 22, 44))
     draw = ImageDraw.Draw(img, "RGBA")
@@ -610,8 +623,6 @@ def buffer_create_and_confirm(video_url, caption):
 
 # ---------- main ----------
 def main():
-    parser = argparse.ArgumentParser()
-    parser.parse_args()
     log(f"DRY_RUN={DRY_RUN}  PLACEHOLDER_IMAGES={MOCK_IMAGES}  topic_hint={TOPIC_HINT or '-'}")
     check_kit()
     guard_no_placeholder_post()
@@ -648,7 +659,7 @@ def main():
         img = GEN / f"img_{k}.jpg"
         if MOCK_IMAGES:
             log("  PLACEHOLDER_IMAGES=true — placeholder illustration (dev only)")
-            make_placeholder(img, str(k), k)
+            make_placeholder(img, k)
             provider = "placeholder"
         else:
             provider = gen_image(f"{prompt}, {STYLE_SUFFIX}", img)

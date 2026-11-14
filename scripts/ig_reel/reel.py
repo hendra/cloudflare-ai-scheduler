@@ -22,6 +22,29 @@ def assemble(frames_dir, wav, out_mp4):
         str(out_mp4)], check=True)
 
 
+FONT_SCALES = (1.0, 0.9, 0.8, 0.7)
+
+
+def fit_scales(cap, story, images, meta_base, work):
+    """Per scene, the largest font scale whose text stays inside the safe area once all
+    animations have settled (measured once, before any frame is captured). Raises only if
+    even the smallest scale overflows."""
+    out = {}
+    for idx, (kind, beats) in enumerate(SCENE_BEATS):
+        end_ms = frames_for(beats) * 1000 / FPS
+        for scale in FONT_SCALES:
+            html_path = pathlib.Path(work) / f"fit_{idx}_{kind}.html"
+            meta = dict(meta_base, progress_from=0, progress_to=0, font_scale=scale)
+            html_path.write_text(scene_html(kind, story, images, meta), encoding="utf-8")
+            overflow = cap.measure(html_path, end_ms)
+            if not overflow:
+                out[kind] = scale
+                break
+        else:
+            raise RuntimeError(f"text outside the safe area even at {FONT_SCALES[-1]}× font: {kind}: " + " | ".join(overflow))
+    return out
+
+
 def render_reel(story, images, meta_base, seed, out_mp4):
     """images: {1..4: Path}. meta_base: {"source","date","handle"}. Returns
     {"seconds","frames","overflow","hook_visible_at_0","music"}; raises if text leaves the safe area."""
@@ -34,8 +57,10 @@ def render_reel(story, images, meta_base, seed, out_mp4):
 
     overflow, frame, beat, hook_ok = [], 0, 0, False
     with Capturer() as cap:
+        scales = fit_scales(cap, story, images, meta_base, work)
         for idx, (kind, beats) in enumerate(SCENE_BEATS):
-            meta = dict(meta_base, progress_from=beat / TOTAL_BEATS, progress_to=(beat + beats) / TOTAL_BEATS)
+            meta = dict(meta_base, progress_from=beat / TOTAL_BEATS, progress_to=(beat + beats) / TOTAL_BEATS,
+                        font_scale=scales[kind])
             html_path = work / f"scene_{idx}_{kind}.html"
             html_path.write_text(scene_html(kind, story, images, meta), encoding="utf-8")
             n = frames_for(beats)
@@ -53,4 +78,4 @@ def render_reel(story, images, meta_base, seed, out_mp4):
     music = compose(seed, TOTAL_BEATS, wav)
     assemble(work, wav, out_mp4)
     return {"seconds": music["seconds"], "frames": frame, "overflow": overflow,
-            "hook_visible_at_0": hook_ok, "music": music}
+            "hook_visible_at_0": hook_ok, "music": music, "font_scales": scales}

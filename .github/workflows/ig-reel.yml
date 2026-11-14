@@ -65,13 +65,15 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg fonts-inter fonts-dejavu-core fonts-noto-color-emoji
+          # CTA/payoff emoji render as tofu boxes without this font — fail early instead of posting them
+          fc-list | grep -qi "Noto Color Emoji" || { echo "::error::Noto Color Emoji font missing"; exit 1; }
 
       - name: Install Python deps
         run: |
           python -m pip install --upgrade pip
           pip install pillow==13.0.0 numpy==2.4.6 scipy==1.17.1 playwright==1.65.1
 
-      - name: Ensure a Chrome binary (scene capture + render_html.py)
+      - name: Ensure a Chrome binary (scene capture)
         run: |
           if ! command -v google-chrome; then
             python -m playwright install --with-deps chromium

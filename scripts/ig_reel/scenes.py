@@ -38,12 +38,12 @@ def _esc(s):
 
 def _base_css(kind, dur, meta):
     img_from, img_to = SHOTS[kind][1], SHOTS[kind][2]
-    fade = "" if kind == "hook" else f"animation: scenein .2s linear both;"
     return f"""
 @font-face {{ font-family: 'Anton'; src: url('{(FONTS / "Anton-Regular.ttf").as_uri()}'); }}
 @font-face {{ font-family: 'Inter'; src: url('{(FONTS / "Inter.ttf").as_uri()}'); font-weight: 100 900; }}
+:root {{ --fs: {meta.get("font_scale", 1.0)}; }}
 html, body {{ margin: 0; width: 1080px; height: 1920px; overflow: hidden; background: #000; }}
-.scene {{ position: relative; width: 1080px; height: 1920px; overflow: hidden; {fade} }}
+.scene {{ position: relative; width: 1080px; height: 1920px; overflow: hidden; }}
 .bg {{ position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
        animation: kb {dur:.3f}s linear both; }}
 .shade {{ position: absolute; inset: 0; background: linear-gradient(180deg,
@@ -56,10 +56,10 @@ html, body {{ margin: 0; width: 1080px; height: 1920px; overflow: hidden; backgr
 .kicker {{ font: 700 30px/1 'Inter'; letter-spacing: 8px; color: {YELLOW}; text-transform: uppercase; }}
 .src {{ font: 500 26px/1.3 'Inter'; color: #CFCFCF; }}
 .handle {{ font: 700 30px/1 'Inter'; letter-spacing: 3px; color: {YELLOW}; }}
-.w {{ display: inline-block; white-space: pre; animation: word .25s ease-out both; }}
+.w {{ display: inline-block; white-space: pre-wrap; max-width: 100%; overflow-wrap: anywhere;
+      animation: word .25s ease-out both; }}
 @keyframes kb {{ from {{ transform: {img_from}; }} to {{ transform: {img_to}; }} }}
 @keyframes prog {{ from {{ width: {meta["progress_from"] * 100:.2f}%; }} to {{ width: {meta["progress_to"] * 100:.2f}%; }} }}
-@keyframes scenein {{ from {{ opacity: 0; }} to {{ opacity: 1; }} }}
 @keyframes word {{ from {{ opacity: 0; transform: translateY(18px); }} to {{ opacity: 1; transform: none; }} }}
 @keyframes pop {{ 0% {{ transform: scale(0); }} 70% {{ transform: scale(1.12); }} 100% {{ transform: scale(1); }} }}
 @keyframes sweep {{ from {{ transform: scaleX(0); }} to {{ transform: scaleX(1); }} }}
@@ -123,7 +123,7 @@ def scene_html(kind, story, images, meta):
         hook = str(story.get("hook") or "")
         size = 140 if len(hook) <= 24 else 120 if len(hook) <= 36 else 100
         css += f"""
-.hook-text {{ margin: 0; font: {size}px/1.0 'Anton'; color: #FFFFFF; text-transform: uppercase;
+.hook-text {{ margin: 0; font: calc({size}px * var(--fs))/1.0 'Anton'; color: #FFFFFF; text-transform: uppercase;
               overflow-wrap: anywhere; text-shadow: 0 4px 30px rgba(0,0,0,.6); }}
 .hook-text em {{ font-style: normal; color: {YELLOW}; }}
 .kicker.top {{ position: absolute; top: 260px; left: 72px; }}"""
@@ -134,7 +134,7 @@ def scene_html(kind, story, images, meta):
     elif kind in ("context", "twist", "why"):
         b = beats.get(kind, {})
         css += f"""
-.beat {{ margin: 0; font: 800 62px/1.22 'Inter'; color: #FFFFFF; text-shadow: 0 3px 24px rgba(0,0,0,.55); }}
+.beat {{ margin: 0; font: 800 calc(62px * var(--fs))/1.22 'Inter'; color: #FFFFFF; text-shadow: 0 3px 24px rgba(0,0,0,.55); }}
 .hl {{ position: relative; display: inline-block; white-space: pre-wrap; animation: word .25s ease-out both; }}
 .hlbox {{ position: absolute; inset: 2px -10px; background: {YELLOW}; transform-origin: left center;
           animation: sweep .35s cubic-bezier(.2,.8,.2,1) both; z-index: 0; }}
@@ -147,7 +147,7 @@ def scene_html(kind, story, images, meta):
         b = beats.get("payoff", {})
         img_style = ' style="filter: brightness(.55)"'
         css += f"""
-.payoff {{ margin: 0; font: 92px/1.05 'Anton'; color: #FFFFFF; text-transform: uppercase; overflow-wrap: anywhere; }}
+.payoff {{ margin: 0; font: calc(92px * var(--fs))/1.05 'Anton'; color: #FFFFFF; text-transform: uppercase; overflow-wrap: anywhere; }}
 .chip {{ align-self: flex-start; font: 800 34px/1 'Inter'; color: #111; background: {YELLOW}; padding: 16px 26px;
          border-radius: 999px; letter-spacing: 2px; transform-origin: left center;
          animation: pop .35s ease-out both; animation-delay: {2 * BEAT_S:.3f}s; }}"""
@@ -159,8 +159,8 @@ def scene_html(kind, story, images, meta):
         img_style = ' style="filter: blur(18px) brightness(.45)"'
         css += f"""
 .stack.center {{ bottom: auto; top: 640px; text-align: center; align-items: center; gap: 44px; }}
-.cta {{ margin: 0; font: 800 66px/1.2 'Inter'; color: #FFFFFF; }}
-.follow {{ font: 60px/1.1 'Anton'; color: {YELLOW}; text-transform: uppercase; }}
+.cta {{ margin: 0; font: 800 calc(66px * var(--fs))/1.2 'Inter'; color: #FFFFFF; }}
+.follow {{ font: calc(60px * var(--fs))/1.1 'Anton'; color: {YELLOW}; text-transform: uppercase; }}
 .r1, .r2, .r3 {{ animation: rise .35s ease-out both; }}
 .r1 {{ animation-delay: {BEAT_S:.3f}s; }} .r2 {{ animation-delay: {2 * BEAT_S:.3f}s; }} .r3 {{ animation-delay: {3 * BEAT_S:.3f}s; }}"""
         body = (f'<div class="stack center"><p class="cta safe r1">{_esc(story.get("cta"))}</p>'

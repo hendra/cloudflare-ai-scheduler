@@ -66,7 +66,7 @@ def interleave(groups, cap):
     return out[:cap]
 
 
-_DROP = re.compile(r"<(script|style|nav|header|footer|aside|form|noscript|svg)\b[^>]*>.*?</\1\s*>", re.S | re.I)
+_DROP = re.compile(r"<(script|style|nav|header|footer|aside|noscript|svg)\b[^>]*>.*?</\1\s*>", re.S | re.I)
 
 
 def extract_article_text(page_html):
