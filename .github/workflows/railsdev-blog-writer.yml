@@ -36,6 +36,7 @@ jobs:
       OPENCODE_BASE_URL: ${{ vars.OPENCODE_BASE_URL }}
       DRY_RUN: ${{ inputs.dry_run || 'false' }}
       SITE_DIR: ../site
+      GSC_SERVICE_ACCOUNT_JSON: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON }}
     steps:
       - name: Checkout scheduler repo
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0

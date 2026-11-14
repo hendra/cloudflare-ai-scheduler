@@ -2,6 +2,7 @@
 import { callModel } from "./ai-providers.mjs";
 import { generateCover } from "./cover/render.mjs";
 import { mergePr } from "./site-pr.mjs";
+import { indexArticle } from "./site-index.mjs";
 // RailsDev blog writer (PR + auto-merge) — deterministic, zero dependencies.
 //
 // Flow: fetch signals (HN front page + GitHub Trending) → load existing corpus
@@ -28,6 +29,8 @@ import { join } from "node:path";
 const DRY_RUN = String(process.env.DRY_RUN || "false") === "true";
 const AI_STUB = process.env.AI_STUB === "true";
 const SITE_DIR = process.env.SITE_DIR || "railsdev-site";
+const SITE_URL = "https://railsdev.io";
+const INDEXNOW_KEY = "85dd4d96ba8c4f5ca1e8c7f26ddffb80"; // public key file: https://railsdev.io/85dd4d96ba8c4f5ca1e8c7f26ddffb80.txt
 const RAILSDEV_PAT = process.env.RAILSDEV_PAT || "";
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
 const SLACK_CHANNEL = process.env.SLACK_RAILSDEV_CHANNEL_ID || "";
@@ -332,9 +335,12 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   const m = mergePr(pr, { env: gitEnv });
   if (m.merged) console.log("PR merged:", pr);
   else console.log(`::warning title=Auto-merge failed::${m.error} — PR ${pr} left open; merge it by hand.`);
+  // Indexing never fails the run: the article is already published.
+  const ix = m.merged ? await indexArticle({ siteUrl: SITE_URL, slug: article.slug, indexNowKey: INDEXNOW_KEY, env: process.env }) : null;
+  if (ix) console.log("indexing:", JSON.stringify(ix));
   // The PR (merged or open) is the deliverable; a Slack summary failure (e.g. channel_not_found) must not fail the run.
   try { await postToSlack([m.merged
-    ? `🖌️ _RailsDev article published_\n*${article.title}*\n→ ${pr}\n${v.wordCount} words · keyword: ${article.keyword}`
+    ? `🖌️ _RailsDev article published_\n*${article.title}*\n→ ${pr}\n${v.wordCount} words · keyword: ${article.keyword}\n🔎 ${ix.url || "(not live yet)"} · Bing: ${ix.bing} · Google sitemap: ${ix.google}`
     : `🖌️ _RailsDev PR opened — auto-merge failed_\n*${article.title}*\n→ ${pr}\n${m.error}\nMerge it by hand.`]); }
   catch (e) { console.log(`::warning title=Slack summary not posted::${e.message} — PR ${pr} was opened; check the Slack channel secret / bot membership.`); }
 })().catch(async (e) => { await fail(`unexpected error: ${String(e).slice(0, 300)}`); });
