@@ -3,6 +3,8 @@
 Pure functions (no network): the orchestrator (scripts/ig_reel_daily.py) does the I/O.
 Grounding rule: every number the AI writes must appear in the fetched article text.
 """
+import datetime as _dt
+import email.utils as _eu
 import html as _html
 import re
 
@@ -28,6 +30,25 @@ STORY_SCHEMA_HINT = """{"hook": "maks 7 kata, membuka rasa penasaran",
  "caption": {"opener": "hook diparafrase, maks 120 karakter", "body": "2–3 baris pendek",
              "question": "1 pertanyaan untuk komentar", "save_line": "ajakan simpan/kirim"},
  "hashtags": ["5–8 hashtag: umum + niche + bahasa Indonesia"]}"""
+
+
+_MONTHS_ID = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
+
+
+def format_date_id(raw):
+    """RSS/Atom date → '14 Nov 2026' with Indonesian month names; unparseable text is kept."""
+    raw = str(raw or "").strip()
+    if not raw:
+        return "tanggal tidak tercantum"
+    d = None
+    try:
+        d = _eu.parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        try:
+            d = _dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return raw[:32]
+    return f"{d.day} {_MONTHS_ID[d.month - 1]} {d.year}"
 
 
 def interleave(groups, cap):
@@ -56,6 +77,43 @@ def extract_article_text(page_html):
         if text:
             paras.append(text)
     return "\n".join(paras)[:ARTICLE_MAX]
+
+
+# Function words that dominate ordinary Indonesian vs English prose; the AI sometimes
+# follows an English source article instead of the instruction to write in Indonesian.
+_ID_WORDS = {"yang", "dan", "di", "ini", "itu", "dari", "untuk", "dengan", "ke", "bisa", "ada", "tidak",
+             "adalah", "akan", "juga", "atau", "karena", "kita", "kamu", "lebih", "jadi", "punya", "seperti",
+             "ternyata", "sekitar", "kali", "baru", "para", "tapi", "pun", "nya", "milik", "alias", "ikut"}
+_EN_WORDS = {"the", "and", "of", "is", "are", "with", "to", "this", "that", "it", "its", "could", "be",
+             "what", "you", "for", "by", "from", "which", "an", "a", "was", "were", "has", "have"}
+
+
+def _words_of(text):
+    return re.findall(r"[a-zà-ÿ]+", str(text).lower())
+
+
+def is_indonesian(text):
+    words = _words_of(text)
+    id_hits = sum(w in _ID_WORDS for w in words)
+    en_hits = sum(w in _EN_WORDS for w in words)
+    return id_hits >= 3 and id_hits > en_hits
+
+
+def looks_english(text):
+    """For one short field: English function words outnumber Indonesian ones."""
+    words = _words_of(text)
+    en_hits = sum(w in _EN_WORDS for w in words)
+    return en_hits >= 2 and en_hits > sum(w in _ID_WORDS for w in words)
+
+
+def hook_copied_from_article(hook, article_text):
+    """A short hook has too few function words to judge; an English hook is mostly words
+    lifted straight from the English article, an Indonesian one mostly is not."""
+    words = [w for w in _words_of(hook) if len(w) >= 3]
+    if not words:
+        return False
+    article_words = set(_words_of(article_text))
+    return sum(w in article_words for w in words) / len(words) >= 0.6
 
 
 def _norm_number(raw):
@@ -136,6 +194,28 @@ def check_story(data, article_text):
         hard.append(f"need {HASHTAGS_MIN}-{HASHTAGS_MAX} hashtags, got {n_tags}")
     elif not (HASHTAGS_MIN <= n_tags <= HASHTAGS_MAX):
         soft.append(f"{n_tags} hashtags (want {HASHTAGS_MIN}-{HASHTAGS_MAX})")
+
+    # Language: judged per field — one Indonesian caption must not carry English beats.
+    lang_errs = []
+    if hook and (looks_english(hook) or hook_copied_from_article(hook, article_text)):
+        lang_errs.append("hook")
+    for i, b in enumerate(beats):
+        if isinstance(b, dict) and looks_english(b.get("text")):
+            lang_errs.append(f"beat {i + 1}")
+        hl = str(b.get("highlight") or "") if isinstance(b, dict) else ""
+        if hl and (looks_english(hl) or hook_copied_from_article(hl, article_text)):
+            lang_errs.append(f"beat {i + 1} highlight")
+    if cta and looks_english(cta):
+        lang_errs.append("cta")
+    cap_d = data.get("caption") if isinstance(data.get("caption"), dict) else {}
+    for k in ("opener", "body", "question", "save_line"):
+        if looks_english(cap_d.get(k)):
+            lang_errs.append(f"caption.{k}")
+    beats_text = " ".join(str(b.get("text") or "") for b in beats if isinstance(b, dict))
+    if beats_text.strip() and not is_indonesian(beats_text):
+        lang_errs.append("beats (overall)")
+    if lang_errs:
+        hard.append("must be written in Bahasa Indonesia, not English: " + ", ".join(dict.fromkeys(lang_errs)))
 
     allowed = numbers_in(article_text)
     invented = sorted({n for t in _story_texts(data) for n in numbers_in(t)} - allowed)

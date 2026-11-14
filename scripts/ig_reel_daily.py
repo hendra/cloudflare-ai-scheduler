@@ -2,9 +2,11 @@
 """IG Reel — Interesting Facts & Knowledge (@kaliajatau.id, → Instagram via Buffer)
 
 Prompt 1 (`prompts/ig-reel-daily.md`) in executable form. Deterministic: RSS fetch
-→ Buffer dedup → AI picks 4–5 findings → HTML scenes rendered by headless Chrome
-→ reel assembled by build_reel.py (synthesised original music) → Cloudinary
-hosting → Buffer createPost (Instagram reel).
+(feeds interleaved) → Buffer dedup → AI shortlists 3 findings → fetch the top article →
+AI writes ONE story (hook → context → twist → why → payoff → CTA) only from that text,
+every number checked against it → 4 cinematic illustrations → animated HTML scenes
+captured frame-by-frame + composed beat-synced music (scripts/ig_reel/) → Cloudinary
+hosting → Buffer createPost (Instagram reel, cover = frame 0).
 
 Env (see .github/workflows/ig-reel.yml):
   DRY_RUN=true            Everything except the Cloudinary upload + Buffer post
@@ -28,7 +30,6 @@ import base64
 import datetime as dt
 import hashlib
 import hmac
-import html
 import json
 import os
 import pathlib
@@ -53,6 +54,7 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "").strip()
 OPENCODE_API_KEY = os.environ.get("OPENCODE_API_KEY", "").strip()
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "").strip()
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b").strip()
+KILO_API_KEY = os.environ.get("KILO_API_KEY", "").strip()
 OPENCODE_MODEL = (os.environ.get("OPENCODE_MODEL", "") or "glm-5.3-flash-free").strip()
 OPENCODE_BASE_URL = (os.environ.get("OPENCODE_BASE_URL", "https://opencode.ai/inference/openai/v1") or "").rstrip("/")
 CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME", "opqimovw").strip()
@@ -76,13 +78,19 @@ KIT_FILES = ("cf_image.py", "render_html.py", "build_reel.py")
 GEN = ROOT / ".ig-reel-out"
 GEN.mkdir(exist_ok=True)
 
-# Content limits (prompt below + scene layout): caption <= 400 chars, 4–5 facts,
-# fact text <= 280 chars (fits the .fact box above the source line), short title, hook <= 8 words.
-CAPTION_MAX = 400
-FACTS_MIN, FACTS_MAX = 4, 5
-FACT_TEXT_MAX = 280
-FACT_TITLE_MAX = 80
-HOOK_MAX_WORDS = 8
+# Single-story cinematic Reel (spec: docs/superpowers/specs/2026-11-15-ig-reel-cinematic-redesign-design.md).
+ARTICLE_MIN = 800       # chars of article text needed to ground a story; else try the next shortlisted item
+ARTICLE_PROMPT_MAX = 4000  # chars of article sent to the AI (keeps free-tier token budgets in reach)
+DEDUPE_POSTS = 28       # last 28 sent posts = 7 days at 4 Reels/day
+STYLE_SUFFIX = ("cinematic film still, dramatic volumetric lighting, teal-and-amber grade, 35mm, "
+                "shallow depth of field, film grain, vertical 9:16, no text, no letters, no logos")
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from ig_reel.reel import render_reel  # noqa: E402
+from ig_reel.story import (  # noqa: E402
+    STORY_SCHEMA_HINT, apply_story_limits, build_caption, check_story, extract_article_text, format_date_id,
+    interleave,
+)
 
 UA = "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0"
 
@@ -96,7 +104,6 @@ RSS_FEEDS = [
 def log(*a):
     print(*a, flush=True)
 
-esc = lambda s: html.escape(str(s or ""), quote=True)
 
 
 def http(url, *, data=None, headers=None, timeout=60, method=None):
@@ -181,9 +188,9 @@ def recent_post_captions():
         fail("BUFFER_ACCESS_TOKEN required for a real run")
     try:
         d = buffer_graphql(
-            'query { posts(first: 12, input: { organizationId: "%s", '
+            'query { posts(first: %d, input: { organizationId: "%s", '
             'filter: { status: [sent], channelIds: ["%s"] } }) { '
-            'edges { node { text createdAt } } } }' % (BUFFER_ORG, BUFFER_CHANNEL))
+            'edges { node { text createdAt } } } }' % (DEDUPE_POSTS, BUFFER_ORG, BUFFER_CHANNEL))
         texts = [e["node"]["text"] for e in d.get("posts", {}).get("edges", []) if e.get("node", {}).get("text")]
         log(f"buffer: fetched {len(texts)} recent sent posts for 7-day dedup")
         return texts
@@ -222,102 +229,17 @@ def fetch_candidates():
                     desc = re.sub(r"\s+", " ", desc)[:220]
             if title and link:
                 items.append({"title": title, "link": link, "date": date, "desc": desc, "source": source})
-    seen, out = set(), []
-    for it in items:
-        key = it["title"][:80].lower()
-        if key not in seen:
-            seen.add(key)
-            out.append(it)
-    log(f"rss: {len(out)} candidates from {len(RSS_FEEDS)} feeds")
-    return out[:18]
+    groups = [[it for it in items if it["source"] == source] for source, _ in RSS_FEEDS]
+    out = interleave(groups, 18)  # round-robin so one busy feed can't crowd out the others
+    log(f"rss: {len(out)} candidates from {len(RSS_FEEDS)} feeds (of {len(items)} items)")
+    return out
 
 
 # ---------- 4. AI: pick findings + write Indonesian script ----------
-def truncate_word(s, n):
-    """Truncate to <= n chars at a word boundary (ellipsis-free)."""
-    s = re.sub(r"\s+", " ", str(s or "")).strip()
-    if len(s) <= n:
-        return s
-    cut = s[:n]
-    m = re.search(r"^(.*)\s[^\s]*$", cut)
-    cand = (m.group(1) if m else cut).rstrip(" ,;:-–—")
-    return cand if cand else cut.rstrip()
-
-
-def check_script(data):
-    """Validate AI output. Returns (hard, soft) violation lists.
-    Hard = must not ship; soft = safely truncatable (caption/text length).
-    Trims fact overflow to limits in place."""
-    hard, soft = [], []
-    facts = data.get("facts")
-    if not isinstance(facts, list):
-        hard.append("'facts' missing or not a list")
-        facts = []
-    else:
-        if len(facts) > FACTS_MAX:
-            log(f"  validation: trimming {len(facts)} facts to {FACTS_MAX}")
-            del facts[FACTS_MAX:]
-        if len(facts) < FACTS_MIN:
-            hard.append(f"need {FACTS_MIN}-{FACTS_MAX} facts, got {len(facts)}")
-    for i, f in enumerate(facts, 1):
-        if not isinstance(f, dict):
-            hard.append(f"fact {i} is not an object")
-            continue
-        fact_txt = str(f.get("fact") or "").strip()
-        title_txt = str(f.get("title") or "").strip()
-        if not fact_txt:
-            hard.append(f"fact {i}: missing 'fact' text")
-        elif len(fact_txt) > FACT_TEXT_MAX:
-            soft.append(f"fact {i} text {len(fact_txt)} chars (> {FACT_TEXT_MAX})")
-        if not title_txt:
-            hard.append(f"fact {i}: missing 'title'")
-        elif len(title_txt) > FACT_TITLE_MAX:
-            soft.append(f"fact {i} title {len(title_txt)} chars (> {FACT_TITLE_MAX})")
-        if not str(f.get("image_prompt") or "").strip():
-            hard.append(f"fact {i}: missing 'image_prompt'")
-        try:
-            ref = int(str(f.get("ref")).strip())
-            if ref < 1:
-                raise ValueError
-        except Exception:
-            hard.append(f"fact {i}: missing/invalid 'ref'")
-    hook = str(data.get("hook") or "").strip()
-    if hook and len(hook.split()) > HOOK_MAX_WORDS:
-        soft.append(f"hook '{hook}' is {len(hook.split())} words (> {HOOK_MAX_WORDS})")
-    caption = str(data.get("caption") or "").strip()
-    if not caption:
-        hard.append("missing 'caption'")
-    elif len(caption) > CAPTION_MAX:
-        soft.append(f"caption {len(caption)} chars (> {CAPTION_MAX})")
-    return hard, soft
-
-
-def apply_length_limits(data):
-    """Safe truncations the scene layout tolerates."""
-    data["caption"] = truncate_word(data.get("caption"), CAPTION_MAX)
-    if str(data.get("hook") or "").strip():
-        data["hook"] = " ".join(str(data["hook"]).split()[:HOOK_MAX_WORDS])
-    for f in data.get("facts") or []:
-        if not isinstance(f, dict):
-            continue
-        f["fact"] = truncate_word(f.get("fact"), FACT_TEXT_MAX)
-        f["title"] = truncate_word(f.get("title"), FACT_TITLE_MAX)
-
-
-def repair_prompt(data, violations):
-    return (
-        "Output JSON baru saja, tanpa prosa. Perbaiki skenario Reel di bawah ini agar lolos validasi.\n"
-        "Pelanggaran:\n- " + "\n- ".join(violations) + "\n"
-        f"Batas wajib: hook maks {HOOK_MAX_WORDS} kata; {FACTS_MIN}–{FACTS_MAX} fakta; "
-        f"teks fakta maks {FACT_TEXT_MAX} karakter; judul fakta maks {FACT_TITLE_MAX} karakter; "
-        f"caption maks {CAPTION_MAX} karakter; setiap fakta wajib punya ref (1-based) ke daftar kandidat asli.\n"
-        "Jangan tambah/fakta baru, jangan ubah ref. Jawab hanya JSON dengan skema yang sama.\n\n"
-        + json.dumps(data, ensure_ascii=False))
-
-
-
 def ai_json(prompt, max_tokens=2600):
-    """OpenCode Console (opencode.ai) → OpenRouter → Groq fallback. Returns parsed JSON."""
+    """OpenCode Console → OpenRouter → Groq → Kilo (keyless) → Cloudflare Workers AI. Returns parsed JSON.
+    Mirrors the chain in scripts/ai-providers.mjs; the single-story prompt (article text included) is
+    large enough that Groq's free tier alone rate-limits, so the later fallbacks matter."""
     attempts = []
     if OPENCODE_API_KEY:
         attempts.append((
@@ -344,8 +266,20 @@ def ai_json(prompt, max_tokens=2600):
              "messages": [{"role": "user", "content": prompt}],
              "max_tokens": max_tokens, "temperature": 0.4},
             {"Authorization": f"Bearer {GROQ_API_KEY}"}))
-    if not attempts:
-        raise RuntimeError("no AI provider credentials (OPENCODE_API_KEY / OPENROUTER_API_KEY / GROQ_API_KEY)")
+    # Kilo AI Gateway: anonymous free tier (200 req/h/IP); a key only raises the limit.
+    attempts.append((
+        "https://ai-gateway.kilo.ai/api/v1/chat/completions",
+        {"model": "kilo-auto/free",
+         "messages": [{"role": "user", "content": prompt}],
+         "max_tokens": max_tokens, "temperature": 0.4},
+        {"Authorization": f"Bearer {KILO_API_KEY}"} if KILO_API_KEY else {}))
+    if CF_ACCOUNT and CF_TOKEN:
+        attempts.append((
+            f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT}/ai/v1/chat/completions",
+            {"model": "@cf/openai/gpt-oss-120b",
+             "messages": [{"role": "user", "content": prompt}],
+             "max_tokens": max_tokens, "temperature": 0.4},
+            {"Authorization": f"Bearer {CF_TOKEN}"}))
     errors = []
     for url, body, headers in attempts:
         try:
@@ -361,50 +295,84 @@ def ai_json(prompt, max_tokens=2600):
     raise RuntimeError("all AI providers failed: " + " | ".join(errors))
 
 
-def draft_script(candidates, avoid):
+def pick_shortlist(candidates, avoid):
+    """AI ranks candidates for one 25-second story; returns up to 3 valid 1-based refs."""
     avoid_block = ("\n".join(f"- {t[:120]}" for t in avoid)) or "(none)"
-    hint = f"\nJendela topik prioritas (aksi ini PRIORITAS bila relevan): {TOPIC_HINT}\n" if TOPIC_HINT else ""
-    lines = "\n".join(
-        f"{i+1}. [{c['source']}] {c['title']}{(' | ' + c['date']) if c['date'] else ''} | {c['link']}\n   {c['desc']}"
-        for i, c in enumerate(candidates))
-    prompt = f"""Kamu editor majalah sains untuk @kaliajatau.id. Dari daftar temuan di bawah, pilih 4–5 temuan paling menarik & bisa diverifikasi (prioritas: baru rilis minggu ini), lalu susun skenario Reel 30–40 detik untuk niche "Interesting Facts & Knowledge".
+    hint = f"\nTopik prioritas bila relevan: {TOPIC_HINT}\n" if TOPIC_HINT else ""
+    lines = "\n".join(f"{i+1}. [{c['source']}] {c['title']} | {c['desc']}" for i, c in enumerate(candidates))
+    prompt = f"""Kamu produser Reel sains @kaliajatau.id. Pilih 3 temuan yang paling cocok jadi SATU cerita Reel 25 detik:
+paling bikin "hah, serius?!", bisa dijelaskan tanpa jargon, dan mudah divisualkan. Prioritaskan yang terbaru.
 {hint}
-Sudah dipostrujukan minggu ini (hindari duplikat):
+Sudah diposting baru-baru ini (JANGAN pilih topik yang sama):
 {avoid_block}
 
-Aturan konten:
-- Bahasa Indonesia santai-profesional; JANGAN mengarang angka/fakta/sumber/tanggal.
-- Setiap fakta WAJIB menunjuk ke satu item dari daftar kandidat lewat "ref" (nomor 1-based).
-- Fakta harus bisa disimpulkan dari kandidat yang dipilih — tidak menambah info di luar deskripsi kandidat.
-- Fakta awal: gunakan "mungkin"/"menurut studi" untuk temuan yang belum final.
-- Teks per scene: 1 judul pendek + fakta 2–3 kalimat (maks ±280 karakter per scene).
-- Hook maks 8 kata; CTA: ajakan simpan/share + ikuti @kaliajatau.id.
+Kandidat:
+{lines}
 
-Jawab HANYA JSON dengan skema ini (tanpa prosa):
-{{"hook": "hook <= 8 kata",
-  "hook_sub": "baris kecil di bawah hook",
-  "facts": [{{"ref": 3, "title": "...", "fact": "...",
-             "image_prompt": "vivid 9:16 illustration, no text no letters"}}],
-  "caption": "caption IG <= 400 karakter, santai, 1 pertanyaan di akhir",
-  "hashtags": ["#Sains"]}}
+Jawab HANYA JSON: {{"refs": [nomor terbaik, kedua, ketiga]}}"""
+    data = ai_json(prompt, max_tokens=1500)  # reasoning models spend tokens before answering
+    refs = []
+    for r in (data.get("refs") or []) if isinstance(data, dict) else []:
+        try:
+            r = int(str(r).strip())
+        except ValueError:
+            continue
+        if 1 <= r <= len(candidates) and r not in refs:
+            refs.append(r)
+    if not refs:
+        fail("AI shortlist returned no valid candidate refs")
+    log(f"shortlist: {refs}")
+    return refs[:3]
 
-Daftar temuan:
-{lines}"""
+
+def fetch_article(cand):
+    raw = http(cand["link"], timeout=25)
+    page = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else str(raw)
+    text = extract_article_text(page)[:ARTICLE_PROMPT_MAX]
+    if cand.get("desc") and cand["desc"] not in text:
+        text = cand["desc"] + "\n" + text
+    log(f"article: {len(text)} chars from {cand['link']}")
+    return text
+
+
+def write_story(cand, article):
+    """One AI call writes the story only from `article`; validated, one repair retry, then truncated."""
+    prompt = f"""Kamu penulis naskah Reel sains @kaliajatau.id (gaya dokumenter sinematik, Bahasa Indonesia santai tapi kredibel).
+Tulis SATU cerita dari artikel di bawah, dengan alur: hook (rasa penasaran) → context (apa yang ditemukan) →
+twist (detail paling mengejutkan, sorot satu angka/frasa kunci) → why (kenapa penting buat kita) → payoff (satu kalimat
+yang layak disimpan). CTA = ajakan kirim/share yang spesifik untuk cerita ini (sebut tipe teman yang cocok).
+
+Aturan WAJIB:
+- SEMUA teks (hook, beats, cta, caption) dalam Bahasa Indonesia, walaupun artikelnya berbahasa Inggris.
+- highlight juga Bahasa Indonesia (mis. "1.000 km", bukan "1,000 kilometers"); tulis angka gaya Indonesia (titik ribuan, koma desimal).
+- HANYA pakai informasi dari artikel. JANGAN mengarang angka, nama, tanggal, atau klaim. Setiap angka harus ada di artikel.
+- Temuan yang belum final: pakai "menurut studi" / "mungkin".
+- image_prompts dalam bahasa Inggris, subjek visual yang sama di keempat prompt, tanpa teks/huruf.
+
+Jawab HANYA JSON dengan skema:
+{STORY_SCHEMA_HINT}
+
+Sumber: {cand['source']} — {cand['title']}
+Artikel:
+{article}"""
     data = ai_json(prompt)
-    hard, soft = check_script(data)
+    if not isinstance(data, dict):
+        raise RuntimeError("AI story is not a JSON object")
+    hard, soft = check_story(data, article)
     if hard or soft:
-        log("draft: validation issues: " + "; ".join(hard + soft))
-        data = ai_json(repair_prompt(data, hard + soft))
-        hard, soft = check_script(data)
+        log("story: validation issues: " + "; ".join(hard + soft))
+        fix = ("Perbaiki JSON cerita di bawah agar lolos validasi. Pelanggaran:\n- " + "\n- ".join(hard + soft)
+               + "\nTetap HANYA pakai informasi dari artikel; hapus angka yang tidak ada di artikel. "
+               + "Jawab hanya JSON dengan skema yang sama.\n\nJSON:\n" + json.dumps(data, ensure_ascii=False)
+               + "\n\nArtikel:\n" + article)
+        data = ai_json(fix)
+        if not isinstance(data, dict):
+            raise RuntimeError("AI story repair is not a JSON object")
+        hard, soft = check_story(data, article)
         if hard:
-            raise RuntimeError("AI output still invalid after one repair retry: " + "; ".join(hard))
-        if soft:
-            log("draft: after repair, truncating: " + "; ".join(soft))
-    apply_length_limits(data)
-    facts = data.get("facts") or []
-    if not (FACTS_MIN <= len(facts) <= FACTS_MAX):
-        raise RuntimeError(f"AI returned {len(facts)} facts (need {FACTS_MIN}–{FACTS_MAX})")
-    return data, candidates
+            raise RuntimeError("; ".join(hard))
+    apply_story_limits(data)
+    return data
 
 
 # ---------- 5. Illustrations + scenes ----------
@@ -421,96 +389,6 @@ def make_placeholder(path, label, seed):
     draw.ellipse([330, 560, 438, 668], fill=(255, 255, 255, 30))
     img.save(path, quality=90)
     log(f"  placeholder image written to {path}")
-
-
-def make_scene_html(kind, num, title, body, source, idx_total, bg_tag):
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-<style>
-  html,body {{ margin:0; width:1080px; height:1920px; overflow:hidden; background:#0B1020;
-               font-family:'Inter','DejaVu Sans',sans-serif; color:#F2F1EC }}
-  .scene {{ position:relative; width:1080px; height:1920px }}
-  .bg {{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.38 }}
-  .shade {{ position:absolute; inset:0;
-            background:linear-gradient(180deg, rgba(11,16,32,.10) 0%, rgba(11,16,32,.55) 45%, rgba(11,16,32,.92) 82%) }}
-  .num {{ position:absolute; top:262px; left:84px; font-size:220px; line-height:1; font-weight:800;
-          color:#FFD23F; opacity:.92; letter-spacing:-6px }}
-  .kicker {{ position:absolute; top:190px; left:88px; font-size:30px; letter-spacing:8px;
-             color:#FFD23F; font-weight:700; text-transform:uppercase }}
-  h1 {{ position:absolute; top:560px; left:88px; right:210px; margin:0;
-        font-size:64px; line-height:1.22; font-weight:800 }}
-  .fact {{ position:absolute; top:1120px; left:88px; right:210px; margin:0;
-           font-size:40px; line-height:1.36; color:#E9E7DE }}
-  .src {{ position:absolute; top:1600px; left:88px; right:88px; font-size:25px;
-          line-height:1.4; color:#C9C7BB }}
-  .handle {{ position:absolute; top:1756px; left:88px; font-size:29px; color:#FFD23F;
-             font-weight:700; letter-spacing:3px }}
-  .trust {{ position:absolute; top:1760px; right:88px; font-size:24px; color:#B7B5A9 }}
-</style></head><body>
-<div class="scene">
-  {bg_tag}
-  <div class="shade"></div>
-  <div class="kicker">Fakta Sains · {esc(idx_total)}</div>
-  <div class="num">{esc(num)}</div>
-  <h1>{esc(title)}</h1>
-  <p class="fact">{esc(body)}</p>
-  <div class="src">{esc(source)}</div>
-  <div class="handle">@kaliajatau.id</div>
-  <div class="trust">Sains untuk semua</div>
-</div>
-</body></html>"""
-    return html
-
-
-def hook_scene(title, sub, idx_total):
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-<style>
-  html,body {{ margin:0; width:1080px; height:1920px; overflow:hidden; background:#0B1020;
-               font-family:'Inter','DejaVu Sans',sans-serif; color:#F2F1EC; text-align:center }}
-  .week {{ position:absolute; top:300px; left:0; right:0; font-size:34px; color:#FFD23F;
-           letter-spacing:10px; font-weight:700; text-transform:uppercase }}
-  .mega {{ position:absolute; top:620px; left:90px; right:90px; margin:0; font-size:96px;
-           line-height:1.08; font-weight:800; color:#F2F1EC; letter-spacing:-3px }}
-  .mega em {{ color:#FFD23F; font-style:normal }}
-  .sub {{ position:absolute; top:1360px; left:0; right:0; font-size:38px; color:#D9D6CC }}
-  .handle {{ position:absolute; top:1690px; left:0; right:0; font-size:31px; color:#FFD23F;
-             letter-spacing:4px; font-weight:700 }}
-</style></head><body>
-  <div class="week">Fakta Sains · {TODAY}</div>
-  <h1 class="mega">{esc(title)}</h1>
-  <div class="sub">{esc(sub)}</div>
-  <div class="handle">@kaliajatau.id</div>
-</body></html>"""
-    return html
-
-def cta_scene(n):
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8">
-<style>
-  html,body {{ margin:0; width:1080px; height:1920px; overflow:hidden; background:#0B1020;
-               font-family:'Inter','DejaVu Sans',sans-serif; color:#F2F1EC; text-align:center }}
-  .q {{ position:absolute; top:480px; left:80px; right:80px; font-size:88px; line-height:1.15;
-        font-weight:800; margin:0 }}
-  .q em {{ color:#FFD23F; font-style:normal }}
-  .save {{ position:absolute; top:1090px; left:0; right:0; font-size:38px; color:#D9D6CC }}
-  .follow {{ position:absolute; top:1330px; left:0; right:0; font-size:52px; color:#FFD23F;
-             letter-spacing:6px; font-weight:800 }}
-</style></head><body>
-  <h1 class="q">Fakta mana yang <em>paling bikin kaget</em>?</h1>
-  <div class="save">Simpan dulu &amp; tag temanmu.</div>
-  <div class="follow">FOLLOW @kaliajatau.id</div>
-</body></html>"""
-    return html
-
-
-def data_uri_image(path):
-    return f'<img class="bg" src="data:image/jpeg;base64,{base64.b64encode(path.read_bytes()).decode()}" alt="">'
-
-
-def render(png_name, html):
-    src = GEN / (png_name + ".html")
-    src.write_text(html)
-    subprocess.run([sys.executable, str(KIT / "render_html.py"), str(src), str(GEN / png_name),
-                    "1080x1920", "--png"], check=True)
-    return GEN / (png_name + ".png")
 
 
 # ---------- 5. Illustration providers (chain; Cloudflare primary, then best free) ----------
@@ -702,7 +580,7 @@ def buffer_create_and_confirm(video_url, caption):
             "channelId": BUFFER_CHANNEL,
             "schedulingType": "automatic",
             "mode": "shareNow",
-            "assets": [{"video": {"url": video_url, "metadata": {"thumbnailOffset": 500}}}],
+            "assets": [{"video": {"url": video_url, "metadata": {"thumbnailOffset": 0}}}],
             "metadata": {"instagram": {"type": "reel", "shouldShareToFeed": True, "isAiGenerated": True}},
         }})
     payload = d.get("createPost", {})
@@ -738,72 +616,56 @@ def main():
     candidates = fetch_candidates()
     if len(candidates) < 6:
         fail(f"only {len(candidates)} RSS candidates found; refusing to fabricate")
-    script, candidate_list = draft_script(candidates, recent)
-    facts = script["facts"]
 
-    # ground every fact in its referenced candidate: source/link/date can never be invented
-    for f in facts:
-        idx = f.pop("ref", None)
+    # one story: shortlist → fetch the article → write only from its text
+    story = cand = None
+    reasons = []
+    for ref in pick_shortlist(candidates, recent):
+        c = candidates[ref - 1]
         try:
-            ref = int(str(idx).strip()) if idx is not None else -1
-            cand = candidate_list[ref - 1]
-        except Exception:
-            fail(f"AI fact {f.get('title')!r} has no valid 'ref' into the candidate list")
-        f["source"] = cand["source"]
-        f["date"] = (cand["date"] or "")[:32] or "tanggal tidak tercantum"
-        f["link"] = cand.get("link", "")
-    hook = script.get("hook", "5 Fakta Sains").strip()
-    hook_sub = script.get("hook_sub", "Yang rilis minggu ini").strip()
-    caption = (script.get("caption") or "Fakta sains minggu ini").strip()
-    hashtags = " ".join(script.get("hashtags") or ["#Sains"])
-    full_caption = f"{caption}\n\n{hashtags}"
+            article = fetch_article(c)
+        except Exception as e:
+            reasons.append(f"#{ref} fetch failed: {str(e)[:80]}")
+            continue
+        if len(article) < ARTICLE_MIN:
+            reasons.append(f"#{ref} article text only {len(article)} chars")
+            continue
+        try:
+            story = write_story(c, article)
+            cand = c
+            break
+        except RuntimeError as e:
+            reasons.append(f"#{ref} story invalid: {str(e)[:120]}")
+    if not story:
+        fail("no shortlisted article yielded enough text and a valid story: " + "; ".join(reasons))
+    log(f"story: {story['hook']!r} from [{cand['source']}] {cand['title'][:80]}")
 
-    scenes_meta = [{"kind": "hook", "png": GEN / "scene_00.png", "dur": 3.0}]
-    image_providers = []
-
-    # hook scene (HTML-only)
-    render("scene_00", hook_scene(hook, hook_sub, NOW.strftime("%Y-%m-%d")))
-
-    total = len(facts)
-    for i, f in enumerate(facts, start=1):
-        log(f"fact {i}/{total}: {f.get('title')}")
-        img = GEN / f"img_{i}.jpg"
+    images, image_providers = {}, []
+    for k, prompt in enumerate(story["image_prompts"], start=1):
+        img = GEN / f"img_{k}.jpg"
         if MOCK_IMAGES:
             log("  PLACEHOLDER_IMAGES=true — placeholder illustration (dev only)")
-            make_placeholder(img, str(i), i)
+            make_placeholder(img, str(k), k)
             provider = "placeholder"
         else:
-            provider = gen_image(
-                f"{f.get('image_prompt', '')}, no text, no letters, no logos, vertical 9:16",
-                img)
+            provider = gen_image(f"{prompt}, {STYLE_SUFFIX}", img)
+        images[k] = img
         image_providers.append(provider)
-        bg = data_uri_image(img)
-        html = make_scene_html(
-            "fact", f"{i:02d}", f.get("title", ""), f.get("fact", ""),
-            f"Sumber: {f.get('source', '?')} · {f.get('date', '?')}",
-            f"{i}/{total}", bg,
-        )
-        scene_png = render(f"scene_{i:02d}", html)
-        scenes_meta.append({"kind": "fact", "png": scene_png, "dur": 5.5})
 
-    render(f"scene_{total+1:02d}", cta_scene(total))
-    scenes_meta.append({"kind": "cta", "png": GEN / f"scene_{total+1:02d}.png", "dur": 3.5})
-
-    scenes_json = GEN / "scenes.json"
-    scenes_json.write_text(json.dumps(
-        [{"png": str(s["png"].resolve()), "dur": s["dur"]} for s in scenes_meta], indent=1))
+    date = format_date_id(cand["date"])
     reel = GEN / "ig_reel.mp4"
-    subprocess.run([sys.executable, str(KIT / "build_reel.py"), str(scenes_json), str(reel)], check=True)
-    log(f"reel: built {reel} ({reel.stat().st_size / 1e6:.1f} MB)")
-
-    sources = [f"{f.get('source', '?')} — {f.get('title', '')[:60]} ({f.get('date', '')}) [{f.get('link', '')}]" for f in facts]
+    res = render_reel(story, images, {"source": cand["source"], "date": date, "handle": "@kaliajatau.id"},
+                      f"{TODAY}-{NOW:%H%M}", reel)
+    log(f"reel: built {reel} ({reel.stat().st_size / 1e6:.1f} MB, {res['seconds']}s, "
+        f"music {res['music']['key']} {'-'.join(res['music']['progression'])})")
+    full_caption = build_caption(story, cand["source"], cand["link"])
+    sources = [f"{cand['source']} — {cand['title'][:80]} ({date}) [{cand['link']}]"]
     log(f"images via: {image_providers}")
 
     if DRY_RUN:
         log("=== DRY RUN — would upload to Cloudinary and post to Buffer ===")
         log(f"caption:\n{full_caption}")
-        log(f"scenes: {len(scenes_meta)} | duration ≈ {sum(s['dur'] for s in scenes_meta):.1f}s")
-        log("REPORT " + json.dumps({"status": "dry-run", "topic": hook, "path": str(reel),
+        log("REPORT " + json.dumps({"status": "dry-run", "topic": story["hook"], "path": str(reel),
                                     "posted": False, "images": image_providers,
                                     "sources": sources}))
         return
@@ -820,7 +682,7 @@ def main():
         fail(f"cloudinary size mismatch: local {reel.stat().st_size} vs {up.get('bytes')}")
     log(f"cloudinary: uploaded {url}")
     post_id, link = buffer_create_and_confirm(url, full_caption)
-    log("REPORT " + json.dumps({"status": "sent", "topic": hook, "post_id": post_id,
+    log("REPORT " + json.dumps({"status": "sent", "topic": story["hook"], "post_id": post_id,
                                 "reel": link, "posted": True, "images": image_providers,
                                 "sources": sources}))
 

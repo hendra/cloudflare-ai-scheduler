@@ -86,7 +86,8 @@ def _beat_text(text, highlight, hl_at):
              f'style="animation-delay:{hl_at:.3f}s"></span><span class="hltext" '
              f'style="animation-delay:{hl_at:.3f}s">{hl_words}</span></span>')
         c, _ = _words(post, t + WORD_STAGGER)
-        return a + b + c
+        gap = " " if post[:1].isspace() else ""  # _words drops leading whitespace
+        return a + b + gap + c
     return _words(text, REVEAL_START)[0]
 
 

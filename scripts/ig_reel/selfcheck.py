@@ -11,7 +11,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from ig_reel.story import (  # noqa: E402
-    build_caption, check_story, extract_article_text, interleave, numbers_in,
+    build_caption, check_story, extract_article_text, format_date_id, interleave, numbers_in,
 )
 
 # ---------- story ----------
@@ -64,6 +64,49 @@ assert check_story(bad, ARTICLE)[0]
 bad = copy.deepcopy(STORY)
 bad["beats"][1]["highlight"] = "tidak ada di teks"
 assert check_story(bad, ARTICLE)[0]
+
+english = copy.deepcopy(STORY)
+english["hook"] = "Hidden giant beyond Pluto"
+for b, t in zip(english["beats"], ["Astronomers spotted an icy world with the Webb telescope.",
+                                   "Its winds reach 8.700 km/jam, which is fast.",
+                                   "The clouds of glass are carried sideways by the wind.",
+                                   "This is the worst weather of any planet."]):
+    b["text"] = t
+english["beats"][1]["highlight"] = "8.700 km/jam"
+english["cta"] = "Share this with a friend who loves space"
+english["caption"] = {"opener": "A giant hidden beyond Pluto.", "body": "It could be the sixth dwarf planet.",
+                      "question": "What do you think?", "save_line": "Save and share this!"}
+hard, _ = check_story(english, ARTICLE)
+assert any("Bahasa Indonesia" in h for h in hard), hard
+
+# English beats must be rejected even when caption/CTA are Indonesian (seen in a real run).
+mixed = copy.deepcopy(STORY)
+for b, t in zip(mixed["beats"], ["Scientists found that the winds on this planet are fast.",
+                                 "Its winds reach 8.700 km/jam, which is faster than sound.",
+                                 "The clouds of glass are carried sideways by the wind.",
+                                 "This is the worst weather of any known planet."]):
+    b["text"] = t
+mixed["beats"][1]["highlight"] = "8.700 km/jam"
+hard, _ = check_story(mixed, ARTICLE)
+assert any("beat" in h and "Indonesia" in h for h in hard), hard
+# English hook copied from the article's own words is rejected; an Indonesian hook passes.
+eng_hook = copy.deepcopy(STORY)
+eng_hook["hook"] = "Glass carried sideways by winds"
+hard, _ = check_story(eng_hook, ARTICLE)
+assert any("hook" in h and "Indonesia" in h for h in hard), hard
+
+# An English phrase lifted from the article as the on-screen highlight is rejected.
+eng_hl = copy.deepcopy(STORY)
+eng_hl["beats"][1]["text"] = "Anginnya bertiup 8,700 kilometers per hour di planet ini."
+eng_hl["beats"][1]["highlight"] = "8,700 kilometers per hour"
+hard, _ = check_story(eng_hl, ARTICLE)
+assert any("highlight" in h and "Indonesia" in h for h in hard), hard
+
+assert format_date_id("Sat, 14 Nov 2026 09:23:09 EST") == "14 Nov 2026"
+assert format_date_id("Wed, 12 Aug 2026 10:00:00 +0000") == "12 Agu 2026"
+assert format_date_id("2026-05-03T10:00:00Z") == "3 Mei 2026"
+assert format_date_id("") == "tanggal tidak tercantum"
+assert format_date_id("sometime soon") == "sometime soon"
 
 cap = build_caption(copy.deepcopy(STORY), "NASA", "https://x")
 assert cap.startswith("Bayangkan hujan kaca"), cap
@@ -125,6 +168,8 @@ hook_rule = hook.split(".hook-text {")[1].split("}")[0]
 assert "animation" not in hook_rule, "hook text must be fully visible at t=0 (cover)"
 twist = scene_html("twist", copy.deepcopy(STORY), IMGS, META)
 assert 'class="hl"' in twist and "8.700" in twist.split('class="hl"')[1].split("</span></span>")[0]
+visible = re.sub(r"<[^>]+>", "", twist)
+assert "8.700 km/jam — sekitar" in visible, "space after the highlight must survive"
 cta = scene_html("cta", copy.deepcopy(STORY), IMGS, META)
 assert FOLLOW_LINE in cta and "Kirim ke teman" in cta
 evil = copy.deepcopy(STORY)
