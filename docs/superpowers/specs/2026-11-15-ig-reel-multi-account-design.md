@@ -83,8 +83,8 @@ coding, study, work, research), `dedupe_posts: 120` (30 days).
   Checks that replace source grounding, all hard failures:
   - no currency amounts, percentages, or numbers above 10 (step counts stay legal);
   - no model version names (pattern such as `GPT-4`, `Claude 3.5`, `o3`);
-  - Bahasa Indonesia check as today, with the example prompt itself exempt from
-    nothing: prompts are written in Indonesian too.
+  - Bahasa Indonesia check as today; the example prompt is written in Indonesian too
+    and is checked like every other field.
 
 Per run: if the slot is in `news_slots` and a feed story passes grounding, post it;
 otherwise, if the account has themes, post a tip; otherwise fail as today.
