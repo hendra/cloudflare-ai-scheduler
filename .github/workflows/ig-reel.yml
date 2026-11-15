@@ -7,7 +7,7 @@ name: ig-reel
 # overrides the repo-level one of the same name; a missing one falls back to repo level, and the
 # script's wrong-account guard then refuses a real post. Add an account: docs/ig-reel-add-account.md
 #   kaliajatau (default) — Interesting Facts & Knowledge, @kaliajatau.id; repo-level secrets.
-#   ai-labs              — Claude & ChatGPT tips: fresh announcement in the morning slot, else a theme tip.
+#   ai-labs              — Claude/ChatGPT/Gemini creative tips (photo, video, animation): announcement in the morning slot, else a theme tip.
 # Per run: RSS fetch → Buffer dedup → ONE story written only from an article (every number
 # checked) or one theme tip (no prices/versions/big numbers), Bahasa Indonesia → 4 cinematic
 # illustrations → animated HTML scenes captured frame-by-frame + composed beat-synced music

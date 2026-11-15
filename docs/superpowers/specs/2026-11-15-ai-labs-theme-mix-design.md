@@ -1,6 +1,6 @@
 # AI-labs theme mix: creative tips first, weighted rotation
 
-Date: 2026-11-15. Status: awaiting owner approval. Branch: `feat/ai-labs-theme-mix`.
+Date: 2026-11-15. Status: approved.
 
 ## Intent
 
@@ -24,7 +24,7 @@ demanded ones are dropped.
   coding tools (Superpowers) stay in the list.
 - Naming tools outside the three assistants (Canva, CapCut, Sora, Kling…) as the tip's
   `tool`. Tips stay inside the three apps, except the coding-tool theme below, which names
-  Superpowers inside a Claude/ChatGPT tips Reel.
+  Superpowers inside a Claude/ChatGPT/Gemini tips Reel.
 - Changing news mode, scene layout, music, or `scripts/ig-kit/`.
 
 ## Anti-goals
