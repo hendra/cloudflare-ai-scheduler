@@ -254,7 +254,15 @@ assert len({t["topic"] for t in theme_plan(_WR, _day, "morning", 99)}) == 4   # 
 for bad_w in (0, 4, "2", True):
     BAD8 = [{**W[2], "weight": bad_w}] * 8
     assert any("weight" in e for e in validate_account({**LABS, "themes": BAD8})), bad_w
-assert validate_account({**LABS, "themes": [{**W[2], "weight": 2}] * 8}) == []
+assert validate_account({**LABS, "themes": [{**W[2], "topic": f"v{i}", "weight": 2} for i in range(8)]}) == []
+# Focus 1: no weight field at all = today's identity ring.
+_ID = [{"tool": "Claude", "topic": f"x{i}"} for i in range(8)]
+assert [t["topic"] for t in theme_ring(_ID)] == [f"x{i}" for i in range(8)]
+assert validate_account({**KALI, "themes": _ID}) == []
+# Focus 2 at validation time: a weight mix that puts one theme in a day's four slots is rejected,
+# not posted as the same Reel twice.
+_T3 = [{"tool": "Claude", "topic": f"x{i}", "weight": 3 if i < 2 else 1} for i in range(8)]
+assert any("repeat" in e for e in validate_account({**LABS, "themes": _T3})), validate_account({**LABS, "themes": _T3})
 assert wants_news(KALI, "evening") and wants_news(LABS, "morning") and not wants_news(LABS, "midday")
 # Wrong-account guard: an account that is not set up, or Cloudinary secrets of another account, must not post.
 assert account_target_errors(KALI, "whatever-the-repo-secret-is") == []

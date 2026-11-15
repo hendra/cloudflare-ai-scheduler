@@ -48,7 +48,8 @@ demanded ones are dropped.
 ### Schema
 
 `{"tool": "Claude"|"ChatGPT"|"Gemini", "topic": "…", "weight": 1|2|3}`. `weight` optional,
-default 1. Validated as an integer 1-3; at least 8 themes as today.
+default 1. Validated as an integer 1-3, at least 8 themes as today, and the mix must keep
+one day's four rotation slots on four different themes (checked on the ring).
 
 ### Rotation
 

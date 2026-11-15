@@ -40,6 +40,10 @@ def validate_account(cfg):
     weights = [t.get("weight", 1) if isinstance(t, dict) else 1 for t in themes]
     if any(not isinstance(w, int) or isinstance(w, bool) or not 1 <= w <= 3 for w in weights):
         errs.append("themes: weight must be an integer 1-3 (or omitted = 1)")
+    else:  # a weight mix may not put the same theme in two of a day's four slots (the ring rotates, so it wraps)
+        topics = [t["topic"] for t in theme_ring(themes)]
+        if any(len({topics[(i + j) % len(topics)] for j in range(4)}) < 4 for i in range(len(topics))):
+            errs.append("themes: weight mix would repeat a theme within one day — lower a weight or add themes")
     if not feeds and not themes:
         errs.append("account needs feeds or themes")
     slots = cfg.get("news_slots")
