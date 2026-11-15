@@ -9,7 +9,7 @@ import re
 
 ACCOUNTS_DIR = pathlib.Path(__file__).resolve().parent / "accounts"
 SLOTS = ("morning", "midday", "afternoon", "evening")
-TOOLS = ("Claude", "ChatGPT")
+TOOLS = ("Claude", "ChatGPT", "Gemini")
 MIN_THEMES = 8
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _STR_FIELDS = ("handle", "follow_line", "hook_kicker", "persona", "label", "buffer_channel_id", "buffer_org_id")
@@ -37,6 +37,13 @@ def validate_account(cfg):
         themes = []
     elif themes and len(themes) < MIN_THEMES:
         errs.append(f"themes: need at least {MIN_THEMES} (or none), got {len(themes)}")
+    weights = [t.get("weight", 1) if isinstance(t, dict) else 1 for t in themes]
+    if any(not isinstance(w, int) or isinstance(w, bool) or not 1 <= w <= 3 for w in weights):
+        errs.append("themes: weight must be an integer 1-3 (or omitted = 1)")
+    else:  # a weight mix may not put the same theme in two of a day's four slots (the ring rotates, so it wraps)
+        topics = [t["topic"] for t in theme_ring(themes)]
+        if any(len({topics[(i + j) % len(topics)] for j in range(4)}) < 4 for i in range(len(topics))):
+            errs.append("themes: weight mix would repeat a theme within one day — lower a weight or add themes")
     if not feeds and not themes:
         errs.append("account needs feeds or themes")
     slots = cfg.get("news_slots")
@@ -72,9 +79,37 @@ def slot_name(hour_wib):
     return SLOTS[0] if hour_wib < 10 else SLOTS[1] if hour_wib < 14 else SLOTS[2] if hour_wib < 18 else SLOTS[3]
 
 
-def pick_theme(themes, day, slot):
-    """Consecutive themes for the four slots of a day, rolling on across days."""
-    return themes[(day.toordinal() * 4 + SLOTS.index(slot)) % len(themes)]
+def theme_ring(themes):
+    """Themes expanded by weight, round-robin: every theme once, then the weight-2 themes again.
+    Round-robin (not blocks) keeps a day's four consecutive slots on four different themes."""
+    if not themes:
+        return []
+    return [t for level in range(max(t.get("weight", 1) for t in themes))
+            for t in themes if t.get("weight", 1) > level]
+
+
+def pick_theme(ring, day, slot):
+    if not ring:
+        raise ValueError("empty theme ring: the account has no themes, so it has no tip mode")
+    return ring[(day.toordinal() * 4 + SLOTS.index(slot)) % len(ring)]
+
+
+def theme_plan(ring, day, slot, tries):
+    """Up to `tries` themes from today's ring position, each topic once (the tip retry path).
+    A retry steps a whole day of slots ahead, so it never reuses today's other slots."""
+    if not ring:
+        return []
+    start = (day.toordinal() * 4 + SLOTS.index(slot)) % len(ring)
+    out, seen = [], set()
+    for step in range(len(ring)):
+        theme = ring[(start + step * len(SLOTS)) % len(ring)]
+        if theme["topic"] in seen:
+            continue
+        seen.add(theme["topic"])
+        out.append(theme)
+        if len(out) == tries:
+            break
+    return out
 
 
 def wants_news(cfg, slot):

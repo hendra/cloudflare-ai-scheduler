@@ -210,7 +210,8 @@ assert "http" not in build_caption(TIP, "Claude", None) and "Sumber" not in buil
 import datetime as _d  # noqa: E402
 
 from ig_reel.accounts import (  # noqa: E402
-    SLOTS, account_target_errors, load_account, pick_theme, slot_name, validate_account, wants_news,
+    SLOTS, account_target_errors, load_account, pick_theme, slot_name, theme_plan, theme_ring, validate_account,
+    wants_news,
 )
 
 KALI = load_account("kaliajatau")
@@ -220,8 +221,12 @@ assert KALI["dedupe_posts"] == 28 and KALI["cloudinary_cloud_name"] is None  # r
 assert KALI["buffer_channel_id"] == "6aed5544e29c69a1717ba62e" and KALI["buffer_org_id"] == "6aed53e7ec5c7c6d73f3e437"
 assert [n for n, _ in KALI["feeds"]] == ["ScienceDaily", "MIT News", "NASA"]
 LABS = load_account("ai-labs")
-assert LABS["news_slots"] == ["morning"] and LABS["dedupe_posts"] == 120 and len(LABS["themes"]) >= 20
-assert {t["tool"] for t in LABS["themes"]} == {"Claude", "ChatGPT"}
+assert LABS["news_slots"] == ["morning"] and LABS["dedupe_posts"] == 120
+assert len(LABS["themes"]) == 27
+assert {t["tool"] for t in LABS["themes"]} == {"Claude", "ChatGPT", "Gemini"}
+assert sum(1 for t in LABS["themes"] if t.get("weight") == 2) == 12
+assert len(theme_ring(LABS["themes"])) == 39
+assert len({pick_theme(theme_ring(LABS["themes"]), _d.date(2026, 11, 16), s)["topic"] for s in SLOTS}) == 4
 for bad in ("", "../x", "Kaliajatau", "nope"):
     try:
         load_account(bad)
@@ -233,7 +238,41 @@ assert validate_account({**LABS, "themes": LABS["themes"][:3]})
 assert validate_account({**KALI, "feeds": [["x", "http://insecure"]]})
 assert validate_account({**KALI, "dedupe_posts": 0}) and validate_account({**KALI, "news_slots": ["noon"]})
 assert [slot_name(h) for h in (8, 11, 16, 19)] == list(SLOTS)
-assert len({pick_theme(LABS["themes"], _d.date(2026, 11, 16), s)["topic"] for s in SLOTS}) == 4
+
+# Weighted rotation: every theme once, then the weight-2 themes again (round-robin, so a day's
+# four slots stay four different themes); retry never hands back a theme already tried.
+W = [{"tool": "Claude", "topic": "t1", "weight": 2}, {"tool": "Gemini", "topic": "t2", "weight": 2},
+     {"tool": "ChatGPT", "topic": "t3"}, {"tool": "Claude", "topic": "t4"}, {"tool": "Gemini", "topic": "t5"}]
+assert len(theme_ring(W)) == 7 and [t["topic"] for t in theme_ring(W)] == ["t1", "t2", "t3", "t4", "t5", "t1", "t2"]
+assert theme_ring([]) == [] and theme_plan([], _d.date(2026, 11, 16), "morning", 3) == []
+_day = _d.date(2026, 11, 16)
+_WR = theme_ring(W)
+assert pick_theme(_WR, _day, "morning") == _WR[(_day.toordinal() * 4) % len(_WR)]
+_p = theme_plan(_WR, _day, "morning", 3)
+assert _p[0] == pick_theme(_WR, _day, "morning") and len(_p) == len({t["topic"] for t in _p})
+assert len({t["topic"] for t in theme_plan(_WR, _day, "morning", 99)}) == 5   # terminates, no repeats
+# A retry skips today's other slots (four ring positions per retry), and an empty ring fails loudly.
+_LR = theme_ring(LABS["themes"])
+_today = {pick_theme(_LR, _day, s)["topic"] for s in SLOTS}
+_p2 = theme_plan(_LR, _day, "morning", 3)
+assert not ({t["topic"] for t in _p2[1:]} & (_today - {_p2[0]["topic"]})), _p2
+try:
+    pick_theme([], _day, "morning")
+    raise AssertionError("empty ring must fail with a message, not ZeroDivisionError")
+except ValueError:
+    pass
+for bad_w in (0, 4, "2", True):
+    BAD8 = [{**W[2], "weight": bad_w}] * 8
+    assert any("weight" in e for e in validate_account({**LABS, "themes": BAD8})), bad_w
+assert validate_account({**LABS, "themes": [{**W[2], "topic": f"v{i}", "weight": 2} for i in range(8)]}) == []
+# Focus 1: no weight field at all = today's identity ring.
+_ID = [{"tool": "Claude", "topic": f"x{i}"} for i in range(8)]
+assert [t["topic"] for t in theme_ring(_ID)] == [f"x{i}" for i in range(8)]
+assert validate_account({**KALI, "themes": _ID}) == []
+# Focus 2 at validation time: a weight mix that puts one theme in a day's four slots is rejected,
+# not posted as the same Reel twice.
+_T3 = [{"tool": "Claude", "topic": f"x{i}", "weight": 3 if i < 2 else 1} for i in range(8)]
+assert any("repeat" in e for e in validate_account({**LABS, "themes": _T3})), validate_account({**LABS, "themes": _T3})
 assert wants_news(KALI, "evening") and wants_news(LABS, "morning") and not wants_news(LABS, "midday")
 # Wrong-account guard: an account that is not set up, or Cloudinary secrets of another account, must not post.
 assert account_target_errors(KALI, "whatever-the-repo-secret-is") == []
