@@ -21,7 +21,8 @@ Copy `scripts/ig_reel/accounts/ai-labs.json` to `scripts/ig_reel/accounts/<id>.j
 | `news_max_age_days` | `null` = any feed item; a number = only items that fresh (use with themes). |
 | `themes` | `{"tool": "Claude"\|"ChatGPT", "topic": "…"}`. Empty = no tip mode. Otherwise at least 8; the four daily slots take four consecutive themes. |
 | `dedupe_posts` | How many recent Buffer posts the AI is told not to repeat (28 = one week at 4/day). |
-| `buffer_channel_id`, `buffer_org_id`, `cloudinary_cloud_name` | The account's own IDs (not secret). They pin where a run may post. |
+| `buffer_channel_id`, `buffer_org_id` | The account's own Buffer IDs (not secret). A post always goes to this channel; Buffer rejects a token that does not own it. |
+| `cloudinary_cloud_name` | The account's Cloudinary cloud name. A real run refuses to upload when the `CLOUDINARY_CLOUD_NAME` secret differs. `null` = not pinned (only `kaliajatau`, which uses the repo-level secrets). |
 
 `python3 scripts/ig_reel/selfcheck.py` validates every account file.
 
@@ -37,8 +38,9 @@ Repo → Settings → Environments → New environment `ig-<id>`, with these **e
 Known limits:
 
 - A secret missing from the environment silently falls back to the repo-level one
-  (@kaliajatau.id's). For posting secrets the script's guard then refuses the real run
-  (cloud name or Buffer channel does not match the settings file). For AI and image keys it
+  (@kaliajatau.id's). For Cloudinary the script's guard then refuses the real run (cloud
+  name does not match the settings file); for Buffer the post is rejected by Buffer itself
+  (the token does not own the pinned channel). For AI and image keys it
   only means shared quota.
 - Environments on a **private** repo need a paid GitHub plan. This repo is public.
 - `kaliajatau` has no secrets in its environment `ig-kaliajatau`; it uses the repo-level ones.
@@ -50,7 +52,7 @@ gh workflow run ig-reel.yml -f dry_run=true -f account=<id>
 ```
 
 In the log check the `keys:` line (which providers have a key; values are never printed) and
-the `guard:` line, which must say handle, Cloudinary cloud and Buffer channel all match.
+the `guard:` line, which must say the account may post (handle set, Cloudinary cloud matches).
 Download the `ig-reel-dry-run-<id>` artifact and watch the Reel. `-f mode=tip` / `-f mode=news`
 force one story mode.
 

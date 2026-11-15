@@ -106,7 +106,16 @@ prefixed with the account label.
 
 ### Wrong-account guard
 
-Before any upload, a real run fails unless `CLOUDINARY_CLOUD_NAME` equals the pinned
+*Revised during implementation (dry runs, 2026-11-15): the Buffer token has only
+`posts:read`/`posts:write`, so it cannot list channels; and the repo's
+`CLOUDINARY_CLOUD_NAME` secret is not the playbook default. The guard is therefore:
+handle must be set, and the cloud name must match when the account pins one
+(`kaliajatau` pins none). Buffer needs no lookup: a post always goes to the pinned
+channel id and Buffer rejects a token that does not own it. Tips also got
+`news_max_age_days` (only fresh announcements count as news), `hook_kicker`, and a
+retry across 3 themes.*
+
+Original text: Before any upload, a real run fails unless `CLOUDINARY_CLOUD_NAME` equals the pinned
 `cloudinary_cloud_name`, and unless the Buffer token can see the pinned channel. A dry
 run logs both results and which AI and image providers have keys, without printing
 values. Known limit: a missing AI or image key falls back to the repo-level key; that
