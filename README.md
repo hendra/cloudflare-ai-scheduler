@@ -13,6 +13,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler — and, since late 2026
 | FullstackWeb.dev blog writer (`fullstackweb-blog-writer` + `-1130`, `-1620`) | 07:45 + 11:30 + 16:20 WIB | PR on `hendra/fullstackwebdev-site` | **enabled** |
 | INASOFT blog writer (`inasoft-blog-writer` + `-1130`, `-1620`) | 07:45 + 11:30 + 16:20 WIB | PR on `hendra/inasoft-site` | **enabled** |
 | IG Reel pipeline (`ig-reel-daily` + 3 sibling rows) | 4 rows — `15 1`, `45 4`, `35 9`, `30 12` UTC (08:15, 11:45, 16:35, 19:30 WIB) | Instagram @kaliajatau.id via Buffer | **enabled** |
+| IG Reel ai-labs (`ig-reel-ai-labs` + 3 sibling rows) | same 4 slots | Instagram @ailabs01.id via Buffer | **enabled** (2026-11-15) |
 
 Pipelines are deterministic. Most are zero-dependency Node 20 scripts (one file each, plus `scripts/ai-providers.mjs` / `scripts/cover/`; blog covers are rendered by headless Chrome); the IG Reel is a Python orchestrator (`scripts/ig_reel_daily.py`; pip deps installed in the workflow). No agent tool-calling; 1–2 LLM completions per run.
 
