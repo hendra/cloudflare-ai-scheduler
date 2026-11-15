@@ -83,7 +83,7 @@ STYLE_SUFFIX = ("cinematic film still, dramatic volumetric lighting, teal-and-am
                 "shallow depth of field, film grain, vertical 9:16, no text, no letters, no logos")
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from ig_reel.accounts import SLOTS, account_target_errors, load_account, pick_theme, slot_name, wants_news  # noqa: E402
+from ig_reel.accounts import account_target_errors, load_account, slot_name, theme_plan, theme_ring, wants_news  # noqa: E402
 from ig_reel.reel import render_reel  # noqa: E402
 from ig_reel.scenes import TIP_KICKERS  # noqa: E402
 from ig_reel.story import (  # noqa: E402
@@ -778,11 +778,8 @@ def main():
         sources = [f"{source} — {cand['title'][:80]} ({date}) [{link}]"]
         log(f"story: {story['hook']!r} from [{source}] {cand['title'][:80]}")
     else:
-        theme = pick_theme(themes, NOW.date(), SLOT)
         reasons = []
-        for offset in range(TIP_TRIES):  # like the news shortlist: a rejected tip moves on to the next theme
-            if offset:
-                theme = themes[(themes.index(theme) + len(SLOTS)) % len(themes)]  # skip today's other slots
+        for theme in theme_plan(theme_ring(themes), NOW.date(), SLOT, TIP_TRIES):  # each theme once, weighted order
             try:
                 story = write_tip(theme, recent)
                 break
