@@ -19,6 +19,8 @@ Create and post 1 Instagram Reel in the **Interesting Facts & Knowledge** niche 
 - **Hosting/upload:** Cloudinary (hosting and upload only — never for image generation)
 - **Publishing:** Buffer, posted as an Instagram `reel`
 
+- **Accounts (since 2026-11-15):** this prompt describes the @kaliajatau.id account. Handle, feeds, niche and posting targets of every account live in `scripts/ig_reel/accounts/<id>.json`; see `docs/ig-reel-add-account.md`.
+
 ## Rules and Constraints
 
 - Follow the ENTIRE playbook at `https://res.cloudinary.com/opqimovw/raw/upload/ig-kit/ig-playbook.md` (flow §2, niche format §3.B, upload §4, safety rules §6).
