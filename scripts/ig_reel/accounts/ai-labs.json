@@ -1,6 +1,6 @@
 {
   "label": "IG Reel ai-labs",
-  "handle": "",
+  "handle": "@ailabs01.id",
   "follow_line": "Ikuti buat tips AI kreatif berikutnya",
   "hook_kicker": "TIPS AI",
   "persona": "Reel tips & trik AI (Claude, ChatGPT, Gemini) untuk bikin dan edit foto, video, dan animasi, plus cara kerja yang lebih cepat, Bahasa Indonesia santai dan praktis",
@@ -40,7 +40,7 @@
     {"tool": "Claude", "topic": "memakai skills populer seperti Superpowers di alur kerja coding"}
   ],
   "dedupe_posts": 120,
-  "buffer_channel_id": "TODO-owner",
-  "buffer_org_id": "TODO-owner",
-  "cloudinary_cloud_name": "TODO-owner"
+  "buffer_channel_id": "6af92062ece6dfde5fcba082",
+  "buffer_org_id": "67654dffc44cce0b50102d9e",
+  "cloudinary_cloud_name": "sabtvf1z"
 }

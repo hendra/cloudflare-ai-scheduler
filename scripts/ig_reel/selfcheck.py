@@ -280,7 +280,7 @@ assert len(account_target_errors({**KALI, "handle": ""}, "x")) == 1
 PINNED = {**KALI, "cloudinary_cloud_name": "mycloud"}
 assert account_target_errors(PINNED, "mycloud") == [] and len(account_target_errors(PINNED, "other")) == 1
 assert len(account_target_errors(PINNED, "")) == 1
-assert len(account_target_errors(LABS, "opqimovw")) == 2  # as shipped: no handle, placeholder cloud name
+assert account_target_errors(LABS, LABS["cloudinary_cloud_name"]) == [] and len(account_target_errors(LABS, "opqimovw")) == 1
 assert validate_account({**KALI, "cloudinary_cloud_name": ""})
 
 # ---------- timeline ----------
