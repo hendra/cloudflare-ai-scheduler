@@ -210,7 +210,8 @@ assert "http" not in build_caption(TIP, "Claude", None) and "Sumber" not in buil
 import datetime as _d  # noqa: E402
 
 from ig_reel.accounts import (  # noqa: E402
-    SLOTS, account_target_errors, load_account, pick_theme, slot_name, validate_account, wants_news,
+    SLOTS, account_target_errors, load_account, pick_theme, slot_name, theme_plan, theme_ring, validate_account,
+    wants_news,
 )
 
 KALI = load_account("kaliajatau")
@@ -234,6 +235,23 @@ assert validate_account({**KALI, "feeds": [["x", "http://insecure"]]})
 assert validate_account({**KALI, "dedupe_posts": 0}) and validate_account({**KALI, "news_slots": ["noon"]})
 assert [slot_name(h) for h in (8, 11, 16, 19)] == list(SLOTS)
 assert len({pick_theme(LABS["themes"], _d.date(2026, 11, 16), s)["topic"] for s in SLOTS}) == 4
+
+# Weighted rotation: every theme once, then the weight-2 themes again (round-robin, so a day's
+# four slots stay four different themes); retry never hands back a theme already tried.
+W = [{"tool": "Claude", "topic": "t1", "weight": 2}, {"tool": "Gemini", "topic": "t2", "weight": 2},
+     {"tool": "ChatGPT", "topic": "t3"}, {"tool": "Claude", "topic": "t4"}]
+assert len(theme_ring(W)) == 6 and [t["topic"] for t in theme_ring(W)] == ["t1", "t2", "t3", "t4", "t1", "t2"]
+assert theme_ring([]) == [] and theme_plan([], _d.date(2026, 11, 16), "morning", 3) == []
+_day = _d.date(2026, 11, 16)
+_WR = theme_ring(W)
+assert pick_theme(_WR, _day, "morning") == _WR[(_day.toordinal() * 4) % len(_WR)]
+_p = theme_plan(_WR, _day, "morning", 3)
+assert _p[0] == pick_theme(_WR, _day, "morning") and len({t["topic"] for t in _p}) == 3
+assert len({t["topic"] for t in theme_plan(_WR, _day, "morning", 99)}) == 4   # terminates, no repeats
+for bad_w in (0, 4, "2", True):
+    BAD8 = [{**W[2], "weight": bad_w}] * 8
+    assert any("weight" in e for e in validate_account({**LABS, "themes": BAD8})), bad_w
+assert validate_account({**LABS, "themes": [{**W[2], "weight": 2}] * 8}) == []
 assert wants_news(KALI, "evening") and wants_news(LABS, "morning") and not wants_news(LABS, "midday")
 # Wrong-account guard: an account that is not set up, or Cloudinary secrets of another account, must not post.
 assert account_target_errors(KALI, "whatever-the-repo-secret-is") == []
