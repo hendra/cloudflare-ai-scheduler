@@ -2,6 +2,7 @@
   "label": "IG Reel @kaliajatau.id",
   "handle": "@kaliajatau.id",
   "follow_line": "Ikuti @kaliajatau.id buat fakta gila berikutnya",
+  "hook_kicker": "FAKTA SAINS",
   "persona": "Reel sains @kaliajatau.id (gaya dokumenter sinematik, Bahasa Indonesia santai tapi kredibel)",
   "feeds": [
     ["ScienceDaily", "https://www.sciencedaily.com/rss/all.xml"],
@@ -9,6 +10,7 @@
     ["NASA", "https://www.nasa.gov/news-release/feed/"]
   ],
   "news_slots": "all",
+  "news_max_age_days": null,
   "themes": [],
   "dedupe_posts": 28,
   "buffer_channel_id": "6aed5544e29c69a1717ba62e",

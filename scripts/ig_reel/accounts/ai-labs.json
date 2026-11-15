@@ -2,12 +2,14 @@
   "label": "IG Reel ai-labs",
   "handle": "",
   "follow_line": "Ikuti buat tips AI berikutnya",
+  "hook_kicker": "TIPS AI",
   "persona": "Reel tips & trik AI (Claude dan ChatGPT) untuk pemula, Bahasa Indonesia santai dan praktis",
   "feeds": [
     ["OpenAI", "https://openai.com/news/rss.xml"],
     ["Claude Code", "https://github.com/anthropics/claude-code/releases.atom"]
   ],
   "news_slots": ["morning"],
+  "news_max_age_days": 3,
   "themes": [
     {"tool": "Claude", "topic": "minta AI bertanya balik dulu sebelum menjawab"},
     {"tool": "ChatGPT", "topic": "memberi peran yang jelas di awal prompt"},

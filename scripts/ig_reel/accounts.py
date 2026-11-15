@@ -12,7 +12,7 @@ SLOTS = ("morning", "midday", "afternoon", "evening")
 TOOLS = ("Claude", "ChatGPT")
 MIN_THEMES = 8
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-_STR_FIELDS = ("handle", "follow_line", "persona", "label", "buffer_channel_id", "buffer_org_id",
+_STR_FIELDS = ("handle", "follow_line", "hook_kicker", "persona", "label", "buffer_channel_id", "buffer_org_id",
                "cloudinary_cloud_name")
 _MAY_BE_EMPTY = ("handle",)
 
@@ -46,6 +46,9 @@ def validate_account(cfg):
     n = cfg.get("dedupe_posts")
     if not isinstance(n, int) or isinstance(n, bool) or not 1 <= n <= 200:
         errs.append("dedupe_posts: integer 1-200")
+    age = cfg.get("news_max_age_days")
+    if age is not None and (not isinstance(age, int) or isinstance(age, bool) or age < 1):
+        errs.append("news_max_age_days: null (any age) or an integer >= 1")
     return errs
 
 
