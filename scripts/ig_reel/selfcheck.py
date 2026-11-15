@@ -11,12 +11,36 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from ig_reel.story import (  # noqa: E402
-    apply_story_limits, build_caption, check_story, extract_article_text, format_date_id, interleave, numbers_in,
+    apply_story_limits, build_caption, check_story, extract_article_text, feed_body, format_date_id, grounding_text,
+    interleave, numbers_in, order_by_source,
 )
 
 # ---------- story ----------
 assert [c["title"] for c in interleave([[{"title": "a1"}, {"title": "a2"}], [{"title": "b1"}]], 3)] == ["a1", "b1", "a2"]
 assert [c["title"] for c in interleave([[{"title": "Same"}], [{"title": "same"}, {"title": "x"}]], 5)] == ["Same", "x"]
+
+# --- feed full text / source-alternating shortlist (spec 2026-11-15-ig-reel-article-fetch-403) ---
+# only <p> text counts, like the page path: NASA's feed body ends in "Explore More" teasers for other stories
+assert feed_body("<p>Tom &amp; Jerry&nbsp;ran <b>fast</b></p><script>x()</script><h2>Explore More</h2>"
+                 "<div>3 min read Other story 14 days ago</div>", 100) == "Tom & Jerry ran fast"
+assert feed_body("plain text without paragraphs", 100) == ""
+assert feed_body("<p>" + "a" * 50 + "</p>", 10) == "a" * 10
+assert feed_body("", 10) == ""
+
+_src = ["SD", "MIT", "NASA", "SD", "MIT", "NASA", "MIT"]          # sources of candidates 1..7
+assert order_by_source([2, 5, 7, 1, 3, 4], _src) == [2, 1, 3, 5, 4, 7]   # MIT,SD,NASA | MIT,SD | MIT
+assert order_by_source([2, 5, 7], _src) == [2, 5, 7]              # one source: rank order kept
+assert order_by_source([4], _src) == [4]
+assert order_by_source([], _src) == []
+
+
+def _no_page():
+    raise AssertionError("page must not be fetched when the feed body is long enough")
+
+
+assert grounding_text("x" * 800, _no_page, 800) == "x" * 800
+assert grounding_text("x" * 799, lambda: "PAGE", 800) == "PAGE"
+assert grounding_text("", lambda: "PAGE", 800) == "PAGE"
 
 html = "<nav><p>menu</p></nav><script>x</script><p>Para one.</p><p>Para &amp; two.</p>"
 assert extract_article_text(html) == "Para one.\nPara & two.", extract_article_text(html)

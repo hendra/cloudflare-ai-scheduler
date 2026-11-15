@@ -80,6 +80,31 @@ def extract_article_text(page_html):
     return "\n".join(paras)[:ARTICLE_MAX]
 
 
+def feed_body(raw, cap):
+    """Paragraph text of a feed item's full-text field (content:encoded), capped.
+
+    Same <p>-only rule as the page: feeds append teasers for other stories outside paragraphs."""
+    return extract_article_text(raw or "")[:cap]
+
+
+def order_by_source(refs, sources):
+    """Reorder ranked 1-based refs round-robin by source, so one unreadable site can't fill the top."""
+    left, out = list(refs), []
+    while left:
+        seen = set()
+        for r in list(left):
+            if sources[r - 1] not in seen:
+                seen.add(sources[r - 1])
+                out.append(r)
+                left.remove(r)
+    return out
+
+
+def grounding_text(body, fetch_page, min_chars):
+    """The feed's own article text when it is long enough, else the fetched page."""
+    return body if len(body) >= min_chars else fetch_page()
+
+
 # Function words that dominate ordinary Indonesian vs English prose; the AI sometimes
 # follows an English source article instead of the instruction to write in Indonesian.
 _ID_WORDS = {"yang", "dan", "di", "ini", "itu", "dari", "untuk", "dengan", "ke", "bisa", "ada", "tidak",

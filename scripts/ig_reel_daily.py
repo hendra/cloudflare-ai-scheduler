@@ -2,7 +2,7 @@
 """IG Reel — Interesting Facts & Knowledge (@kaliajatau.id, → Instagram via Buffer)
 
 Prompt 1 (`prompts/ig-reel-daily.md`) in executable form. Deterministic: RSS fetch
-(feeds interleaved) → Buffer dedup → AI shortlists 3 findings → fetch the top article →
+(feeds interleaved) → Buffer dedup → AI shortlists 6 findings → feed text or fetched article →
 AI writes ONE story (hook → context → twist → why → payoff → CTA) only from that text,
 every number checked against it → 4 cinematic illustrations → animated HTML scenes
 captured frame-by-frame + composed beat-synced music (scripts/ig_reel/) → Cloudinary
@@ -88,15 +88,15 @@ STYLE_SUFFIX = ("cinematic film still, dramatic volumetric lighting, teal-and-am
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from ig_reel.reel import render_reel  # noqa: E402
 from ig_reel.story import (  # noqa: E402
-    STORY_SCHEMA_HINT, apply_story_limits, build_caption, check_story, extract_article_text, format_date_id,
-    interleave,
+    STORY_SCHEMA_HINT, apply_story_limits, build_caption, check_story, extract_article_text, feed_body,
+    format_date_id, grounding_text, interleave, order_by_source,
 )
 
 UA = "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0"
 
 RSS_FEEDS = [
     ("ScienceDaily", "https://www.sciencedaily.com/rss/all.xml"),
-    ("Phys.org", "https://phys.org/rss-feed/"),
+    ("MIT News", "https://news.mit.edu/rss/research"),
     ("NASA", "https://www.nasa.gov/news-release/feed/"),
 ]
 
@@ -213,7 +213,7 @@ def fetch_candidates():
             tag = node.tag.split("}")[-1]
             if tag not in ("item", "entry"):
                 continue
-            title = link = date = desc = ""
+            title = link = date = desc = body = ""
             for child in node:
                 t = child.tag.split("}")[-1]
                 txt = (child.text or "").strip()
@@ -227,8 +227,10 @@ def fetch_candidates():
                 elif t in ("description", "summary", "content") and not desc:
                     desc = re.sub(r"<[^>]+>", " ", txt)
                     desc = re.sub(r"\s+", " ", desc)[:220]
+                elif t == "encoded" and not body:  # content:encoded = the feed's own full article text
+                    body = feed_body(txt, ARTICLE_PROMPT_MAX)
             if title and link:
-                items.append({"title": title, "link": link, "date": date, "desc": desc, "source": source})
+                items.append({"title": title, "link": link, "date": date, "desc": desc, "body": body, "source": source})
     groups = [[it for it in items if it["source"] == source] for source, _ in RSS_FEEDS]
     out = interleave(groups, 18)  # round-robin so one busy feed can't crowd out the others
     log(f"rss: {len(out)} candidates from {len(RSS_FEEDS)} feeds (of {len(items)} items)")
@@ -296,11 +298,11 @@ def ai_json(prompt, max_tokens=2600):
 
 
 def pick_shortlist(candidates, avoid):
-    """AI ranks candidates for one 25-second story; returns up to 3 valid 1-based refs."""
+    """AI ranks candidates for one 25-second story; returns up to 6 valid 1-based refs, sources alternating."""
     avoid_block = ("\n".join(f"- {t[:120]}" for t in avoid)) or "(none)"
     hint = f"\nTopik prioritas bila relevan: {TOPIC_HINT}\n" if TOPIC_HINT else ""
     lines = "\n".join(f"{i+1}. [{c['source']}] {c['title']} | {c['desc']}" for i, c in enumerate(candidates))
-    prompt = f"""Kamu produser Reel sains @kaliajatau.id. Pilih 3 temuan yang paling cocok jadi SATU cerita Reel 25 detik:
+    prompt = f"""Kamu produser Reel sains @kaliajatau.id. Pilih 6 temuan yang paling cocok jadi SATU cerita Reel 25 detik:
 paling bikin "hah, serius?!", bisa dijelaskan tanpa jargon, dan mudah divisualkan. Prioritaskan yang terbaru.
 {hint}
 Sudah diposting baru-baru ini (JANGAN pilih topik yang sama):
@@ -309,7 +311,7 @@ Sudah diposting baru-baru ini (JANGAN pilih topik yang sama):
 Kandidat:
 {lines}
 
-Jawab HANYA JSON: {{"refs": [nomor terbaik, kedua, ketiga]}}"""
+Jawab HANYA JSON: {{"refs": [nomor terbaik, kedua, ketiga, keempat, kelima, keenam]}}"""
     data = ai_json(prompt, max_tokens=1500)  # reasoning models spend tokens before answering
     refs = []
     for r in (data.get("refs") or []) if isinstance(data, dict) else []:
@@ -321,14 +323,15 @@ Jawab HANYA JSON: {{"refs": [nomor terbaik, kedua, ketiga]}}"""
             refs.append(r)
     if not refs:
         fail("AI shortlist returned no valid candidate refs")
+    refs = order_by_source(refs[:6], [c["source"] for c in candidates])
     log(f"shortlist: {refs}")
-    return refs[:3]
+    return refs
 
 
 ARTICLE_MAX_BYTES = 2_000_000
 
 
-def fetch_article(cand):
+def _fetch_article_page(cand):
     """Article page text. Only http(s), only HTML, at most 2 MB read (RSS links are data)."""
     link = str(cand.get("link") or "")
     if urllib.parse.urlsplit(link).scheme not in ("http", "https"):
@@ -341,10 +344,17 @@ def fetch_article(cand):
         raw = r.read(ARTICLE_MAX_BYTES)
         charset = r.headers.get_content_charset() or "utf-8"
     page = raw.decode(charset, "replace")
-    text = extract_article_text(page)[:ARTICLE_PROMPT_MAX]
+    return extract_article_text(page)[:ARTICLE_PROMPT_MAX]
+
+
+def fetch_article(cand):
+    """Text that grounds the story: the feed's own full text when long enough, else the article page."""
+    body = cand.get("body") or ""
+    text = grounding_text(body, lambda: _fetch_article_page(cand), ARTICLE_MIN)
+    origin = "feed body (" + cand["link"] + ")" if text is body and body else cand["link"]
     if cand.get("desc") and cand["desc"] not in text:
         text = cand["desc"] + "\n" + text
-    log(f"article: {len(text)} chars from {cand['link']}")
+    log(f"article: {len(text)} chars from {origin}")
     return text
 
 
