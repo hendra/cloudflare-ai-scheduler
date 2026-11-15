@@ -12,8 +12,7 @@ SLOTS = ("morning", "midday", "afternoon", "evening")
 TOOLS = ("Claude", "ChatGPT")
 MIN_THEMES = 8
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
-_STR_FIELDS = ("handle", "follow_line", "hook_kicker", "persona", "label", "buffer_channel_id", "buffer_org_id",
-               "cloudinary_cloud_name")
+_STR_FIELDS = ("handle", "follow_line", "hook_kicker", "persona", "label", "buffer_channel_id", "buffer_org_id")
 _MAY_BE_EMPTY = ("handle",)
 
 
@@ -46,6 +45,9 @@ def validate_account(cfg):
     n = cfg.get("dedupe_posts")
     if not isinstance(n, int) or isinstance(n, bool) or not 1 <= n <= 200:
         errs.append("dedupe_posts: integer 1-200")
+    cloud = cfg.get("cloudinary_cloud_name")
+    if cloud is not None and (not isinstance(cloud, str) or not cloud.strip()):
+        errs.append("cloudinary_cloud_name: null (not pinned) or a non-empty string")
     age = cfg.get("news_max_age_days")
     if age is not None and (not isinstance(age, int) or isinstance(age, bool) or age < 1):
         errs.append("news_max_age_days: null (any age) or an integer >= 1")
@@ -79,14 +81,14 @@ def wants_news(cfg, slot):
     return cfg["news_slots"] == "all" or slot in cfg["news_slots"]
 
 
-def account_target_errors(account, cloud_name, visible_channel_ids):
-    """Why this run must not post: the secrets it received belong to another account,
-    or the account is not fully set up. Empty list = safe to post."""
+def account_target_errors(account, cloud_name):
+    """Why this run must not post: the account is not set up, or the Cloudinary secrets it
+    received belong to another account. Empty list = safe to post.
+    Buffer needs no check here: a post always goes to the pinned buffer_channel_id, and Buffer
+    itself rejects a token that does not own that channel."""
     errs = []
     if not account["handle"].strip():
         errs.append("handle is empty in the account file")
-    if cloud_name != account["cloudinary_cloud_name"]:
+    if account["cloudinary_cloud_name"] is not None and cloud_name != account["cloudinary_cloud_name"]:
         errs.append("CLOUDINARY_CLOUD_NAME does not match the account's cloudinary_cloud_name")
-    if account["buffer_channel_id"] not in visible_channel_ids:
-        errs.append("BUFFER_ACCESS_TOKEN cannot see the account's buffer_channel_id")
     return errs

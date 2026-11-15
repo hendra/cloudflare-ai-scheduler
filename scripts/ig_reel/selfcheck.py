@@ -216,7 +216,7 @@ from ig_reel.accounts import (  # noqa: E402
 KALI = load_account("kaliajatau")
 assert KALI["handle"] == "@kaliajatau.id" and KALI["news_slots"] == "all" and KALI["themes"] == []
 assert KALI["follow_line"] == "Ikuti @kaliajatau.id buat fakta gila berikutnya"
-assert KALI["dedupe_posts"] == 28 and KALI["cloudinary_cloud_name"] == "opqimovw"
+assert KALI["dedupe_posts"] == 28 and KALI["cloudinary_cloud_name"] is None  # repo-level secrets, not pinned
 assert KALI["buffer_channel_id"] == "6aed5544e29c69a1717ba62e" and KALI["buffer_org_id"] == "6aed53e7ec5c7c6d73f3e437"
 assert [n for n, _ in KALI["feeds"]] == ["ScienceDaily", "MIT News", "NASA"]
 LABS = load_account("ai-labs")
@@ -235,12 +235,14 @@ assert validate_account({**KALI, "dedupe_posts": 0}) and validate_account({**KAL
 assert [slot_name(h) for h in (8, 11, 16, 19)] == list(SLOTS)
 assert len({pick_theme(LABS["themes"], _d.date(2026, 11, 16), s)["topic"] for s in SLOTS}) == 4
 assert wants_news(KALI, "evening") and wants_news(LABS, "morning") and not wants_news(LABS, "midday")
-# Wrong-account guard: secrets of another account, or an account not set up yet, must not post.
-assert account_target_errors(KALI, "opqimovw", ["6aed5544e29c69a1717ba62e"]) == []
-assert len(account_target_errors({**KALI, "handle": ""}, "opqimovw", ["6aed5544e29c69a1717ba62e"])) == 1
-assert len(account_target_errors(KALI, "other", ["6aed5544e29c69a1717ba62e"])) == 1
-assert len(account_target_errors(KALI, "opqimovw", ["zzz"])) == 1
-assert len(account_target_errors(LABS, "opqimovw", ["6aed5544e29c69a1717ba62e"])) == 3
+# Wrong-account guard: an account that is not set up, or Cloudinary secrets of another account, must not post.
+assert account_target_errors(KALI, "whatever-the-repo-secret-is") == []
+assert len(account_target_errors({**KALI, "handle": ""}, "x")) == 1
+PINNED = {**KALI, "cloudinary_cloud_name": "mycloud"}
+assert account_target_errors(PINNED, "mycloud") == [] and len(account_target_errors(PINNED, "other")) == 1
+assert len(account_target_errors(PINNED, "")) == 1
+assert len(account_target_errors(LABS, "opqimovw")) == 2  # as shipped: no handle, placeholder cloud name
+assert validate_account({**KALI, "cloudinary_cloud_name": ""})
 
 # ---------- timeline ----------
 from ig_reel.timeline import scene_starts, total_frames  # noqa: E402

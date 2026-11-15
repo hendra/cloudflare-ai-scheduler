@@ -83,7 +83,7 @@ STYLE_SUFFIX = ("cinematic film still, dramatic volumetric lighting, teal-and-am
                 "shallow depth of field, film grain, vertical 9:16, no text, no letters, no logos")
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from ig_reel.accounts import account_target_errors, load_account, pick_theme, slot_name, wants_news  # noqa: E402
+from ig_reel.accounts import SLOTS, account_target_errors, load_account, pick_theme, slot_name, wants_news  # noqa: E402
 from ig_reel.reel import render_reel  # noqa: E402
 from ig_reel.scenes import TIP_KICKERS  # noqa: E402
 from ig_reel.story import (  # noqa: E402
@@ -104,6 +104,7 @@ BUFFER_CHANNEL = ACCOUNT["buffer_channel_id"]
 BUFFER_ORG = ACCOUNT["buffer_org_id"]
 SLOT = slot_name(NOW.hour)
 MODE = (os.environ.get("MODE", "").strip().lower() or "auto")
+TIP_TRIES = 3  # themes tried before a tip run gives up
 
 
 def log(*a):
@@ -228,18 +229,12 @@ def recent_post_captions():
 
 
 def verify_account_targets():
-    """Wrong-account guard. A real run stops unless the secrets it received belong to this
-    account; a dry run only logs the result."""
-    channels = []
-    if BUFFER_TOKEN:
-        try:
-            d = buffer_graphql('query { channels(input: { organizationId: "%s" }) { id } }' % BUFFER_ORG)
-            channels = [c.get("id") for c in d.get("channels") or []]
-        except Exception as e:
-            log(f"guard: Buffer channel lookup failed: {str(e)[:160]}")
-    errs = account_target_errors(ACCOUNT, CLOUD_NAME, channels)
+    """Wrong-account guard (see account_target_errors). A real run stops; a dry run only logs."""
+    errs = account_target_errors(ACCOUNT, CLOUD_NAME)
     if not errs:
-        log(f"guard: account {ACCOUNT['id']} — handle, Cloudinary cloud and Buffer channel all match")
+        pin = "matches" if ACCOUNT["cloudinary_cloud_name"] else "not pinned"
+        log(f"guard: account {ACCOUNT['id']} may post — handle set, Cloudinary cloud {pin}, "
+            f"Buffer channel {BUFFER_CHANNEL}")
     elif DRY_RUN:
         log(f"guard: account {ACCOUNT['id']} could NOT post for real: " + "; ".join(errs))
     else:
@@ -457,14 +452,16 @@ Artikel:
 def write_tip(theme, avoid):
     """One AI call writes a theme tip (no source article); validated with the tip rules, one repair retry."""
     avoid_block = ("\n".join(f"- {t[:120]}" for t in avoid[:60])) or "(belum ada)"
+    topic = TOPIC_HINT or theme['topic']
     prompt = f"""Kamu penulis naskah {ACCOUNT['persona']}.
-Tulis SATU tips praktis untuk {theme['tool']} dengan tema: {theme['topic']}.
+Tulis SATU tips praktis untuk {theme['tool']} dengan tema: {topic}.
 Alur beats: context = masalah yang sering dialami orang → twist = triknya (sorot frasa kuncinya) →
 why = contoh prompt siap salin (pendek, dalam Bahasa Indonesia) → payoff = hasil yang didapat, satu kalimat layak disimpan.
 CTA = ajakan kirim/share yang spesifik untuk tips ini (sebut tipe teman yang cocok).
 
 Aturan WAJIB:
-- SEMUA teks (hook, beats, cta, caption) dalam Bahasa Indonesia.
+- SEMUA teks (hook, beats, cta, caption) dalam Bahasa Indonesia, TERMASUK contoh prompt di beat "why"
+  (mis. "Sebelum menjawab, tanyakan dulu 3 hal yang perlu kamu tahu dari saya."). Jangan menulis prompt berbahasa Inggris.
 - Tips harus benar untuk {theme['tool']} secara umum dan bisa langsung dicoba siapa pun.
 - JANGAN sebut harga, paket berbayar, persentase, batas pemakaian, tanggal, nama versi model, atau lokasi menu/tombol.
 - JANGAN pakai angka di atas {TIP_MAX_NUMBER}. Sebut alatnya hanya "{theme['tool']}".
@@ -483,6 +480,7 @@ Jawab HANYA JSON dengan skema:
         log("tip: truncating: " + "; ".join(soft))
     if hard:
         log("tip: validation issues: " + "; ".join(hard))
+        log("tip: rejected beats: " + " | ".join(str(b.get("text"))[:130] for b in data.get("beats") or [] if isinstance(b, dict)))
         data = ai_json("Perbaiki JSON tips di bawah agar lolos validasi. Pelanggaran:\n- " + "\n- ".join(hard + soft)
                        + "\nJawab hanya JSON dengan skema yang sama.\n\nJSON:\n" + json.dumps(data, ensure_ascii=False))
         if not isinstance(data, dict):
@@ -781,15 +779,20 @@ def main():
         log(f"story: {story['hook']!r} from [{source}] {cand['title'][:80]}")
     else:
         theme = pick_theme(themes, NOW.date(), SLOT)
-        if TOPIC_HINT:
-            theme = {**theme, "topic": TOPIC_HINT}
-        try:
-            story = write_tip(theme, recent)
-        except RuntimeError as e:
-            fail(f"tip invalid ({theme['tool']} — {theme['topic']}): {e}")
+        reasons = []
+        for offset in range(TIP_TRIES):  # like the news shortlist: a rejected tip moves on to the next theme
+            if offset:
+                theme = themes[(themes.index(theme) + len(SLOTS)) % len(themes)]  # skip today's other slots
+            try:
+                story = write_tip(theme, recent)
+                break
+            except RuntimeError as e:
+                reasons.append(f"{theme['tool']} — {theme['topic']}: {str(e)[:140]}")
+        if not story:
+            fail("no valid tip after " + str(TIP_TRIES) + " themes: " + "; ".join(reasons))
         mode, source, link = "tip", theme["tool"], None
         date = format_date_id(NOW.isoformat())
-        sources = [f"tip: {source} — {theme['topic']}"]
+        sources = [f"tip: {source} — {TOPIC_HINT or theme['topic']}"]
         meta.update(source_label="Tips", kickers=TIP_KICKERS)
         log(f"tip: {story['hook']!r} for [{source}] {theme['topic']}")
     meta.update(source=source, date=date)
