@@ -81,9 +81,10 @@ def extract_article_text(page_html):
 
 
 def feed_body(raw, cap):
-    """Plain text of a feed item's full-text field (content:encoded): no tags, no entities, capped."""
-    text = re.sub(r"<[^>]+>", " ", _DROP.sub(" ", str(raw or "")))
-    return re.sub(r"\s+", " ", _html.unescape(text)).strip()[:cap]
+    """Paragraph text of a feed item's full-text field (content:encoded), capped.
+
+    Same <p>-only rule as the page: feeds append teasers for other stories outside paragraphs."""
+    return extract_article_text(raw or "")[:cap]
 
 
 def order_by_source(refs, sources):

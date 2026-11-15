@@ -20,7 +20,10 @@ assert [c["title"] for c in interleave([[{"title": "a1"}, {"title": "a2"}], [{"t
 assert [c["title"] for c in interleave([[{"title": "Same"}], [{"title": "same"}, {"title": "x"}]], 5)] == ["Same", "x"]
 
 # --- feed full text / source-alternating shortlist (spec 2026-11-15-ig-reel-article-fetch-403) ---
-assert feed_body("<p>Tom &amp; Jerry&nbsp;ran</p>\n\n<script>x()</script><b>fast</b>", 100) == "Tom & Jerry ran fast"
+# only <p> text counts, like the page path: NASA's feed body ends in "Explore More" teasers for other stories
+assert feed_body("<p>Tom &amp; Jerry&nbsp;ran <b>fast</b></p><script>x()</script><h2>Explore More</h2>"
+                 "<div>3 min read Other story 14 days ago</div>", 100) == "Tom & Jerry ran fast"
+assert feed_body("plain text without paragraphs", 100) == ""
 assert feed_body("<p>" + "a" * 50 + "</p>", 10) == "a" * 10
 assert feed_body("", 10) == ""
 
