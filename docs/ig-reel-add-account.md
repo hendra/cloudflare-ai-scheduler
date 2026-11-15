@@ -19,7 +19,8 @@ Copy `scripts/ig_reel/accounts/ai-labs.json` to `scripts/ig_reel/accounts/<id>.j
 | `feeds` | `[name, https url]` pairs (RSS or Atom). Check each answers 200 to `curl`. |
 | `news_slots` | `"all"`, or the slots that try a feed story: `morning` (<10:00 WIB), `midday` (<14:00), `afternoon` (<18:00), `evening`. |
 | `news_max_age_days` | `null` = any feed item; a number = only items that fresh (use with themes). |
-| `themes` | `{"tool": "Claude"\|"ChatGPT", "topic": "…"}`. Empty = no tip mode. Otherwise at least 8; the four daily slots take four consecutive themes. |
+| `themes` | `{"tool": "Claude"\|"ChatGPT"\|"Gemini", "topic": "…", "weight": 2}`. Empty = no tip mode. Otherwise at least 8; the four daily slots take four consecutive rotation slots. |
+| `weight` | Optional 1-3 (default 1): how many rotation slots the theme takes. 2 = twice as often. |
 | `dedupe_posts` | How many recent Buffer posts the AI is told not to repeat (28 = one week at 4/day). |
 | `buffer_channel_id`, `buffer_org_id` | The account's own Buffer IDs (not secret). A post always goes to this channel; Buffer rejects a token that does not own it. |
 | `cloudinary_cloud_name` | The account's Cloudinary cloud name. A real run refuses to upload when the `CLOUDINARY_CLOUD_NAME` secret differs. `null` = not pinned (only `kaliajatau`, which uses the repo-level secrets). |

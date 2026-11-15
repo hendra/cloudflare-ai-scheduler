@@ -221,8 +221,12 @@ assert KALI["dedupe_posts"] == 28 and KALI["cloudinary_cloud_name"] is None  # r
 assert KALI["buffer_channel_id"] == "6aed5544e29c69a1717ba62e" and KALI["buffer_org_id"] == "6aed53e7ec5c7c6d73f3e437"
 assert [n for n, _ in KALI["feeds"]] == ["ScienceDaily", "MIT News", "NASA"]
 LABS = load_account("ai-labs")
-assert LABS["news_slots"] == ["morning"] and LABS["dedupe_posts"] == 120 and len(LABS["themes"]) >= 20
-assert {t["tool"] for t in LABS["themes"]} == {"Claude", "ChatGPT"}
+assert LABS["news_slots"] == ["morning"] and LABS["dedupe_posts"] == 120
+assert len(LABS["themes"]) == 27
+assert {t["tool"] for t in LABS["themes"]} == {"Claude", "ChatGPT", "Gemini"}
+assert sum(1 for t in LABS["themes"] if t.get("weight") == 2) == 12
+assert len(theme_ring(LABS["themes"])) == 39
+assert len({pick_theme(theme_ring(LABS["themes"]), _d.date(2026, 11, 16), s)["topic"] for s in SLOTS}) == 4
 for bad in ("", "../x", "Kaliajatau", "nope"):
     try:
         load_account(bad)
@@ -234,7 +238,6 @@ assert validate_account({**LABS, "themes": LABS["themes"][:3]})
 assert validate_account({**KALI, "feeds": [["x", "http://insecure"]]})
 assert validate_account({**KALI, "dedupe_posts": 0}) and validate_account({**KALI, "news_slots": ["noon"]})
 assert [slot_name(h) for h in (8, 11, 16, 19)] == list(SLOTS)
-assert len({pick_theme(LABS["themes"], _d.date(2026, 11, 16), s)["topic"] for s in SLOTS}) == 4
 
 # Weighted rotation: every theme once, then the weight-2 themes again (round-robin, so a day's
 # four slots stay four different themes); retry never hands back a theme already tried.
