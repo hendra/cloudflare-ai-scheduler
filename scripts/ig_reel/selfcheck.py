@@ -242,15 +242,25 @@ assert [slot_name(h) for h in (8, 11, 16, 19)] == list(SLOTS)
 # Weighted rotation: every theme once, then the weight-2 themes again (round-robin, so a day's
 # four slots stay four different themes); retry never hands back a theme already tried.
 W = [{"tool": "Claude", "topic": "t1", "weight": 2}, {"tool": "Gemini", "topic": "t2", "weight": 2},
-     {"tool": "ChatGPT", "topic": "t3"}, {"tool": "Claude", "topic": "t4"}]
-assert len(theme_ring(W)) == 6 and [t["topic"] for t in theme_ring(W)] == ["t1", "t2", "t3", "t4", "t1", "t2"]
+     {"tool": "ChatGPT", "topic": "t3"}, {"tool": "Claude", "topic": "t4"}, {"tool": "Gemini", "topic": "t5"}]
+assert len(theme_ring(W)) == 7 and [t["topic"] for t in theme_ring(W)] == ["t1", "t2", "t3", "t4", "t5", "t1", "t2"]
 assert theme_ring([]) == [] and theme_plan([], _d.date(2026, 11, 16), "morning", 3) == []
 _day = _d.date(2026, 11, 16)
 _WR = theme_ring(W)
 assert pick_theme(_WR, _day, "morning") == _WR[(_day.toordinal() * 4) % len(_WR)]
 _p = theme_plan(_WR, _day, "morning", 3)
-assert _p[0] == pick_theme(_WR, _day, "morning") and len({t["topic"] for t in _p}) == 3
-assert len({t["topic"] for t in theme_plan(_WR, _day, "morning", 99)}) == 4   # terminates, no repeats
+assert _p[0] == pick_theme(_WR, _day, "morning") and len(_p) == len({t["topic"] for t in _p})
+assert len({t["topic"] for t in theme_plan(_WR, _day, "morning", 99)}) == 5   # terminates, no repeats
+# A retry skips today's other slots (four ring positions per retry), and an empty ring fails loudly.
+_LR = theme_ring(LABS["themes"])
+_today = {pick_theme(_LR, _day, s)["topic"] for s in SLOTS}
+_p2 = theme_plan(_LR, _day, "morning", 3)
+assert not ({t["topic"] for t in _p2[1:]} & (_today - {_p2[0]["topic"]})), _p2
+try:
+    pick_theme([], _day, "morning")
+    raise AssertionError("empty ring must fail with a message, not ZeroDivisionError")
+except ValueError:
+    pass
 for bad_w in (0, 4, "2", True):
     BAD8 = [{**W[2], "weight": bad_w}] * 8
     assert any("weight" in e for e in validate_account({**LABS, "themes": BAD8})), bad_w

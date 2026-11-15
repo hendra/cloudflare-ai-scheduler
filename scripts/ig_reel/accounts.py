@@ -89,17 +89,20 @@ def theme_ring(themes):
 
 
 def pick_theme(ring, day, slot):
+    if not ring:
+        raise ValueError("empty theme ring: the account has no themes, so it has no tip mode")
     return ring[(day.toordinal() * 4 + SLOTS.index(slot)) % len(ring)]
 
 
 def theme_plan(ring, day, slot, tries):
-    """Up to `tries` themes from today's ring position, each topic once (the tip retry path)."""
+    """Up to `tries` themes from today's ring position, each topic once (the tip retry path).
+    A retry steps a whole day of slots ahead, so it never reuses today's other slots."""
     if not ring:
         return []
     start = (day.toordinal() * 4 + SLOTS.index(slot)) % len(ring)
     out, seen = [], set()
     for step in range(len(ring)):
-        theme = ring[(start + step) % len(ring)]
+        theme = ring[(start + step * len(SLOTS)) % len(ring)]
         if theme["topic"] in seen:
             continue
         seen.add(theme["topic"])

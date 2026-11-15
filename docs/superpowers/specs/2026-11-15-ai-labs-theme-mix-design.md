@@ -54,9 +54,9 @@ one day's four rotation slots on four different themes (checked on the ring).
 ### Rotation
 
 `theme_ring(themes)` expands each theme to its weight; `pick_theme` positions on that ring
-by day + slot as today. Retry after a rejected tip advances one ring step and skips any
-theme equal to one already tried this run, so a weight-2 theme cannot be retried against
-itself.
+by day + slot as today. Retry after a rejected tip advances a day's worth of slots (four
+ring positions), so it never reuses today's other slots, and skips themes already tried
+this run. `pick_theme([])` fails with a named error, not a division by zero.
 
 ### The list (27 themes, all in Bahasa Indonesia)
 
