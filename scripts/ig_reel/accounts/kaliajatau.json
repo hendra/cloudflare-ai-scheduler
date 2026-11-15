@@ -1,0 +1,17 @@
+{
+  "label": "IG Reel @kaliajatau.id",
+  "handle": "@kaliajatau.id",
+  "follow_line": "Ikuti @kaliajatau.id buat fakta gila berikutnya",
+  "persona": "Reel sains @kaliajatau.id (gaya dokumenter sinematik, Bahasa Indonesia santai tapi kredibel)",
+  "feeds": [
+    ["ScienceDaily", "https://www.sciencedaily.com/rss/all.xml"],
+    ["MIT News", "https://news.mit.edu/rss/research"],
+    ["NASA", "https://www.nasa.gov/news-release/feed/"]
+  ],
+  "news_slots": "all",
+  "themes": [],
+  "dedupe_posts": 28,
+  "buffer_channel_id": "6aed5544e29c69a1717ba62e",
+  "buffer_org_id": "6aed53e7ec5c7c6d73f3e437",
+  "cloudinary_cloud_name": "opqimovw"
+}

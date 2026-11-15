@@ -1,0 +1,89 @@
+"""Per-account settings for the IG Reel pipeline (one JSON file per Instagram account).
+
+Add an account: docs/ig-reel-add-account.md. Spec:
+docs/superpowers/specs/2026-11-15-ig-reel-multi-account-design.md
+"""
+import json
+import pathlib
+import re
+
+ACCOUNTS_DIR = pathlib.Path(__file__).resolve().parent / "accounts"
+SLOTS = ("morning", "midday", "afternoon", "evening")
+TOOLS = ("Claude", "ChatGPT")
+MIN_THEMES = 8
+_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+_STR_FIELDS = ("handle", "follow_line", "persona", "label", "buffer_channel_id", "buffer_org_id",
+               "cloudinary_cloud_name")
+_MAY_BE_EMPTY = ("handle",)
+
+
+def validate_account(cfg):
+    """Human-readable problems with an account dict; empty list = valid."""
+    errs = []
+    for f in _STR_FIELDS:
+        v = cfg.get(f)
+        if not isinstance(v, str) or (not v.strip() and f not in _MAY_BE_EMPTY):
+            errs.append(f"{f}: must be a non-empty string" if f not in _MAY_BE_EMPTY else f"{f}: must be a string")
+    feeds = cfg.get("feeds")
+    if not isinstance(feeds, list) or any(
+            not (isinstance(f, list) and len(f) == 2 and all(isinstance(x, str) and x for x in f)
+                 and f[1].startswith("https://")) for f in feeds):
+        errs.append("feeds: must be a list of [name, https url]")
+        feeds = []
+    themes = cfg.get("themes")
+    if not isinstance(themes, list) or any(
+            not (isinstance(t, dict) and t.get("tool") in TOOLS and isinstance(t.get("topic"), str) and t["topic"].strip())
+            for t in themes):
+        errs.append(f"themes: must be a list of {{tool: {'|'.join(TOOLS)}, topic}}")
+        themes = []
+    elif themes and len(themes) < MIN_THEMES:
+        errs.append(f"themes: need at least {MIN_THEMES} (or none), got {len(themes)}")
+    if not feeds and not themes:
+        errs.append("account needs feeds or themes")
+    slots = cfg.get("news_slots")
+    if slots != "all" and not (isinstance(slots, list) and all(s in SLOTS for s in slots)):
+        errs.append(f"news_slots: 'all' or a list of {SLOTS}")
+    n = cfg.get("dedupe_posts")
+    if not isinstance(n, int) or isinstance(n, bool) or not 1 <= n <= 200:
+        errs.append("dedupe_posts: integer 1-200")
+    return errs
+
+
+def load_account(account_id):
+    if not isinstance(account_id, str) or not _ID_RE.match(account_id):
+        raise ValueError(f"invalid account id {account_id!r} (lowercase letters, digits, dashes)")
+    path = ACCOUNTS_DIR / f"{account_id}.json"
+    if not path.is_file():
+        known = sorted(p.stem for p in ACCOUNTS_DIR.glob("*.json"))
+        raise ValueError(f"unknown account {account_id!r}; known: {', '.join(known)}")
+    cfg = json.loads(path.read_text(encoding="utf-8"))
+    errs = validate_account(cfg)
+    if errs:
+        raise ValueError(f"account {account_id}: " + "; ".join(errs))
+    return {**cfg, "id": account_id}
+
+
+def slot_name(hour_wib):
+    return SLOTS[0] if hour_wib < 10 else SLOTS[1] if hour_wib < 14 else SLOTS[2] if hour_wib < 18 else SLOTS[3]
+
+
+def pick_theme(themes, day, slot):
+    """Consecutive themes for the four slots of a day, rolling on across days."""
+    return themes[(day.toordinal() * 4 + SLOTS.index(slot)) % len(themes)]
+
+
+def wants_news(cfg, slot):
+    return cfg["news_slots"] == "all" or slot in cfg["news_slots"]
+
+
+def account_target_errors(account, cloud_name, visible_channel_ids):
+    """Why this run must not post: the secrets it received belong to another account,
+    or the account is not fully set up. Empty list = safe to post."""
+    errs = []
+    if not account["handle"].strip():
+        errs.append("handle is empty in the account file")
+    if cloud_name != account["cloudinary_cloud_name"]:
+        errs.append("CLOUDINARY_CLOUD_NAME does not match the account's cloudinary_cloud_name")
+    if account["buffer_channel_id"] not in visible_channel_ids:
+        errs.append("BUFFER_ACCESS_TOKEN cannot see the account's buffer_channel_id")
+    return errs
