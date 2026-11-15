@@ -169,6 +169,81 @@ assert cap.startswith("Bayangkan hujan kaca"), cap
 assert "Sumber: NASA (https://x)" in cap
 assert cap.rstrip().splitlines()[-1] == "#Sains #Astronomi #FaktaUnik #NASA #LuarAngkasa"
 
+# Feed item age (announcement freshness): RSS and Atom dates; junk is "unknown", never "fresh".
+import datetime as _dt  # noqa: E402
+
+from ig_reel.story import age_days  # noqa: E402
+
+_now = _dt.datetime(2026, 11, 15, 12, 0, tzinfo=_dt.timezone.utc)
+assert abs(age_days("Sat, 14 Nov 2026 12:00:00 GMT", _now) - 1) < 1e-6
+assert abs(age_days("2026-11-13T12:00:00Z", _now) - 2) < 1e-6
+assert age_days("", _now) is None and age_days("kemarin", _now) is None
+
+# ---------- tip mode (no source article) ----------
+TIP = {"hook": "Jawaban AI kamu masih ngawur?",
+       "hook_highlight": ["ngawur"],
+       "beats": [{"role": "context", "text": "Banyak orang langsung minta jawaban, lalu hasilnya tidak sesuai dengan yang dimau.", "highlight": ""},
+                 {"role": "twist", "text": "Triknya: suruh Claude bertanya balik dulu sebelum dia menjawab.", "highlight": "bertanya balik dulu"},
+                 {"role": "why", "text": "Sebelum menjawab, tanyakan 3 hal yang perlu kamu tahu dari saya.", "highlight": ""},
+                 {"role": "payoff", "text": "Jawaban yang kamu dapat jadi lebih pas dengan kebutuhanmu.", "highlight": ""}],
+       "cta": "Kirim ke teman yang sering kesal dengan AI 🤖",
+       "image_prompts": ["a", "b", "c", "d"],
+       "caption": {"opener": "Jawaban AI sering tidak sesuai dengan yang kamu mau?", "body": "Coba minta dia bertanya dulu.",
+                   "question": "Kamu sudah pernah coba cara ini?", "save_line": "Simpan dulu biar tidak lupa."},
+       "hashtags": ["#TipsAI", "#Claude", "#ChatGPT", "#BelajarAI", "#Produktif"]}
+assert check_story(TIP, "", mode="tip") == ([], []), check_story(TIP, "", mode="tip")
+for bad_text, rule in (("Paket ini cuma Rp 300.000 per bulan untuk kamu.", "prices"), ("Hasilnya jadi 50% lebih cepat dari yang biasa.", "percentages"),
+                       ("Pakai GPT-4 supaya hasilnya lebih pas dengan kamu.", "versions"), ("Pakai Claude 3.5 supaya hasilnya lebih pas.", "versions"),
+                       ("Pilih Sonnet supaya hasilnya lebih pas dengan kamu.", "versions"), ("Ikuti 25 langkah ini dengan teliti ya.", "above 10")):
+    t = copy.deepcopy(TIP)
+    t["beats"][3]["text"] = bad_text
+    h, _ = check_story(t, "", mode="tip")
+    assert any(rule in x for x in h), (bad_text, h)
+t = copy.deepcopy(TIP)
+t["beats"][0]["text"] = "Most people ask for the answer and the result is not what they want."
+assert any("Indonesia" in x for x in check_story(t, "", mode="tip")[0])
+# The news rule still applies outside tip mode: the same text fails there (its "3" is in no article).
+assert any("numbers not found" in x for x in check_story(TIP, "")[0])
+assert "http" not in build_caption(TIP, "Claude", None) and "Sumber" not in build_caption(TIP, "Claude", None)
+
+# ---------- accounts ----------
+import datetime as _d  # noqa: E402
+
+from ig_reel.accounts import (  # noqa: E402
+    SLOTS, account_target_errors, load_account, pick_theme, slot_name, validate_account, wants_news,
+)
+
+KALI = load_account("kaliajatau")
+assert KALI["handle"] == "@kaliajatau.id" and KALI["news_slots"] == "all" and KALI["themes"] == []
+assert KALI["follow_line"] == "Ikuti @kaliajatau.id buat fakta gila berikutnya"
+assert KALI["dedupe_posts"] == 28 and KALI["cloudinary_cloud_name"] is None  # repo-level secrets, not pinned
+assert KALI["buffer_channel_id"] == "6aed5544e29c69a1717ba62e" and KALI["buffer_org_id"] == "6aed53e7ec5c7c6d73f3e437"
+assert [n for n, _ in KALI["feeds"]] == ["ScienceDaily", "MIT News", "NASA"]
+LABS = load_account("ai-labs")
+assert LABS["news_slots"] == ["morning"] and LABS["dedupe_posts"] == 120 and len(LABS["themes"]) >= 20
+assert {t["tool"] for t in LABS["themes"]} == {"Claude", "ChatGPT"}
+for bad in ("", "../x", "Kaliajatau", "nope"):
+    try:
+        load_account(bad)
+        raise AssertionError(bad)
+    except ValueError:
+        pass
+assert validate_account({**KALI, "feeds": [], "themes": []})
+assert validate_account({**LABS, "themes": LABS["themes"][:3]})
+assert validate_account({**KALI, "feeds": [["x", "http://insecure"]]})
+assert validate_account({**KALI, "dedupe_posts": 0}) and validate_account({**KALI, "news_slots": ["noon"]})
+assert [slot_name(h) for h in (8, 11, 16, 19)] == list(SLOTS)
+assert len({pick_theme(LABS["themes"], _d.date(2026, 11, 16), s)["topic"] for s in SLOTS}) == 4
+assert wants_news(KALI, "evening") and wants_news(LABS, "morning") and not wants_news(LABS, "midday")
+# Wrong-account guard: an account that is not set up, or Cloudinary secrets of another account, must not post.
+assert account_target_errors(KALI, "whatever-the-repo-secret-is") == []
+assert len(account_target_errors({**KALI, "handle": ""}, "x")) == 1
+PINNED = {**KALI, "cloudinary_cloud_name": "mycloud"}
+assert account_target_errors(PINNED, "mycloud") == [] and len(account_target_errors(PINNED, "other")) == 1
+assert len(account_target_errors(PINNED, "")) == 1
+assert len(account_target_errors(LABS, "opqimovw")) == 2  # as shipped: no handle, placeholder cloud name
+assert validate_account({**KALI, "cloudinary_cloud_name": ""})
+
 # ---------- timeline ----------
 from ig_reel.timeline import scene_starts, total_frames  # noqa: E402
 
@@ -205,12 +280,11 @@ if HAVE_NUMPY:
     assert pick_track("2026-11-16-0815") != pick_track("2026-11-17-0815") or pick_track("2026-11-18-0815") != pick_track("2026-11-16-0815")
 
 # ---------- scenes ----------
-from ig_reel.scenes import FOLLOW_LINE, scene_html  # noqa: E402
+from ig_reel.scenes import scene_html  # noqa: E402
 from ig_reel.timeline import SCENE_BEATS  # noqa: E402
 
 IMGS = {k: pathlib.Path(f"/tmp/img{k}.jpg") for k in (1, 2, 3, 4)}
-META = {"source": "NASA", "date": "12 Nov 2026", "handle": "@kaliajatau.id", "progress_from": 0.0, "progress_to": 0.1}
-assert FOLLOW_LINE == "Ikuti @kaliajatau.id buat fakta gila berikutnya"
+META = {"source": "NASA", "date": "12 Nov 2026", "handle": "@tes", "follow_line": "Ikuti @tes buat tips", "progress_from": 0.0, "progress_to": 0.1}
 for kind, _ in SCENE_BEATS:
     h = scene_html(kind, copy.deepcopy(STORY), IMGS, META)
     assert "@font-face" in h and "Anton" in h and re.search(r'class="[^"]*\bsafe\b', h), kind
@@ -245,7 +319,12 @@ hl_delay = float(lt.split('class="hl" style="animation-delay:')[1].split("s")[0]
 box_delay = float(lt.split('class="hlbox" style="animation-delay:')[1].split("s")[0])
 assert box_delay >= hl_delay, (hl_delay, box_delay)
 cta = scene_html("cta", copy.deepcopy(STORY), IMGS, META)
-assert FOLLOW_LINE in cta and "Kirim ke teman" in cta
+from ig_reel.scenes import TIP_KICKERS  # noqa: E402
+_tipctx = scene_html("context", TIP, IMGS, {**META, "kickers": TIP_KICKERS, "source_label": "Tips", "source": "Claude", "hook_kicker": "TIPS AI"})
+assert "MASALAHNYA" in _tipctx and "Tips: Claude" in _tipctx and "YANG DITEMUKAN" not in _tipctx
+assert "TIPS AI" in scene_html("hook", TIP, IMGS, {**META, "hook_kicker": "TIPS AI"})
+assert "FAKTA SAINS" in scene_html("hook", TIP, IMGS, META)
+assert "Ikuti @tes buat tips" in cta and "kaliajatau" not in cta and "Kirim ke teman" in cta
 evil = copy.deepcopy(STORY)
 evil["beats"][0]["text"] = "<script>alert(1)</script> teks"
 ctx = scene_html("context", evil, IMGS, META)
@@ -283,7 +362,7 @@ else:
     longest["cta"] = ("Kirim ke teman yang suka luar angkasa dan sains 🚀 " + "x" * 20)[:60]
     t0 = time.time()
     out = work / "reel.mp4"
-    res = render_reel(longest, imgs, {"source": "NASA", "date": "12 Nov 2026", "handle": "@kaliajatau.id"},
+    res = render_reel(longest, imgs, {"source": "NASA", "date": "12 Nov 2026", "handle": "@tes", "follow_line": "Ikuti @tes buat tips"},
                       "2026-11-16-0730", out)
     took = time.time() - t0
     assert res["overflow"] == [], res["overflow"]
@@ -301,7 +380,7 @@ else:
     wide["beats"][3]["text"] = " ".join(["MMMMMMMM", "WWWWWWWW"] * 13)
     from ig_reel.reel import fit_scales
     with __import__("ig_reel.capture", fromlist=["Capturer"]).Capturer() as cap:
-        scales = fit_scales(cap, wide, imgs, {"source": "NASA", "date": "12 Nov 2026", "handle": "@kaliajatau.id"}, work)
+        scales = fit_scales(cap, wide, imgs, {"source": "NASA", "date": "12 Nov 2026", "handle": "@tes", "follow_line": "Ikuti @tes buat tips"}, work)
     assert scales["payoff"] < 1.0 and scales["hook"] == 1.0, scales
     print(f"selfcheck: rendered {res['frames']} frames in {took:.1f}s ({res['frames'] / took:.1f} fps) → {out}")
 

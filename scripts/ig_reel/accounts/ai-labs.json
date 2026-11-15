@@ -1,0 +1,43 @@
+{
+  "label": "IG Reel ai-labs",
+  "handle": "",
+  "follow_line": "Ikuti buat tips AI berikutnya",
+  "hook_kicker": "TIPS AI",
+  "persona": "Reel tips & trik AI (Claude dan ChatGPT) untuk pemula, Bahasa Indonesia santai dan praktis",
+  "feeds": [
+    ["OpenAI", "https://openai.com/news/rss.xml"],
+    ["Claude Code", "https://github.com/anthropics/claude-code/releases.atom"]
+  ],
+  "news_slots": ["morning"],
+  "news_max_age_days": 3,
+  "themes": [
+    {"tool": "Claude", "topic": "minta AI bertanya balik dulu sebelum menjawab"},
+    {"tool": "ChatGPT", "topic": "memberi peran yang jelas di awal prompt"},
+    {"tool": "Claude", "topic": "merapikan tulisan tanpa mengubah gaya bahasamu"},
+    {"tool": "ChatGPT", "topic": "meringkas dokumen panjang jadi poin yang bisa ditindaklanjuti"},
+    {"tool": "Claude", "topic": "menjelaskan kode yang tidak kamu pahami baris demi baris"},
+    {"tool": "ChatGPT", "topic": "membuat rencana belajar topik baru langkah demi langkah"},
+    {"tool": "Claude", "topic": "memberi contoh hasil yang kamu mau supaya jawabannya pas"},
+    {"tool": "ChatGPT", "topic": "menulis email kerja yang sopan dan singkat"},
+    {"tool": "Claude", "topic": "meminta kritik jujur atas ide atau tulisanmu"},
+    {"tool": "ChatGPT", "topic": "mengubah catatan rapat jadi daftar tugas"},
+    {"tool": "Claude", "topic": "mencari bug dengan menempelkan pesan error lengkap"},
+    {"tool": "ChatGPT", "topic": "latihan wawancara kerja dengan AI sebagai pewawancara"},
+    {"tool": "Claude", "topic": "membandingkan dua pilihan dengan tabel plus dan minus"},
+    {"tool": "ChatGPT", "topic": "menjelaskan konsep sulit seperti ke anak SD"},
+    {"tool": "Claude", "topic": "menentukan format jawaban: tabel, poin, atau langkah"},
+    {"tool": "ChatGPT", "topic": "membuat soal latihan dari materi pelajaranmu sendiri"},
+    {"tool": "Claude", "topic": "memecah tugas besar jadi langkah kecil yang jelas"},
+    {"tool": "ChatGPT", "topic": "menerjemahkan dengan menjaga nada dan konteks"},
+    {"tool": "Claude", "topic": "meminta AI memeriksa ulang jawabannya sendiri"},
+    {"tool": "ChatGPT", "topic": "mencari ide konten dari satu topik utama"},
+    {"tool": "Claude", "topic": "menulis ulang teks untuk pembaca yang berbeda"},
+    {"tool": "ChatGPT", "topic": "menyusun kerangka presentasi sebelum membuat slide"},
+    {"tool": "Claude", "topic": "memberi batasan: panjang, gaya, dan hal yang harus dihindari"},
+    {"tool": "ChatGPT", "topic": "membuat rumus spreadsheet dari penjelasan biasa"}
+  ],
+  "dedupe_posts": 120,
+  "buffer_channel_id": "TODO-owner",
+  "buffer_org_id": "TODO-owner",
+  "cloudinary_cloud_name": "TODO-owner"
+}

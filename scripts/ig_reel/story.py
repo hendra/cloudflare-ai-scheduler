@@ -52,6 +52,21 @@ def format_date_id(raw):
     return f"{d.day} {_MONTHS_ID[d.month - 1]} {d.year}"
 
 
+def age_days(raw, now):
+    """Age of an RSS (RFC 822) or Atom (ISO 8601) date in days; None when unparseable."""
+    raw = (raw or "").strip()
+    try:
+        when = _eu.parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        try:
+            when = _dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=_dt.timezone.utc)
+    return (now - when).total_seconds() / 86400
+
+
 def interleave(groups, cap):
     """Round-robin across per-feed candidate lists, dedupe by title, keep the first `cap`."""
     seen, out = set(), []
@@ -205,8 +220,32 @@ def _story_texts(data):
     return texts
 
 
-def check_story(data, article_text, extra_allowed=()):
+_TIP_MONEY = re.compile(r"(\bRp\.?\s*\d|\$\s*\d|\bUSD\b|\brupiah\b|\bdolar\b|\bdollars?\b)", re.I)
+_TIP_PERCENT = re.compile(r"(\d\s*%|\bpersen\b)", re.I)
+_TIP_VERSION = re.compile(r"(\b(?:GPT|Claude|Gemini)[- ]?\d|\bo\d\b|\b(?:Opus|Sonnet|Haiku|Turbo)\b)", re.I)
+TIP_MAX_NUMBER = 10
+
+
+def tip_rule_errors(texts):
+    """A tip has no source article, so it may not state what an AI gets wrong about itself:
+    prices, percentages, big numbers (limits, dates) and model version names."""
+    errs = []
+    joined = " \n ".join(str(t) for t in texts)
+    if _TIP_MONEY.search(joined):
+        errs.append("tip must not mention prices or currency amounts")
+    if _TIP_PERCENT.search(joined):
+        errs.append("tip must not mention percentages")
+    if _TIP_VERSION.search(joined):
+        errs.append("tip must not name model versions (say only Claude or ChatGPT)")
+    big = sorted({n for n in re.findall(r"\d+", joined) if int(n) > TIP_MAX_NUMBER}, key=int)
+    if big:
+        errs.append(f"tip must not contain numbers above {TIP_MAX_NUMBER}: " + ", ".join(big))
+    return errs
+
+
+def check_story(data, article_text, extra_allowed=(), mode="news"):
     """Returns (hard, soft). Hard = must not ship; soft = safely truncatable.
+    mode="tip": no source article — tip_rule_errors() replaces the number grounding.
     extra_allowed: numbers known from outside the article text (e.g. the RSS date's year)."""
     hard, soft = [], []
     hook = str(data.get("hook") or "").strip()
@@ -283,6 +322,8 @@ def check_story(data, article_text, extra_allowed=()):
     if lang_errs:
         hard.append("must be written in Bahasa Indonesia, not English: " + ", ".join(dict.fromkeys(lang_errs)))
 
+    if mode == "tip":
+        return hard + tip_rule_errors(_story_texts(data)), soft
     allowed = numbers_in(article_text) | {str(n) for n in extra_allowed}
     invented = sorted({n for t in _story_texts(data) for n in numbers_in(t, keep_raw=False)} - allowed)
     if invented:
@@ -323,6 +364,7 @@ def apply_story_limits(data):
 def build_caption(data, source, link):
     cap = data.get("caption") or {}
     parts = [str(cap.get(k) or "").strip() for k in ("opener", "body", "question", "save_line")]
-    parts.append(f"Sumber: {source} ({link})")
+    if link:  # a tip has no source article
+        parts.append(f"Sumber: {source} ({link})")
     parts.append(" ".join(data.get("hashtags") or []))
     return "\n\n".join(p for p in parts if p)[:CAPTION_MAX]

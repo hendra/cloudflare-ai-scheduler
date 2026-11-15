@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""IG Reel — Interesting Facts & Knowledge (@kaliajatau.id, → Instagram via Buffer)
+"""IG Reel — one Reel for one Instagram account (settings: scripts/ig_reel/accounts/<ACCOUNT>.json) via Buffer
 
 Prompt 1 (`prompts/ig-reel-daily.md`) in executable form. Deterministic: RSS fetch
 (feeds interleaved) → Buffer dedup → AI shortlists 6 findings → feed text or fetched article →
@@ -17,9 +17,9 @@ Env (see .github/workflows/ig-reel.yml):
   KILO_API_KEY            optional; Kilo AI Gateway fallback runs keyless (200 req/h/IP) without it
   CF_ACCOUNT, CF_TOKEN    also the last text fallback (Cloudflare Workers AI @cf/openai/gpt-oss-120b)
   BUFFER_ACCESS_TOKEN     optional in dry run, required in real run
-  BUFFER_CHANNEL_ID       default 6aed5544e29c69a1717ba62e (playbook)
-  BUFFER_ORG_ID           default 6aed53e7ec5c7c6d73f3e437 (playbook)
-  CLOUDINARY_CLOUD_NAME   default opqimovw (playbook), CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
+  ACCOUNT                 account id (default kaliajatau); pins the Buffer channel/org and Cloudinary cloud name
+  MODE                    auto (default) | news | tip — dev override of the story mode
+  CLOUDINARY_CLOUD_NAME   must equal the account's cloudinary_cloud_name; CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
 
 Local testing without CF creds: PLACEHOLDER_IMAGES=true renders flat-colour
 illustrations with Pillow instead of calling Cloudflare (clearly labelled in the
@@ -58,12 +58,10 @@ GROQ_MODEL = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b").strip()
 KILO_API_KEY = os.environ.get("KILO_API_KEY", "").strip()
 OPENCODE_MODEL = (os.environ.get("OPENCODE_MODEL", "") or "glm-5.3-flash-free").strip()
 OPENCODE_BASE_URL = (os.environ.get("OPENCODE_BASE_URL", "https://opencode.ai/inference/openai/v1") or "").rstrip("/")
-CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME", "opqimovw").strip()
+CLOUD_NAME = os.environ.get("CLOUDINARY_CLOUD_NAME", "").strip()
 CLOUD_KEY = os.environ.get("CLOUDINARY_API_KEY", "").strip()
 CLOUD_SECRET = os.environ.get("CLOUDINARY_API_SECRET", "").strip()
 BUFFER_TOKEN = os.environ.get("BUFFER_ACCESS_TOKEN", "").strip()
-BUFFER_CHANNEL = (os.environ.get("BUFFER_CHANNEL_ID", "") or "6aed5544e29c69a1717ba62e").strip()
-BUFFER_ORG = (os.environ.get("BUFFER_ORG_ID", "") or "6aed53e7ec5c7c6d73f3e437").strip()
 
 WIB = dt.timezone(dt.timedelta(hours=7), "WIB")
 NOW = dt.datetime.now(WIB)
@@ -81,24 +79,32 @@ GEN.mkdir(exist_ok=True)
 # Single-story cinematic Reel (spec: docs/superpowers/specs/2026-11-15-ig-reel-cinematic-redesign-design.md).
 ARTICLE_MIN = 800       # chars of article text needed to ground a story; else try the next shortlisted item
 ARTICLE_PROMPT_MAX = 4000  # chars of article sent to the AI (keeps free-tier token budgets in reach)
-DEDUPE_POSTS = 28       # last 28 sent posts = 7 days at 4 Reels/day
 STYLE_SUFFIX = ("cinematic film still, dramatic volumetric lighting, teal-and-amber grade, 35mm, "
                 "shallow depth of field, film grain, vertical 9:16, no text, no letters, no logos")
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from ig_reel.accounts import SLOTS, account_target_errors, load_account, pick_theme, slot_name, wants_news  # noqa: E402
 from ig_reel.reel import render_reel  # noqa: E402
+from ig_reel.scenes import TIP_KICKERS  # noqa: E402
 from ig_reel.story import (  # noqa: E402
-    STORY_SCHEMA_HINT, apply_story_limits, build_caption, check_story, extract_article_text, feed_body,
+    STORY_SCHEMA_HINT, TIP_MAX_NUMBER, age_days, apply_story_limits, build_caption, check_story, extract_article_text, feed_body,
     format_date_id, grounding_text, interleave, order_by_source,
 )
 
 UA = "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0"
 
-RSS_FEEDS = [
-    ("ScienceDaily", "https://www.sciencedaily.com/rss/all.xml"),
-    ("MIT News", "https://news.mit.edu/rss/research"),
-    ("NASA", "https://www.nasa.gov/news-release/feed/"),
-]
+try:
+    ACCOUNT = load_account(os.environ.get("ACCOUNT", "").strip() or "kaliajatau")
+except ValueError as _e:
+    print(f"FATAL: {_e}", flush=True)
+    sys.exit(1)
+RSS_FEEDS = [tuple(f) for f in ACCOUNT["feeds"]]
+DEDUPE_POSTS = ACCOUNT["dedupe_posts"]  # kaliajatau: 28 = 7 days at 4 Reels/day
+BUFFER_CHANNEL = ACCOUNT["buffer_channel_id"]
+BUFFER_ORG = ACCOUNT["buffer_org_id"]
+SLOT = slot_name(NOW.hour)
+MODE = (os.environ.get("MODE", "").strip().lower() or "auto")
+TIP_TRIES = 3  # themes tried before a tip run gives up
 
 
 def log(*a):
@@ -131,7 +137,7 @@ def fail(reason, post_id=None):
         report["note"] = "post created on Buffer but not confirmed sent — do NOT blindly redispatch"
     log("REPORT " + json.dumps(report))
     if not DRY_RUN and SLACK_BOT_TOKEN and SLACK_NEWS_CHANNEL_ID:
-        text = (f"⚠️ IG Reel pipeline failed: {str(reason)[:220]}"
+        text = (f"⚠️ {ACCOUNT['label']} pipeline failed: {str(reason)[:220]}"
                 + (f" (Buffer post id {post_id} — reel may still publish)" if post_id else "")
                 + f" — https://github.com/{os.environ.get('GITHUB_REPOSITORY','')}/actions/runs/{os.environ.get('GITHUB_RUN_ID','')}")
         try:
@@ -180,23 +186,59 @@ def buffer_graphql(query, variables=None):
     return raw.get("data", {})
 
 
+def _posts_query(first, after=None, paged=False):
+    cursor = f', after: "{after}"' if after else ""
+    page = " pageInfo { hasNextPage endCursor }" if paged else ""
+    return ('query { posts(first: %d%s, input: { organizationId: "%s", '
+            'filter: { status: [sent], channelIds: ["%s"] } }) { '
+            'edges { node { text createdAt } }%s } }' % (first, cursor, BUFFER_ORG, BUFFER_CHANNEL, page))
+
+
+def _edge_texts(d):
+    return [e["node"]["text"] for e in d.get("posts", {}).get("edges", []) if e.get("node", {}).get("text")]
+
+
 def recent_post_captions():
+    """Texts of the account's last DEDUPE_POSTS sent posts (the AI's do-not-repeat list)."""
     if not BUFFER_TOKEN:
         if DRY_RUN:
-            log("buffer: BUFFER_ACCESS_TOKEN unset — skipping 7-day duplicate check (dry run)")
+            log("buffer: BUFFER_ACCESS_TOKEN unset — skipping duplicate check (dry run)")
             return []
         fail("BUFFER_ACCESS_TOKEN required for a real run")
     try:
-        d = buffer_graphql(
-            'query { posts(first: %d, input: { organizationId: "%s", '
-            'filter: { status: [sent], channelIds: ["%s"] } }) { '
-            'edges { node { text createdAt } } } }' % (DEDUPE_POSTS, BUFFER_ORG, BUFFER_CHANNEL))
-        texts = [e["node"]["text"] for e in d.get("posts", {}).get("edges", []) if e.get("node", {}).get("text")]
-        log(f"buffer: fetched {len(texts)} recent sent posts for 7-day dedup")
-        return texts
+        d = buffer_graphql(_posts_query(min(DEDUPE_POSTS, 28)))  # the query shape proven in production
+        texts = _edge_texts(d)
     except Exception as e:
         log(f"buffer: duplicate check failed ({e}) — continuing, AI will see no blocklist")
         return []
+    if DEDUPE_POSTS > 28:  # longer look-back: page through; any error keeps what the first query returned
+        try:
+            paged, after = [], None
+            while len(paged) < DEDUPE_POSTS:
+                posts = buffer_graphql(_posts_query(50, after, paged=True)).get("posts", {})
+                paged += _edge_texts({"posts": posts})
+                info = posts.get("pageInfo") or {}
+                after = info.get("endCursor")
+                if not info.get("hasNextPage") or not after:
+                    break
+            texts = paged[:DEDUPE_POSTS]
+        except Exception as e:
+            log(f"buffer: paged duplicate check failed ({e}) — using the first {len(texts)} posts only")
+    log(f"buffer: fetched {len(texts)} recent sent posts for dedup (look-back {DEDUPE_POSTS})")
+    return texts
+
+
+def verify_account_targets():
+    """Wrong-account guard (see account_target_errors). A real run stops; a dry run only logs."""
+    errs = account_target_errors(ACCOUNT, CLOUD_NAME)
+    if not errs:
+        pin = "matches" if ACCOUNT["cloudinary_cloud_name"] else "not pinned"
+        log(f"guard: account {ACCOUNT['id']} may post — handle set, Cloudinary cloud {pin}, "
+            f"Buffer channel {BUFFER_CHANNEL}")
+    elif DRY_RUN:
+        log(f"guard: account {ACCOUNT['id']} could NOT post for real: " + "; ".join(errs))
+    else:
+        fail(f"account {ACCOUNT['id']} refuses to post: " + "; ".join(errs))
 
 
 # ---------- 3. Research: RSS candidates ----------
@@ -231,6 +273,11 @@ def fetch_candidates():
                     body = feed_body(txt, ARTICLE_PROMPT_MAX)
             if title and link:
                 items.append({"title": title, "link": link, "date": date, "desc": desc, "body": body, "source": source})
+    max_age = ACCOUNT.get("news_max_age_days")
+    if max_age:  # accounts that can fall back to a tip only take fresh announcements
+        fresh = [it for it in items if (age_days(it["date"], NOW) or 1e9) <= max_age]
+        log(f"rss: {len(fresh)} of {len(items)} items are at most {max_age} days old")
+        items = fresh
     groups = [[it for it in items if it["source"] == source] for source, _ in RSS_FEEDS]
     out = interleave(groups, 18)  # round-robin so one busy feed can't crowd out the others
     log(f"rss: {len(out)} candidates from {len(RSS_FEEDS)} feeds (of {len(items)} items)")
@@ -302,7 +349,7 @@ def pick_shortlist(candidates, avoid):
     avoid_block = ("\n".join(f"- {t[:120]}" for t in avoid)) or "(none)"
     hint = f"\nTopik prioritas bila relevan: {TOPIC_HINT}\n" if TOPIC_HINT else ""
     lines = "\n".join(f"{i+1}. [{c['source']}] {c['title']} | {c['desc']}" for i, c in enumerate(candidates))
-    prompt = f"""Kamu produser Reel sains @kaliajatau.id. Pilih 6 temuan yang paling cocok jadi SATU cerita Reel 25 detik:
+    prompt = f"""Kamu produser {ACCOUNT['persona']}. Pilih 6 temuan yang paling cocok jadi SATU cerita Reel 25 detik:
 paling bikin "hah, serius?!", bisa dijelaskan tanpa jargon, dan mudah divisualkan. Prioritaskan yang terbaru.
 {hint}
 Sudah diposting baru-baru ini (JANGAN pilih topik yang sama):
@@ -360,7 +407,7 @@ def fetch_article(cand):
 
 def write_story(cand, article):
     """One AI call writes the story only from `article`; validated, one repair retry, then truncated."""
-    prompt = f"""Kamu penulis naskah Reel sains @kaliajatau.id (gaya dokumenter sinematik, Bahasa Indonesia santai tapi kredibel).
+    prompt = f"""Kamu penulis naskah {ACCOUNT['persona']}.
 Tulis SATU cerita dari artikel di bawah, dengan alur: hook (rasa penasaran) → context (apa yang ditemukan) →
 twist (detail paling mengejutkan, sorot satu angka/frasa kunci) → why (kenapa penting buat kita) → payoff (satu kalimat
 yang layak disimpan). CTA = ajakan kirim/share yang spesifik untuk cerita ini (sebut tipe teman yang cocok).
@@ -400,6 +447,73 @@ Artikel:
     apply_story_limits(data)
     return data
 
+
+
+def write_tip(theme, avoid):
+    """One AI call writes a theme tip (no source article); validated with the tip rules, one repair retry."""
+    avoid_block = ("\n".join(f"- {t[:120]}" for t in avoid[:60])) or "(belum ada)"
+    topic = TOPIC_HINT or theme['topic']
+    prompt = f"""Kamu penulis naskah {ACCOUNT['persona']}.
+Tulis SATU tips praktis untuk {theme['tool']} dengan tema: {topic}.
+Alur beats: context = masalah yang sering dialami orang → twist = triknya (sorot frasa kuncinya) →
+why = contoh prompt siap salin (pendek, dalam Bahasa Indonesia) → payoff = hasil yang didapat, satu kalimat layak disimpan.
+CTA = ajakan kirim/share yang spesifik untuk tips ini (sebut tipe teman yang cocok).
+
+Aturan WAJIB:
+- SEMUA teks (hook, beats, cta, caption) dalam Bahasa Indonesia, TERMASUK contoh prompt di beat "why"
+  (mis. "Sebelum menjawab, tanyakan dulu 3 hal yang perlu kamu tahu dari saya."). Jangan menulis prompt berbahasa Inggris.
+- Tips harus benar untuk {theme['tool']} secara umum dan bisa langsung dicoba siapa pun.
+- JANGAN sebut harga, paket berbayar, persentase, batas pemakaian, tanggal, nama versi model, atau lokasi menu/tombol.
+- JANGAN pakai angka di atas {TIP_MAX_NUMBER}. Sebut alatnya hanya "{theme['tool']}".
+- image_prompts dalam bahasa Inggris, subjek visual yang sama di keempat prompt, tanpa teks/huruf/logo.
+
+Sudah diposting baru-baru ini (JANGAN ulangi tips yang sama):
+{avoid_block}
+
+Jawab HANYA JSON dengan skema:
+{STORY_SCHEMA_HINT}"""
+    data = ai_json(prompt)
+    if not isinstance(data, dict):
+        raise RuntimeError("AI tip is not a JSON object")
+    hard, soft = check_story(data, "", mode="tip")
+    if soft:
+        log("tip: truncating: " + "; ".join(soft))
+    if hard:
+        log("tip: validation issues: " + "; ".join(hard))
+        log("tip: rejected beats: " + " | ".join(str(b.get("text"))[:130] for b in data.get("beats") or [] if isinstance(b, dict)))
+        data = ai_json("Perbaiki JSON tips di bawah agar lolos validasi. Pelanggaran:\n- " + "\n- ".join(hard + soft)
+                       + "\nJawab hanya JSON dengan skema yang sama.\n\nJSON:\n" + json.dumps(data, ensure_ascii=False))
+        if not isinstance(data, dict):
+            raise RuntimeError("AI tip repair is not a JSON object")
+        hard, soft = check_story(data, "", mode="tip")
+        if hard:
+            raise RuntimeError("; ".join(hard))
+    apply_story_limits(data)
+    return data
+
+
+def find_news_story(recent):
+    """(story, candidate) written only from a feed article, or (None, reason)."""
+    candidates = fetch_candidates()
+    need = 1 if ACCOUNT.get("news_max_age_days") else 6
+    if len(candidates) < need:
+        return None, f"only {len(candidates)} RSS candidates found; refusing to fabricate"
+    reasons = []
+    for ref in pick_shortlist(candidates, recent):
+        c = candidates[ref - 1]
+        try:
+            article = fetch_article(c)
+        except Exception as e:
+            reasons.append(f"#{ref} fetch failed: {str(e)[:80]}")
+            continue
+        if len(article) < ARTICLE_MIN:
+            reasons.append(f"#{ref} article text only {len(article)} chars")
+            continue
+        try:
+            return write_story(c, article), c
+        except RuntimeError as e:
+            reasons.append(f"#{ref} story invalid: {str(e)[:120]}")
+    return None, "no shortlisted article yielded enough text and a valid story: " + "; ".join(reasons)
 
 # ---------- 5. Illustrations + scenes ----------
 def make_placeholder(path, seed):
@@ -633,36 +747,55 @@ def buffer_create_and_confirm(video_url, caption):
 
 # ---------- main ----------
 def main():
-    log(f"DRY_RUN={DRY_RUN}  PLACEHOLDER_IMAGES={MOCK_IMAGES}  topic_hint={TOPIC_HINT or '-'}")
+    log(f"account={ACCOUNT['id']}  slot={SLOT}  mode={MODE}  DRY_RUN={DRY_RUN}  PLACEHOLDER_IMAGES={MOCK_IMAGES}  "
+        f"topic_hint={TOPIC_HINT or '-'}")
+    log("keys: " + "  ".join(f"{n}={'set' if v else 'unset'}" for n, v in (
+        ("opencode", OPENCODE_API_KEY), ("openrouter", OPENROUTER_API_KEY), ("groq", GROQ_API_KEY),
+        ("cloudflare", CF_ACCOUNT and CF_TOKEN), ("pollinations", os.environ.get("POLLINATIONS_SECRET_KEY", "").strip()),
+        ("cloudinary", CLOUD_KEY and CLOUD_SECRET), ("buffer", BUFFER_TOKEN))))
+    verify_account_targets()
     check_kit()
     guard_no_placeholder_post()
     recent = recent_post_captions()
-    candidates = fetch_candidates()
-    if len(candidates) < 6:
-        fail(f"only {len(candidates)} RSS candidates found; refusing to fabricate")
+    if MODE not in ("auto", "news", "tip"):
+        fail(f"MODE must be auto, news or tip, got {MODE!r}")
+    themes = ACCOUNT["themes"]
+    if MODE == "tip" and not themes:
+        fail(f"account {ACCOUNT['id']} has no themes, so it has no tip mode")
+    meta = {"handle": ACCOUNT["handle"], "follow_line": ACCOUNT["follow_line"], "hook_kicker": ACCOUNT["hook_kicker"]}
 
-    # one story: shortlist → fetch the article → write only from its text
+    # news: one story written only from a feed article; tip: a theme tip when the slot or the feeds have no news
     story = cand = None
-    reasons = []
-    for ref in pick_shortlist(candidates, recent):
-        c = candidates[ref - 1]
-        try:
-            article = fetch_article(c)
-        except Exception as e:
-            reasons.append(f"#{ref} fetch failed: {str(e)[:80]}")
-            continue
-        if len(article) < ARTICLE_MIN:
-            reasons.append(f"#{ref} article text only {len(article)} chars")
-            continue
-        try:
-            story = write_story(c, article)
-            cand = c
-            break
-        except RuntimeError as e:
-            reasons.append(f"#{ref} story invalid: {str(e)[:120]}")
-    if not story:
-        fail("no shortlisted article yielded enough text and a valid story: " + "; ".join(reasons))
-    log(f"story: {story['hook']!r} from [{cand['source']}] {cand['title'][:80]}")
+    if MODE == "news" or (MODE == "auto" and RSS_FEEDS and wants_news(ACCOUNT, SLOT)):
+        story, cand = find_news_story(recent)
+        if not story:
+            if MODE == "news" or not themes:
+                fail(cand)
+            log(f"news: nothing usable ({cand}) — writing a tip instead")
+    if story:
+        mode, source, link = "news", cand["source"], cand["link"]
+        date = format_date_id(cand["date"])
+        sources = [f"{source} — {cand['title'][:80]} ({date}) [{link}]"]
+        log(f"story: {story['hook']!r} from [{source}] {cand['title'][:80]}")
+    else:
+        theme = pick_theme(themes, NOW.date(), SLOT)
+        reasons = []
+        for offset in range(TIP_TRIES):  # like the news shortlist: a rejected tip moves on to the next theme
+            if offset:
+                theme = themes[(themes.index(theme) + len(SLOTS)) % len(themes)]  # skip today's other slots
+            try:
+                story = write_tip(theme, recent)
+                break
+            except RuntimeError as e:
+                reasons.append(f"{theme['tool']} — {theme['topic']}: {str(e)[:140]}")
+        if not story:
+            fail("no valid tip after " + str(TIP_TRIES) + " themes: " + "; ".join(reasons))
+        mode, source, link = "tip", theme["tool"], None
+        date = format_date_id(NOW.isoformat())
+        sources = [f"tip: {source} — {TOPIC_HINT or theme['topic']}"]
+        meta.update(source_label="Tips", kickers=TIP_KICKERS)
+        log(f"tip: {story['hook']!r} for [{source}] {theme['topic']}")
+    meta.update(source=source, date=date)
 
     images, image_providers = {}, []
     for k, prompt in enumerate(story["image_prompts"], start=1):
@@ -676,20 +809,18 @@ def main():
         images[k] = img
         image_providers.append(provider)
 
-    date = format_date_id(cand["date"])
     reel = GEN / "ig_reel.mp4"
-    res = render_reel(story, images, {"source": cand["source"], "date": date, "handle": "@kaliajatau.id"},
+    res = render_reel(story, images, meta,
                       f"{TODAY}-{NOW:%H%M}", reel)
     log(f"reel: built {reel} ({reel.stat().st_size / 1e6:.1f} MB, {res['seconds']}s, "
         f"music {res['music']['key']} {'-'.join(res['music']['progression'])})")
-    full_caption = build_caption(story, cand["source"], cand["link"])
-    sources = [f"{cand['source']} — {cand['title'][:80]} ({date}) [{cand['link']}]"]
+    full_caption = build_caption(story, source, link)
     log(f"images via: {image_providers}")
 
     if DRY_RUN:
         log("=== DRY RUN — would upload to Cloudinary and post to Buffer ===")
         log(f"caption:\n{full_caption}")
-        log("REPORT " + json.dumps({"status": "dry-run", "topic": story["hook"], "path": str(reel),
+        log("REPORT " + json.dumps({"status": "dry-run", "account": ACCOUNT["id"], "mode": mode, "topic": story["hook"], "path": str(reel),
                                     "posted": False, "images": image_providers,
                                     "sources": sources}))
         return
@@ -706,7 +837,7 @@ def main():
         fail(f"cloudinary size mismatch: local {reel.stat().st_size} vs {up.get('bytes')}")
     log(f"cloudinary: uploaded {url}")
     post_id, link = buffer_create_and_confirm(url, full_caption)
-    log("REPORT " + json.dumps({"status": "sent", "topic": story["hook"], "post_id": post_id,
+    log("REPORT " + json.dumps({"status": "sent", "account": ACCOUNT["id"], "mode": mode, "topic": story["hook"], "post_id": post_id,
                                 "reel": link, "posted": True, "images": image_providers,
                                 "sources": sources}))
 

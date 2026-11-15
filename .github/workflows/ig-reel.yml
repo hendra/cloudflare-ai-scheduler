@@ -1,14 +1,20 @@
 name: ig-reel
 
-# IG Reel — Interesting Facts & Knowledge → Instagram @kaliajatau.id (via Buffer)
-# Single-story cinematic Reel: RSS fetch (feeds interleaved) → Buffer 7-day dedup (28 posts) →
-# AI shortlists 3 findings → fetch the top article → AI writes ONE story only from its text
-# (Bahasa Indonesia, every number checked; AI chain OpenCode → OpenRouter → Groq → Kilo → Cloudflare)
-# → 4 cinematic illustrations → animated HTML scenes captured frame-by-frame + composed
-# beat-synced music (scripts/ig_reel/) → Cloudinary hosting → Buffer createPost
-# (reel, shareNow, isAiGenerated, cover = frame 0). Spec:
-# docs/superpowers/specs/2026-11-15-ig-reel-cinematic-redesign-design.md
-# Triggered by the Cloudflare Worker scheduler (D1 row) via workflow_dispatch.
+# IG Reel — one workflow for every Instagram account (posted via Buffer).
+# The `account` input picks scripts/ig_reel/accounts/<account>.json (handle, niche, feeds, tip
+# themes, pinned Buffer channel + Cloudinary cloud) and the GitHub environment `ig-<account>`
+# that holds that account's own secrets under the secret names below. An environment secret
+# overrides the repo-level one of the same name; a missing one falls back to repo level, and the
+# script's wrong-account guard then refuses a real post. Add an account: docs/ig-reel-add-account.md
+#   kaliajatau (default) — Interesting Facts & Knowledge, @kaliajatau.id; repo-level secrets.
+#   ai-labs              — Claude & ChatGPT tips: fresh announcement in the morning slot, else a theme tip.
+# Per run: RSS fetch → Buffer dedup → ONE story written only from an article (every number
+# checked) or one theme tip (no prices/versions/big numbers), Bahasa Indonesia → 4 cinematic
+# illustrations → animated HTML scenes captured frame-by-frame + composed beat-synced music
+# (scripts/ig_reel/) → Cloudinary hosting → Buffer createPost (reel, shareNow, isAiGenerated,
+# cover = frame 0). Specs: docs/superpowers/specs/2026-11-15-ig-reel-cinematic-redesign-design.md,
+# docs/superpowers/specs/2026-11-15-ig-reel-multi-account-design.md
+# Triggered by the Cloudflare Worker scheduler (D1 rows) via workflow_dispatch.
 # DRY_RUN=true composes everything but skips the upload and post.
 # Images: provider chain cloudflare → google → huggingface → pollinations
 # (POLLINATIONS_SECRET_KEY keyed modern endpoint; fallback to classic per-IP free tier).
@@ -22,8 +28,18 @@ on:
         required: false
         default: true
         type: boolean
+      account:
+        description: 'Account id = scripts/ig_reel/accounts/<id>.json and environment ig-<id>'
+        required: false
+        default: 'kaliajatau'
+      mode:
+        description: 'Dev only: force the story mode (auto = announcement in news slots, else tip)'
+        required: false
+        default: auto
+        type: choice
+        options: [auto, news, tip]
       topic:
-        description: 'Optional topic hint (prioritised when relevant)'
+        description: 'Optional topic hint (prioritised when relevant; in tip mode it replaces the theme)'
         required: false
         default: ''
       placeholder_images:
@@ -36,14 +52,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: ig-reel-daily
+  group: ig-reel-${{ inputs.account || 'kaliajatau' }}
   cancel-in-progress: false
 
 jobs:
   reel:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: ig-${{ inputs.account || 'kaliajatau' }}
     env:
+      ACCOUNT: ${{ inputs.account || 'kaliajatau' }}
+      MODE: ${{ inputs.mode || 'auto' }}
       DRY_RUN: ${{ inputs.dry_run || 'false' }}
       TOPIC: ${{ inputs.topic }}
       PLACEHOLDER_IMAGES: ${{ inputs.placeholder_images || 'false' }}
@@ -51,8 +70,6 @@ jobs:
       GOOGLE_IMAGE_MODEL: gemini-nano-banana-2.1
       HF_IMAGE_MODEL: black-forest-labs/FLUX.1-schnell
       IMAGE_ORDER: cloudflare,google,huggingface,pollinations
-      BUFFER_CHANNEL_ID: ${{ vars.BUFFER_CHANNEL_ID }}
-      BUFFER_ORG_ID: ${{ vars.BUFFER_ORG_ID }}
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
@@ -106,7 +123,7 @@ jobs:
         if: always() && env.DRY_RUN == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ig-reel-dry-run
+          name: ig-reel-dry-run-${{ inputs.account || 'kaliajatau' }}
           path: |
             .ig-reel-out/ig_reel.mp4
             .ig-reel-out/frames_sample/*.jpg
@@ -120,7 +137,7 @@ jobs:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_NEWS_CHANNEL_ID: ${{ secrets.SLACK_NEWS_CHANNEL_ID }}
         run: |
-          TEXT="⚠️ IG Reel daily run failed and no note was posted — see https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          TEXT="⚠️ IG Reel (${ACCOUNT}) run failed and no note was posted — see https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           curl -sS -X POST https://slack.com/api/chat.postMessage \
             -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
             -H "Content-Type: application/json; charset=utf-8" \

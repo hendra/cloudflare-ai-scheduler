@@ -46,7 +46,7 @@ def fit_scales(cap, story, images, meta_base, work):
 
 
 def render_reel(story, images, meta_base, seed, out_mp4):
-    """images: {1..4: Path}. meta_base: {"source","date","handle"}. Returns
+    """images: {1..4: Path}. meta_base: {"source","date","handle","follow_line"} (+ optional source_label, kickers, hook_kicker). Returns
     {"seconds","frames","overflow","hook_visible_at_0","music"}; raises if text leaves the safe area."""
     out_mp4 = pathlib.Path(out_mp4)
     work = out_mp4.parent / (out_mp4.stem + "_frames")

@@ -12,10 +12,10 @@ import re
 from .timeline import BEAT_S, SCENE_BEATS
 
 FONTS = pathlib.Path(__file__).resolve().parent / "fonts"
-FOLLOW_LINE = "Ikuti @kaliajatau.id buat fakta gila berikutnya"
 YELLOW = "#FFD23F"
 SAFE = {"left": 72, "right": 930, "top": 240, "bottom": 1480}
 
+TIP_KICKERS = {"context": "MASALAHNYA", "twist": "TRIKNYA", "why": "CONTOH PROMPT", "payoff": "HASILNYA"}
 KICKERS = {"context": "YANG DITEMUKAN", "twist": "TAPI TUNGGU…", "why": "KENAPA PENTING", "payoff": "INTINYA"}
 # scene → (image key, Ken Burns keyframes from → to)
 SHOTS = {
@@ -115,7 +115,7 @@ def scene_html(kind, story, images, meta):
     dur = DURATION[kind]
     img = images[SHOTS[kind][0]]
     css = _base_css(kind, dur, meta)
-    src = f'<div class="src safe">Sumber: {_esc(meta["source"])} · {_esc(meta["date"])}</div>'
+    src = f'<div class="src safe">{_esc(meta.get("source_label", "Sumber"))}: {_esc(meta["source"])} · {_esc(meta["date"])}</div>'
     beats = {b["role"]: b for b in story.get("beats") or [] if isinstance(b, dict)}
     img_style = ""
 
@@ -127,7 +127,7 @@ def scene_html(kind, story, images, meta):
               overflow-wrap: anywhere; text-shadow: 0 4px 30px rgba(0,0,0,.6); }}
 .hook-text em {{ font-style: normal; color: {YELLOW}; }}
 .kicker.top {{ position: absolute; top: 260px; left: 72px; }}"""
-        body = (f'<div class="kicker top safe">FAKTA SAINS</div>'
+        body = (f'<div class="kicker top safe">{_esc(meta.get("hook_kicker", "FAKTA SAINS"))}</div>'
                 f'<div class="stack"><h1 class="hook-text safe">{_highlight_hook(hook, story.get("hook_highlight"))}</h1>'
                 f'<div class="handle safe">{_esc(meta["handle"])}</div></div>')
 
@@ -140,7 +140,7 @@ def scene_html(kind, story, images, meta):
           animation: sweep .35s cubic-bezier(.2,.8,.2,1) both; z-index: 0; }}
 .hltext {{ position: relative; z-index: 1; animation: ink .2s linear both; }}"""
         hl_at = 2 * BEAT_S
-        body = (f'<div class="stack"><div class="kicker safe" style="animation: rise .3s ease-out both">{KICKERS[kind]}</div>'
+        body = (f'<div class="stack"><div class="kicker safe" style="animation: rise .3s ease-out both">{meta.get("kickers", KICKERS)[kind]}</div>'
                 f'<p class="beat safe">{_beat_text(str(b.get("text") or ""), str(b.get("highlight") or ""), hl_at)}</p>{src}</div>')
 
     elif kind == "payoff":
@@ -151,7 +151,7 @@ def scene_html(kind, story, images, meta):
 .chip {{ align-self: flex-start; font: 800 34px/1 'Inter'; color: #111; background: {YELLOW}; padding: 16px 26px;
          border-radius: 999px; letter-spacing: 2px; transform-origin: left center;
          animation: pop .35s ease-out both; animation-delay: {2 * BEAT_S:.3f}s; }}"""
-        body = (f'<div class="stack"><div class="kicker safe">{KICKERS["payoff"]}</div>'
+        body = (f'<div class="stack"><div class="kicker safe">{meta.get("kickers", KICKERS)["payoff"]}</div>'
                 f'<p class="payoff safe">{_words(str(b.get("text") or ""), REVEAL_START)[0]}</p>'
                 f'<div class="chip safe">🔖 SIMPAN INI</div>{src}</div>')
 
@@ -164,7 +164,7 @@ def scene_html(kind, story, images, meta):
 .r1, .r2, .r3 {{ animation: rise .35s ease-out both; }}
 .r1 {{ animation-delay: {BEAT_S:.3f}s; }} .r2 {{ animation-delay: {2 * BEAT_S:.3f}s; }} .r3 {{ animation-delay: {3 * BEAT_S:.3f}s; }}"""
         body = (f'<div class="stack center"><p class="cta safe r1">{_esc(story.get("cta"))}</p>'
-                f'<div class="follow safe r2">{_esc(FOLLOW_LINE)}</div>'
+                f'<div class="follow safe r2">{_esc(meta["follow_line"])}</div>'
                 f'<div class="handle safe r3">❤️ Like · 💬 Komen · 🔁 Share</div></div>')
     else:
         raise ValueError(f"unknown scene kind {kind!r}")
