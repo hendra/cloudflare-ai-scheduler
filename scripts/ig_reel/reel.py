@@ -3,6 +3,7 @@ import pathlib
 import shutil
 import subprocess
 
+from .accounts import DEFAULT_MUSIC_STYLE
 from .capture import Capturer
 from .music import TAIL_S, compose
 from .scenes import scene_html
@@ -46,7 +47,8 @@ def fit_scales(cap, story, images, meta_base, work):
 
 
 def render_reel(story, images, meta_base, seed, out_mp4):
-    """images: {1..4: Path}. meta_base: {"source","date","handle","follow_line"} (+ optional source_label, kickers, hook_kicker). Returns
+    """images: {1..4: Path}. meta_base: {"source","date","handle","follow_line"} (+ optional source_label, kickers, hook_kicker,
+    music_style = the account's soundtrack style). The soundtrack mood comes from story["mood"]. Returns
     {"seconds","frames","overflow","hook_visible_at_0","music"}; raises if text leaves the safe area."""
     out_mp4 = pathlib.Path(out_mp4)
     work = out_mp4.parent / (out_mp4.stem + "_frames")
@@ -75,7 +77,7 @@ def render_reel(story, images, meta_base, seed, out_mp4):
         raise RuntimeError("text outside the safe area: " + " | ".join(overflow))
 
     wav = work / "music.wav"
-    music = compose(seed, TOTAL_BEATS, wav)
+    music = compose(seed, TOTAL_BEATS, wav, style=meta_base.get("music_style", DEFAULT_MUSIC_STYLE), mood=story.get("mood"))
     assemble(work, wav, out_mp4)
     return {"seconds": music["seconds"], "frames": frame, "overflow": overflow,
             "hook_visible_at_0": hook_ok, "music": music, "font_scales": scales}

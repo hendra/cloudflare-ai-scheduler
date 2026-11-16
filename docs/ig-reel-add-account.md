@@ -24,6 +24,7 @@ Copy `scripts/ig_reel/accounts/ai-labs.json` to `scripts/ig_reel/accounts/<id>.j
 | `dedupe_posts` | How many recent Buffer posts the AI is told not to repeat (28 = one week at 4/day). |
 | `buffer_channel_id`, `buffer_org_id` | The account's own Buffer IDs (not secret). A post always goes to this channel; Buffer rejects a token that does not own it. |
 | `cloudinary_cloud_name` | The account's Cloudinary cloud name. A real run refuses to upload when the `CLOUDINARY_CLOUD_NAME` secret differs. `null` = not pinned (only `kaliajatau`, which uses the repo-level secrets). |
+| `music` | Optional. `{"style": "cinematic"}` (warm pad, soft pluck, low drum — the default when omitted) or `{"style": "electronic"}` (pumping synth pad, bright echoing pluck, blips and glitch stutters). The style gives the account its voices and its opening motif; each post's mood then shapes the notes. A new style is added in code: `MUSIC_STYLES` in `scripts/ig_reel/accounts.py`, `STYLES` and `MOTIFS` in `scripts/ig_reel/music.py`. Listen first: `cd scripts && python3 -m ig_reel.music <style> <mood> <seed> <out.wav>`. |
 
 `python3 scripts/ig_reel/selfcheck.py` validates every account file.
 

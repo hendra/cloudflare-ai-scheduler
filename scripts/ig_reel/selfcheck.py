@@ -398,6 +398,11 @@ if HAVE_NUMPY:
         raise AssertionError("unknown style must raise")
     except ValueError:
         pass
+    # the render hands the account's style and the story's mood to the synth
+    import inspect
+    from ig_reel import reel as _reel
+    _src = inspect.getsource(_reel.render_reel)
+    assert 'meta_base.get("music_style"' in _src and 'story.get("mood")' in _src
 
 # ---------- scenes ----------
 from ig_reel.scenes import scene_html  # noqa: E402
@@ -480,11 +485,14 @@ else:
         if b["highlight"] and b["highlight"] not in b["text"]:
             b["highlight"] = ""
     longest["cta"] = ("Kirim ke teman yang suka luar angkasa dan sains 🚀 " + "x" * 20)[:60]
+    longest["mood"] = "mysterious"
     t0 = time.time()
     out = work / "reel.mp4"
-    res = render_reel(longest, imgs, {"source": "NASA", "date": "12 Nov 2026", "handle": "@tes", "follow_line": "Ikuti @tes buat tips"},
+    res = render_reel(longest, imgs, {"source": "NASA", "date": "12 Nov 2026", "handle": "@tes", "follow_line": "Ikuti @tes buat tips",
+                                     "music_style": "electronic"},
                       "2026-11-16-0730", out)
     took = time.time() - t0
+    assert res["music"]["style"] == "electronic" and res["music"]["mood"] == "mysterious", res["music"]
     assert res["overflow"] == [], res["overflow"]
     probe = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(out)],
                                       capture_output=True, text=True, check=True).stdout)
