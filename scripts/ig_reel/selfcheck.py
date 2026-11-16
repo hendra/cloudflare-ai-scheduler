@@ -385,6 +385,13 @@ if HAVE_NUMPY:
             head = x[: int(1.2 * 44100)]
             assert np.sqrt((head ** 2).mean()) >= 0.25 * np.sqrt((x ** 2).mean()), (st, m)
     assert len(set(clips.values())) == len(MUSIC_STYLES) * len(MOODS), "every style × mood must differ"
+    # the phone-speaker share also holds in the lowest keys (four slots of a day = four keys)
+    for hm in ("0815", "1145", "1635", "1930"):
+        compose(f"2026-11-17-{hm}", 46, tmp / "k.wav", style="cinematic", mood="mysterious")
+        x = _load(tmp / "k.wav")
+        spec = np.abs(np.fft.rfft(x.mean(axis=1))) ** 2
+        freqs = np.fft.rfftfreq(len(x), 1 / 44100)
+        assert spec[(freqs >= 150) & (freqs <= 4000)].sum() / spec.sum() >= 0.6, hm
     assert max(rms_db.values()) - min(rms_db.values()) <= 4.0, rms_db
     try:
         compose(SEED, 46, tmp / "bad.wav", style="jazz")

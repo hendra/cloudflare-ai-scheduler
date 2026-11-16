@@ -174,8 +174,8 @@ def compose(seed, beats, out_wav, style=DEFAULT_MUSIC_STYLE, mood=None, bpm=BPM,
     for k in range(beats):
         f = _hz(root + chords[(k // 4) % len(chords)][0] - 24)
         if voice["bass"] == "sine":
-            tone = (0.25 * np.sin(2 * np.pi * f * bt) + 0.5 * np.sin(4 * np.pi * f * bt)
-                    + 0.4 * np.sin(8 * np.pi * f * bt)) * np.exp(-bt * 7)
+            tone = (0.15 * np.sin(2 * np.pi * f * bt) + 0.5 * np.sin(4 * np.pi * f * bt)
+                    + 0.4 * np.sin(8 * np.pi * f * bt) + 0.3 * np.sin(12 * np.pi * f * bt)) * np.exp(-bt * 7)
         else:
             tone = _saw(f, bt) * 0.5 * np.exp(-bt * 10)
         _add(bass, k * beat, tone * 0.32, sr)
@@ -194,7 +194,7 @@ def compose(seed, beats, out_wav, style=DEFAULT_MUSIC_STYLE, mood=None, bpm=BPM,
     blip_t = np.arange(int(0.045 * sr)) / sr
     for k in range(4, beats):
         if k % 4 in rhythm["kick"] and not (k >= cta_beat and (k - cta_beat) % 2):
-            _add(drums, k * beat, kick * 0.3, sr)
+            _add(drums, k * beat, kick * 0.26, sr)
         if k < cta_beat:
             for offset, gain in hat_hits:
                 hat = _highpass(rng.standard_normal(hat_len), hat_hp, sr) * hat_env
