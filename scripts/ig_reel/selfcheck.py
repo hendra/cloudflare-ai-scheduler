@@ -12,7 +12,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from ig_reel.story import (  # noqa: E402
     apply_story_limits, build_caption, check_story, extract_article_text, feed_body, format_date_id, grounding_text,
-    interleave, numbers_in, order_by_source,
+    interleave, numbers_in, order_by_source, MOODS, STORY_SCHEMA_HINT, normalize_mood,
 )
 
 # ---------- story ----------
@@ -163,6 +163,19 @@ assert hs["hook_highlight"] == ["hujan kaca"], hs["hook_highlight"]
 # A numeric highlight must not crash apply_story_limits.
 nh = copy.deepcopy(STORY); nh["beats"][1]["highlight"] = 8700
 apply_story_limits(nh)
+# mood (soundtrack): recognised despite case/spaces; anything else is "" and never an error
+assert MOODS == ("curious", "wonder", "energetic", "mysterious", "uplifting")
+assert normalize_mood("Curious ") == "curious" and normalize_mood("WONDER") == "wonder"
+for bad in (None, 5, ["wonder"], "", "sedih", {"mood": "wonder"}):
+    assert normalize_mood(bad) == "", bad
+for raw, want in (("  Mysterious", "mysterious"), (None, ""), (7, "")):
+    d = {"hook": "a b", "beats": [], "mood": raw}
+    apply_story_limits(d)
+    assert d["mood"] == want, (raw, d["mood"])
+d = {"hook": "a b", "beats": []}
+apply_story_limits(d)
+assert d["mood"] == ""
+assert '"mood"' in STORY_SCHEMA_HINT and all(m in STORY_SCHEMA_HINT for m in MOODS)
 
 cap = build_caption(copy.deepcopy(STORY), "NASA", "https://x")
 assert cap.startswith("Bayangkan hujan kaca"), cap

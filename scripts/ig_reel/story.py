@@ -10,6 +10,7 @@ import html as _html
 import re
 
 ROLES = ("context", "twist", "why", "payoff")
+MOODS = ("curious", "wonder", "energetic", "mysterious", "uplifting")  # soundtrack mood, see music.py
 HOOK_MAX_WORDS = 7
 BEAT_MAX = 120
 CTA_MAX = 60
@@ -27,6 +28,7 @@ STORY_SCHEMA_HINT = """{"hook": "maks 7 kata, membuka rasa penasaran",
    {"role": "payoff", "text": "maks 120 karakter, satu kalimat layak disimpan", "highlight": ""}
  ],
  "cta": "ajakan kirim/share khusus cerita ini, maks 60 karakter, boleh 1 emoji",
+ "mood": "satu dari: curious | wonder | energetic | mysterious | uplifting — suasana cerita ini, untuk musik latar",
  "image_prompts": ["4 prompt bahasa Inggris: hook, context, twist, why/payoff — subjek sama, tanpa teks"],
  "caption": {"opener": "hook diparafrase, maks 120 karakter", "body": "2–3 baris pendek",
              "question": "1 pertanyaan untuk komentar", "save_line": "ajakan simpan/kirim"},
@@ -339,6 +341,12 @@ def _truncate(s, n):
     return cut + "…"
 
 
+def normalize_mood(raw):
+    """A name from MOODS, or "" (the soundtrack then picks one from the seed). Never an error."""
+    mood = raw.strip().lower() if isinstance(raw, str) else ""
+    return mood if mood in MOODS else ""
+
+
 def apply_story_limits(data):
     data["hook"] = " ".join(str(data.get("hook") or "").split()[:HOOK_MAX_WORDS])
     hook_l = data["hook"].lower()
@@ -351,6 +359,7 @@ def apply_story_limits(data):
             b["highlight"] = hl if hl and hl in text else ""
             b["text"] = text
     data["cta"] = _truncate(data.get("cta"), CTA_MAX)
+    data["mood"] = normalize_mood(data.get("mood"))
     if isinstance(data.get("caption"), dict):
         data["caption"]["opener"] = _truncate(data["caption"].get("opener"), OPENER_MAX)
     tags = []
