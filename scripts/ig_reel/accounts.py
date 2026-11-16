@@ -11,6 +11,8 @@ ACCOUNTS_DIR = pathlib.Path(__file__).resolve().parent / "accounts"
 SLOTS = ("morning", "midday", "afternoon", "evening")
 TOOLS = ("Claude", "ChatGPT", "Gemini")
 MIN_THEMES = 8
+MUSIC_STYLES = ("cinematic", "electronic")  # voices live in music.py STYLES
+DEFAULT_MUSIC_STYLE = "cinematic"
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _STR_FIELDS = ("handle", "follow_line", "hook_kicker", "persona", "label", "buffer_channel_id", "buffer_org_id")
 _MAY_BE_EMPTY = ("handle",)
@@ -58,7 +60,18 @@ def validate_account(cfg):
     age = cfg.get("news_max_age_days")
     if age is not None and (not isinstance(age, int) or isinstance(age, bool) or age < 1):
         errs.append("news_max_age_days: null (any age) or an integer >= 1")
+    music = cfg.get("music")
+    if music is not None:
+        if not isinstance(music, dict):
+            errs.append('music: must be an object like {"style": "' + "|".join(MUSIC_STYLES) + '"}')
+        elif "style" in music and music["style"] not in MUSIC_STYLES:
+            errs.append("music.style: must be one of " + ", ".join(MUSIC_STYLES))
     return errs
+
+
+def music_style(cfg):
+    """The account's soundtrack style; accounts without a music block get the default."""
+    return (cfg.get("music") or {}).get("style", DEFAULT_MUSIC_STYLE)
 
 
 def load_account(account_id):

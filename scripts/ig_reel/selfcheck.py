@@ -224,7 +224,7 @@ import datetime as _d  # noqa: E402
 
 from ig_reel.accounts import (  # noqa: E402
     SLOTS, account_target_errors, load_account, pick_theme, slot_name, theme_plan, theme_ring, validate_account,
-    wants_news,
+    wants_news, MUSIC_STYLES, music_style,
 )
 
 KALI = load_account("kaliajatau")
@@ -295,6 +295,15 @@ assert account_target_errors(PINNED, "mycloud") == [] and len(account_target_err
 assert len(account_target_errors(PINNED, "")) == 1
 assert account_target_errors(LABS, LABS["cloudinary_cloud_name"]) == [] and len(account_target_errors(LABS, "opqimovw")) == 1
 assert validate_account({**KALI, "cloudinary_cloud_name": ""})
+# music style: named in the account file, default cinematic, malformed blocks are readable errors
+assert MUSIC_STYLES == ("cinematic", "electronic")
+assert music_style(LABS) == "electronic" and music_style(KALI) == "cinematic"
+_NO_MUSIC = {k: v for k, v in KALI.items() if k != "music"}
+assert validate_account(_NO_MUSIC) == [] and music_style(_NO_MUSIC) == "cinematic"
+assert validate_account({**KALI, "music": {}}) == [] and music_style({**KALI, "music": {}}) == "cinematic"
+for bad in ("electronic", {"style": 3}, {"style": "jazz"}, [], {"style": ""}):
+    errs = validate_account({**KALI, "music": bad})
+    assert any(e.startswith("music") for e in errs), (bad, errs)
 
 # ---------- timeline ----------
 from ig_reel.timeline import scene_starts, total_frames  # noqa: E402
