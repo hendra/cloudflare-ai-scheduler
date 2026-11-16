@@ -5,9 +5,16 @@ Two inputs shape a track besides the seed:
   pattern, the pad brightness and the weight of the impacts;
 - the seed ("YYYY-MM-DD-HHMM") picks the key, one of the mood's progressions and the noise.
 
+- style (from the account file, see accounts.MUSIC_STYLES) picks the voices: "cinematic" is a
+  warm pad, a soft piano-like pluck, a low drum and an airy shimmer; "electronic" is a pumping
+  synth pad, a bright echoing pluck, tight drums, digital blips and glitch stutters. Each
+  style also owns a short signature motif (MOTIFS, scale degrees) played at the very start
+  and echoed on the CTA, transposed to the track's key and scale.
+
 Layers: pad (one chord per bar), bass pulse on every beat, kick + hat from bar 2, plucked
-arpeggio from the twist to the CTA, a riser into the twist and impact hits on the twist and
-CTA downbeats. The key steps with the slot (morning / midday / afternoon / evening), so the
+arpeggio from the twist to the CTA, a texture (shimmer / stutters), a riser into the twist
+and impact hits on the twist and CTA downbeats. The bass and the impacts carry harmonics
+above 150 Hz so they survive phone speakers. The key steps with the slot (morning / midday / afternoon / evening), so the
 four daily Reels always sit in four different keys; the same seed, style and mood render
 byte-identical audio. A missing or unknown mood is derived from the seed — never an error.
 """
@@ -18,6 +25,7 @@ import numpy as np
 from scipy.io import wavfile
 from scipy.signal import butter, sosfilt
 
+from .accounts import DEFAULT_MUSIC_STYLE, MUSIC_STYLES
 from .story import MOODS
 from .timeline import BPM, scene_starts
 
@@ -38,6 +46,14 @@ RHYTHMS = {
     "mysterious": {"kick": (0,),         "hat": None,        "arp_step": 3, "arp_gain": 0.17, "impact": (0.85, 1.6)},
     "uplifting":  {"kick": (0, 1, 2, 3), "hat": "eighth",    "arp_step": 1, "arp_gain": 0.17, "impact": (0.7, 3.0)},
 }
+# per-style voices; keys must equal accounts.MUSIC_STYLES
+STYLES = {
+    "cinematic": {"pad_square": 0.0, "pad_duck": 0.0, "bass": "sine", "kick": (120, 45, 14, 0.0), "hat": (7000, 90, 1.0),
+                  "pluck": "soft", "pluck_octave": 0, "echo": 0.0, "texture": "shimmer", "motif_octave": 12},
+    "electronic": {"pad_square": 0.4, "pad_duck": 0.65, "bass": "saw", "kick": (170, 50, 22, 0.35), "hat": (9000, 170, 1.3),
+                   "pluck": "bright", "pluck_octave": 12, "echo": 0.35, "texture": "glitch", "motif_octave": 12},
+}
+MOTIFS = {"cinematic": (0, 4, 2), "electronic": (0, 2, 4, 7)}  # scale degrees on consecutive half-beats
 TAIL_S = 1.0
 
 
@@ -96,8 +112,21 @@ def _chord(scale, d):
     return tuple(_degree(scale, d + k) for k in (0, 2, 4))
 
 
-def compose(seed, beats, out_wav, style="cinematic", mood=None, bpm=BPM, sr=44100):
+def _pluck_tone(kind, f, sr):
+    """One plucked note: "soft" = piano-like sine with a slow decay, "bright" = short synth pluck."""
+    if kind == "soft":
+        t = np.arange(int(0.6 * sr)) / sr
+        return (np.sin(2 * np.pi * f * t) + 0.35 * np.sin(4 * np.pi * f * t) + 0.12 * np.sin(6 * np.pi * f * t)) * np.exp(-t * 6)
+    t = np.arange(int(0.28 * sr)) / sr
+    square = np.sign(np.sin(2 * np.pi * f * t))
+    return _lowpass(0.6 * _saw(f, t) + 0.4 * square, 3500, sr, order=2) * np.exp(-t * 14) * 0.8
+
+
+def compose(seed, beats, out_wav, style=DEFAULT_MUSIC_STYLE, mood=None, bpm=BPM, sr=44100):
+    if style not in STYLES:
+        raise ValueError(f"unknown music style {style!r}; known: {', '.join(MUSIC_STYLES)}")
     seed = str(seed)
+    voice = STYLES[style]
     mood, key_name, prog = pick_track(seed, mood)
     scale_name, scale, _progs, pad_cutoff = MOOD_SPECS[mood]
     rhythm = RHYTHMS[mood]
@@ -110,14 +139,16 @@ def compose(seed, beats, out_wav, style="cinematic", mood=None, bpm=BPM, sr=4410
     seconds = beats * beat + TAIL_S
     n = int(round(seconds * sr))
     pad = np.zeros(n)
+    bass = np.zeros(n)
     drums = np.zeros(n)
     fx = np.zeros(n)
     pluck = np.zeros(n)
+    air = np.zeros(n)
 
     starts = scene_starts()
-    twist_beat, payoff_end, cta_beat = starts[2], starts[5], starts[5]
+    twist_beat, why_beat, payoff_end, cta_beat = starts[2], starts[3], starts[5], starts[5]
 
-    # pad: one chord per bar, three detuned saws per note, slow swell, low-passed by the mood
+    # pad: one chord per bar, three detuned saws (plus square for the synth style) per note
     n_bars = int(np.ceil(beats / 4)) + 1
     for b in range(n_bars):
         dur = bar + 0.4
@@ -125,42 +156,88 @@ def compose(seed, beats, out_wav, style="cinematic", mood=None, bpm=BPM, sr=4410
         env = np.minimum(1, t / 0.6) * np.minimum(1, (dur - t) / 0.5)
         sig = np.zeros_like(t)
         for semis in chords[b % len(chords)]:
-            f = _hz(root + semis - 12)
+            f = _hz(root + semis)
             for cents in (-7, 0, 7):
-                sig += _saw(f * 2 ** (cents / 1200), t + rng.random() / f)
+                tt = t + rng.random() / f
+                wave = _saw(f * 2 ** (cents / 1200), tt)
+                if voice["pad_square"]:
+                    wave = (1 - voice["pad_square"]) * wave + voice["pad_square"] * np.sign(np.sin(2 * np.pi * f * tt))
+                sig += wave
         _add(pad, b * bar, sig * env / 9, sr)
-    pad = _lowpass(pad, pad_cutoff, sr) * 0.55
+    pad = _lowpass(pad, pad_cutoff, sr) * (0.6 + 0.5 * voice["pad_duck"])
+    if voice["pad_duck"]:  # pumping: the pad dips on every beat and swells back
+        phase = (np.arange(n) / sr) % beat
+        pad *= 1 - voice["pad_duck"] * np.exp(-phase * 9)
 
-    # bass pulse on every beat (chord root, two octaves down)
-    t = np.arange(int(0.45 * sr)) / sr
-    sub_env = np.exp(-t * 7)
+    # bass pulse on every beat (chord root); harmonics keep it audible on small speakers
+    bt = np.arange(int(0.45 * sr)) / sr
     for k in range(beats):
-        chord_root = chords[(k // 4) % len(chords)][0]
-        _add(drums, k * beat, np.sin(2 * np.pi * _hz(root + chord_root - 24) * t) * sub_env * 0.5, sr)
+        f = _hz(root + chords[(k // 4) % len(chords)][0] - 24)
+        if voice["bass"] == "sine":
+            tone = (0.25 * np.sin(2 * np.pi * f * bt) + 0.5 * np.sin(4 * np.pi * f * bt)
+                    + 0.4 * np.sin(8 * np.pi * f * bt)) * np.exp(-bt * 7)
+        else:
+            tone = _saw(f, bt) * 0.5 * np.exp(-bt * 10)
+        _add(bass, k * beat, tone * 0.32, sr)
+    if voice["bass"] == "saw":
+        bass = _highpass(_lowpass(bass, 800, sr), 90, sr, order=2)
 
     # kick on the mood's beats from bar 2 (every other one during the CTA), hats until the CTA
+    k_hi, k_lo, k_decay, k_click = voice["kick"]
     kt = np.arange(int(0.3 * sr)) / sr
-    kick = np.sin(2 * np.pi * (45 * kt + (120 - 45) * (1 - np.exp(-kt * 30)) / 30)) * np.exp(-kt * 14)
+    kick = np.sin(2 * np.pi * (k_lo * kt + (k_hi - k_lo) * (1 - np.exp(-kt * 30)) / 30)) * np.exp(-kt * k_decay)
+    kick[:int(0.004 * sr)] += k_click * np.linspace(1, 0, int(0.004 * sr))
+    hat_hp, hat_decay, hat_gain = voice["hat"]
     hat_len = int(0.05 * sr)
-    hat_env = np.exp(-np.arange(hat_len) / sr * 90)
+    hat_env = np.exp(-np.arange(hat_len) / sr * hat_decay)
     hat_hits = {None: (), "eighth": ((0.5, 0.12),), "sixteenth": ((0.25, 0.07), (0.5, 0.12), (0.75, 0.07))}[rhythm["hat"]]
+    blip_t = np.arange(int(0.045 * sr)) / sr
     for k in range(4, beats):
         if k % 4 in rhythm["kick"] and not (k >= cta_beat and (k - cta_beat) % 2):
-            _add(drums, k * beat, kick * 0.6, sr)
+            _add(drums, k * beat, kick * 0.3, sr)
         if k < cta_beat:
             for offset, gain in hat_hits:
-                hat = _highpass(rng.standard_normal(hat_len), 7000, sr) * hat_env
-                _add(drums, (k + offset) * beat, hat * gain, sr)
+                hat = _highpass(rng.standard_normal(hat_len), hat_hp, sr) * hat_env
+                _add(drums, (k + offset) * beat, hat * gain * hat_gain, sr)
+            if voice["texture"] == "glitch" and rng.random() < 0.3:  # digital blip on some offbeats
+                f = _hz(root + 24 + _degree(scale, int(rng.integers(0, 7))))
+                _add(air, (k + 0.75) * beat, np.sin(2 * np.pi * f * blip_t) * np.exp(-blip_t * 60) * 0.07, sr)
 
     # plucked arpeggio from the twist to the CTA, as dense as the mood asks
-    pt = np.arange(int(0.35 * sr)) / sr
-    penv = np.exp(-pt * 9)
     for i, e in enumerate(range(twist_beat * 2, payoff_end * 2, rhythm["arp_step"])):
         chord = chords[(e // 8) % len(chords)]
-        note = root + chord[i % len(chord)] + (12 if (i // 3) % 2 else 0)
-        f = _hz(note)
-        tone = (np.sin(2 * np.pi * f * pt) + 0.3 * np.sin(4 * np.pi * f * pt)) * penv
-        _add(pluck, e * beat / 2, tone * rhythm["arp_gain"], sr)
+        note = root + chord[i % len(chord)] + (12 if (i // 3) % 2 else 0) + voice["pluck_octave"]
+        _add(pluck, e * beat / 2, _pluck_tone(voice["pluck"], _hz(note), sr) * rhythm["arp_gain"], sr)
+
+    # signature motif: the style's own notes at the very start, echoed quietly on the CTA
+    for at_beat, gain in ((0, 0.34), (cta_beat, 0.17)):
+        for j, deg in enumerate(MOTIFS[style]):
+            f = _hz(root + _degree(scale, deg) + voice["motif_octave"])
+            _add(pluck, (at_beat + j / 2) * beat, _pluck_tone(voice["pluck"], f, sr) * gain, sr)
+
+    if voice["echo"]:  # dotted-eighth echo on the synth pluck
+        dly = int(0.75 * beat * sr)
+        pluck[dly:] += pluck[:-dly] * voice["echo"]
+
+    if voice["texture"] == "shimmer":  # airy high chord tones swelling over the twist and the payoff
+        st = np.arange(int(2 * bar * sr)) / sr
+        senv = np.minimum(1, st / 1.2) * np.minimum(1, (st[-1] - st) / 1.2) * (1 + 0.25 * np.sin(2 * np.pi * 0.7 * st))
+        for sb in (twist_beat, starts[4]):
+            for semis in chords[(sb // 4) % len(chords)]:
+                _add(air, sb * beat, np.sin(2 * np.pi * _hz(root + semis + 24) * st) * senv * 0.035, sr)
+    else:  # glitch stutters: a 1/16 slice of the lead repeats over one beat, 3 times in why/payoff
+        lead = pad + pluck
+        sl = int(beat / 4 * sr)
+        ramp = int(0.002 * sr)
+        for gb in sorted(rng.choice(np.arange(why_beat + 1, cta_beat - 1), size=3, replace=False)):
+            i0 = int(round(gb * beat * sr))
+            piece = lead[i0:i0 + sl].copy()
+            piece[:ramp] *= np.linspace(0, 1, ramp)
+            piece[-ramp:] *= np.linspace(1, 0, ramp)
+            for r in range(1, 4):
+                seg = slice(i0 + r * sl, i0 + (r + 1) * sl)
+                pad[seg] = piece * (1 - 0.2 * r)
+                pluck[seg] = 0
 
     # riser over the 4 beats before the twist
     rl = int(4 * beat * sr)
@@ -172,21 +249,32 @@ def compose(seed, beats, out_wav, style="cinematic", mood=None, bpm=BPM, sr=4410
     # impact hits on the twist and CTA downbeats, weighted by the mood
     impact_gain, boom_decay = rhythm["impact"]
     ht = np.arange(int(1.8 * sr)) / sr
-    boom = np.sin(2 * np.pi * 50 * ht) * np.exp(-ht * boom_decay)
+    boom = (0.3 * np.sin(2 * np.pi * 50 * ht) + 0.45 * np.sin(2 * np.pi * 100 * ht)
+            + 0.3 * np.sin(2 * np.pi * 200 * ht)) * np.exp(-ht * boom_decay)
     burst = _lowpass(rng.standard_normal(len(ht)), 3000, sr) * np.exp(-ht * 12)
-    stab = sum(np.sin(2 * np.pi * _hz(root + s) * ht) for s in chords[0]) / 3 * np.exp(-ht * 4)
+    stab = sum(np.sin(2 * np.pi * _hz(root + s + 12) * ht) for s in chords[0]) / 3 * np.exp(-ht * 4)
     for hb in (twist_beat, cta_beat):
-        _add(fx, hb * beat, (boom * 0.7 + burst * 0.25 + stab * 0.25) * impact_gain, sr)
+        _add(fx, hb * beat, (boom * 0.4 + burst * 0.25 + stab * 0.3) * impact_gain, sr)
 
-    # stereo: pad and pluck widened with a short delay on one side
+    # stereo: pad, pluck and air widened with a short delay on one side
     d = int(0.012 * sr)
-    wide = pad + pluck
-    left = drums + fx + wide
-    right = drums + fx + np.concatenate([np.zeros(d), wide[:-d]])
-    mix = np.stack([left, right], axis=1)
+    wide = pad + pluck + air
+    centre = bass + drums + fx
+    mix = np.stack([centre + wide, centre + np.concatenate([np.zeros(d), wide[:-d]])], axis=1)
+    mix = np.tanh(mix * 1.6)  # gentle saturation: evens out the level between styles and moods
     fade = int(1.5 * sr)
     mix[-fade:] *= np.linspace(1, 0, fade)[:, None]
     mix *= 0.891 / max(np.abs(mix).max(), 1e-9)  # peak −1 dBFS
     wavfile.write(out_wav, sr, (mix * 32767).astype(np.int16))
     return {"style": style, "mood": mood, "key": f"{key_name} {scale_name}",
             "progression": [str(d + 1) for d in prog], "seconds": round(n / sr, 3)}
+
+
+if __name__ == "__main__":  # listen to one track: python3 -m ig_reel.music <style> <mood> <seed> <out.wav>
+    import sys
+
+    from .timeline import TOTAL_BEATS
+
+    if len(sys.argv) != 5:
+        sys.exit("usage: python3 -m ig_reel.music <style> <mood> <seed> <out.wav>")
+    print(compose(sys.argv[3], TOTAL_BEATS, sys.argv[4], style=sys.argv[1], mood=sys.argv[2]))

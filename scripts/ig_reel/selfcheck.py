@@ -357,6 +357,41 @@ if HAVE_NUMPY:
         assert len(set(keys)) == 4, (day, keys)
     assert pick_track("2026-11-16-0815", "wonder") == pick_track("2026-11-16-0815", "wonder")
 
+    # styles: every style × mood renders, differs, carries on phone speakers and sits at a similar level
+    import numpy as np
+    from ig_reel.music import MOTIFS, STYLES
+
+    assert set(STYLES) == set(MUSIC_STYLES) == set(MOTIFS)
+
+    def _load(path):
+        _sr, d = wavfile.read(path)
+        return d.astype(np.float64) / 32767
+
+    rms_db, clips = {}, {}
+    for st in MUSIC_STYLES:
+        for m in MOODS:
+            p = tmp / f"{st}-{m}.wav"
+            info = compose(SEED, 46, p, style=st, mood=m)
+            assert info["style"] == st and abs(info["seconds"] - 28.6) < 0.01, info
+            x = _load(p)
+            assert np.isfinite(x).all() and np.abs(x).max() <= 0.9, (st, m)
+            clips[(st, m)] = p.read_bytes()
+            rms_db[(st, m)] = 20 * np.log10(np.sqrt((x ** 2).mean()))
+            # phone speakers: at least 60% of the energy sits between 150 Hz and 4 kHz
+            spec = np.abs(np.fft.rfft(x.mean(axis=1))) ** 2
+            freqs = np.fft.rfftfreq(len(x), 1 / 44100)
+            assert spec[(freqs >= 150) & (freqs <= 4000)].sum() / spec.sum() >= 0.6, (st, m)
+            # the opening is not near-silent: the motif is in the first 1.2 s (two beats)
+            head = x[: int(1.2 * 44100)]
+            assert np.sqrt((head ** 2).mean()) >= 0.25 * np.sqrt((x ** 2).mean()), (st, m)
+    assert len(set(clips.values())) == len(MUSIC_STYLES) * len(MOODS), "every style × mood must differ"
+    assert max(rms_db.values()) - min(rms_db.values()) <= 4.0, rms_db
+    try:
+        compose(SEED, 46, tmp / "bad.wav", style="jazz")
+        raise AssertionError("unknown style must raise")
+    except ValueError:
+        pass
+
 # ---------- scenes ----------
 from ig_reel.scenes import scene_html  # noqa: E402
 from ig_reel.timeline import SCENE_BEATS  # noqa: E402
