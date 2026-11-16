@@ -323,22 +323,39 @@ except ImportError:
     print("selfcheck: numpy/scipy missing — music section skipped")
 
 if HAVE_NUMPY:
-    from ig_reel.music import compose
+    from ig_reel.music import MOOD_SPECS, compose, pick_track
 
     tmp = pathlib.Path(tempfile.mkdtemp())
-    info = compose("2026-11-16-0730", 46, tmp / "a.wav")
+    assert set(MOOD_SPECS) == set(MOODS)
+    assert all(len(spec[2]) >= 4 for spec in MOOD_SPECS.values())
+    SEED = "2026-11-16-0730"
+    info = compose(SEED, 46, tmp / "a.wav", mood="curious")
+    assert info["style"] == "cinematic" and info["mood"] == "curious" and info["key"].endswith(" dorian"), info
     assert abs(info["seconds"] - 28.6) < 0.01, info
     sr, data = wavfile.read(tmp / "a.wav")
     assert data.ndim == 2 and data.shape[1] == 2 and abs(len(data) / sr - 28.6) < 0.01
     assert abs(data).max() / 32767 <= 0.9, abs(data).max()
-    compose("2026-11-16-0730", 46, tmp / "b.wav")
-    assert (tmp / "a.wav").read_bytes() == (tmp / "b.wav").read_bytes(), "same seed must give identical audio"
-    from ig_reel.music import pick_track
+    compose(SEED, 46, tmp / "b.wav", mood="curious")
+    assert (tmp / "a.wav").read_bytes() == (tmp / "b.wav").read_bytes(), "same inputs must give identical audio"
+    # every mood renders and differs from every other mood on the same seed
+    mood_bytes = {}
+    for m in MOODS:
+        compose(SEED, 46, tmp / f"{m}.wav", mood=m)
+        mood_bytes[m] = (tmp / f"{m}.wav").read_bytes()
+    assert len(set(mood_bytes.values())) == len(MOODS)
+    # unknown / missing mood falls back deterministically, never raises
+    for bad in (None, "", "sedih"):
+        fb = compose(SEED, 46, tmp / "fb.wav", mood=bad)
+        assert fb["mood"] in MOODS and fb["mood"] == pick_track(SEED)[0]
+    # a seed that is not a date still renders deterministically
+    x = compose("manual-run", 46, tmp / "x1.wav")
+    compose("manual-run", 46, tmp / "x2.wav")
+    assert x["mood"] in MOODS and (tmp / "x1.wav").read_bytes() == (tmp / "x2.wav").read_bytes()
+    # four slots of one day: four different keys, even when all four share a mood
     for day in range(1, 31):
-        combos = [pick_track(f"2026-11-{day:02d}-{hm}") for hm in ("0815", "1145", "1635", "1930")]
-        assert len(set(combos)) == 4, (day, combos)
-    assert pick_track("2026-11-16-0815") == pick_track("2026-11-16-0815")
-    assert pick_track("2026-11-16-0815") != pick_track("2026-11-17-0815") or pick_track("2026-11-18-0815") != pick_track("2026-11-16-0815")
+        keys = [pick_track(f"2026-11-{day:02d}-{hm}", "wonder")[1] for hm in ("0815", "1145", "1635", "1930")]
+        assert len(set(keys)) == 4, (day, keys)
+    assert pick_track("2026-11-16-0815", "wonder") == pick_track("2026-11-16-0815", "wonder")
 
 # ---------- scenes ----------
 from ig_reel.scenes import scene_html  # noqa: E402
