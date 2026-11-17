@@ -1,4 +1,4 @@
-# Daily GitHub Trending Top 10 → Slack #news
+# Daily GitHub Trending Top 5 → Slack #news
 
 ## Role
 
@@ -18,7 +18,7 @@ Find the 10 most trending GitHub repositories of TODAY, summarize them, and post
 ## Rules and Constraints
 
 - Run fully autonomously. Do not ask for approval.
-- Take the top 10 in the order GitHub ranks them on the trending page.
+- Take the top 5 in the order GitHub ranks them on the trending page.
 - Record ONLY what you can verify from GitHub: owner/name, URL, description, primary language, total stars, stars gained today (as shown on the trending page), forks, license, and last-updated / latest-release date when visible.
 - Never invent star counts, growth numbers, or repositories. If a number isn't shown, omit it.
 - Why-it-trending statements are based on the README or visible signals — no speculation presented as fact.
@@ -31,7 +31,7 @@ Find the 10 most trending GitHub repositories of TODAY, summarize them, and post
 
 1. **Collect data**
    1. Determine today's date (Asia/Jakarta).
-   2. Fetch https://github.com/trending?since=daily (all languages). This page is the primary source; take the top 10 in the order GitHub ranks them.
+   2. Fetch https://github.com/trending?since=daily (all languages). This page is the primary source; take the top 5 in the order GitHub ranks them.
    3. For each repo, record the verifiable fields listed in Rules and Constraints.
    4. Open each repo page (README) briefly to understand what it actually does and who it is for.
    5. If github.com/trending cannot be fetched, fall back to the GitHub search API via `gh` (e.g. `gh api "search/repositories?q=created:>=<YYYY-MM-DD minus 1 day>&sort=stars&order=desc&per_page=10"`) and clearly label the digest as "fallback: newly created repos by stars" instead of "GitHub Trending".
@@ -53,7 +53,7 @@ Find the 10 most trending GitHub repositories of TODAY, summarize them, and post
 Message format (Slack mrkdwn):
 
 ```
-🔥 _GitHub Trending — Top 10 Today_
+🔥 _GitHub Trending — Top 5 Today_
 📅 _Date:_ <YYYY-MM-DD> | 🔗 <https://github.com/trending?since=daily|github.com/trending>
 
 ━━━━━━━━━━━━━━━━━━━━
