@@ -80,12 +80,16 @@ def _words(text, start, cls="w"):
 def _beat_text(text, highlight, hl_at):
     if highlight and highlight in text:
         pre, post = text.split(highlight, 1)
+        punct = re.match(r"[.,!?;:…]*", post).group(0)  # glued to the last highlighted word, never orphaned
+        post = post[len(punct):]
         a, t = _words(pre, REVEAL_START)
         hl_at = max(hl_at, t + WORD_STAGGER)  # never sweep before the highlighted words appear
-        hl_words = "".join(f"<span>{_esc(w)}</span>" for w in re.findall(r"\S+\s*", highlight))
-        b = (f'<span class="hl" style="animation-delay:{t:.3f}s"><span class="hlbox" '
-             f'style="animation-delay:{hl_at:.3f}s"></span><span class="hltext" '
-             f'style="animation-delay:{hl_at:.3f}s">{hl_words}</span></span>')
+        words = highlight.split()
+        words[-1] += punct
+        # one box per word: each is an inline-block, so the phrase wraps between words like plain text
+        b = " ".join(f'<span class="hl" style="animation-delay:{t:.3f}s"><span class="hlbox" '
+                     f'style="animation-delay:{hl_at:.3f}s"></span><span class="hltext" '
+                     f'style="animation-delay:{hl_at:.3f}s">{_esc(w)}</span></span>' for w in words)
         c, _ = _words(post, t + WORD_STAGGER)
         gap = " " if post[:1].isspace() else ""  # _words drops leading whitespace
         return a + b + gap + c
@@ -140,8 +144,10 @@ def scene_html(kind, story, images, meta):
           animation: sweep .35s cubic-bezier(.2,.8,.2,1) both; z-index: 0; }}
 .hltext {{ position: relative; z-index: 1; animation: ink .2s linear both; }}"""
         hl_at = 2 * BEAT_S
+        hint = ('<div class="src safe" style="color:#FFD23F">lengkapnya di caption ↓</div>'
+                if kind == "why" and story.get("sample_prompt") else "")
         body = (f'<div class="stack"><div class="kicker safe" style="animation: rise .3s ease-out both">{meta.get("kickers", KICKERS)[kind]}</div>'
-                f'<p class="beat safe">{_beat_text(str(b.get("text") or ""), str(b.get("highlight") or ""), hl_at)}</p>{src}</div>')
+                f'<p class="beat safe">{_beat_text(str(b.get("text") or ""), str(b.get("highlight") or ""), hl_at)}</p>{hint}{src}</div>')
 
     elif kind == "payoff":
         b = beats.get("payoff", {})
@@ -162,9 +168,11 @@ def scene_html(kind, story, images, meta):
 .cta {{ margin: 0; font: 800 calc(66px * var(--fs))/1.2 'Inter'; color: #FFFFFF; }}
 .follow {{ font: calc(60px * var(--fs))/1.1 'Anton'; color: {YELLOW}; text-transform: uppercase; }}
 .r1, .r2, .r3 {{ animation: rise .35s ease-out both; }}
-.r1 {{ animation-delay: {BEAT_S:.3f}s; }} .r2 {{ animation-delay: {2 * BEAT_S:.3f}s; }} .r3 {{ animation-delay: {3 * BEAT_S:.3f}s; }}"""
-        body = (f'<div class="stack center"><p class="cta safe r1">{_esc(story.get("cta"))}</p>'
-                f'<div class="follow safe r2">{_esc(meta["follow_line"])}</div>'
+.r1 {{ animation-delay: {BEAT_S:.3f}s; }} .r2 {{ animation-delay: {2 * BEAT_S:.3f}s; }} .r3 {{ animation-delay: {3 * BEAT_S:.3f}s; }}
+.chip {{ font: 800 36px/1 'Inter'; color: #111; background: {YELLOW}; padding: 18px 30px; border-radius: 999px; letter-spacing: 2px; }}"""
+        chip = ('<div class="chip safe r2">📋 PROMPT LENGKAP DI CAPTION</div>' if story.get("sample_prompt") else "")
+        body = (f'<div class="stack center"><p class="cta safe r1">{_esc(story.get("cta"))}</p>{chip}'
+                f'<div class="follow safe r{3 if chip else 2}">{_esc(meta["follow_line"])}</div>'
                 f'<div class="handle safe r3">❤️ Like · 💬 Komen · 🔁 Share</div></div>')
     else:
         raise ValueError(f"unknown scene kind {kind!r}")

@@ -16,6 +16,7 @@ BEAT_MAX = 120
 CTA_MAX = 60
 OPENER_MAX = 120
 CAPTION_MAX = 2200
+SAMPLE_PROMPT_MAX = 400
 HASHTAGS_MIN, HASHTAGS_MAX = 5, 8
 ARTICLE_MAX = 6000
 
@@ -32,7 +33,8 @@ STORY_SCHEMA_HINT = """{"hook": "maks 7 kata, membuka rasa penasaran",
  "image_prompts": ["4 prompt bahasa Inggris: hook, context, twist, why/payoff — subjek sama, tanpa teks"],
  "caption": {"opener": "hook diparafrase, maks 120 karakter", "body": "2–3 baris pendek",
              "question": "1 pertanyaan untuk komentar", "save_line": "ajakan simpan/kirim"},
- "hashtags": ["5–8 hashtag: umum + niche + bahasa Indonesia"]}"""
+ "hashtags": ["5–8 hashtag: umum + niche + bahasa Indonesia"],
+ "sample_prompt": "khusus tips: prompt lengkap siap salin, Bahasa Indonesia, maks 400 karakter; berita: kosongkan"}"""
 
 
 _MONTHS_ID = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"]
@@ -211,14 +213,14 @@ def numbers_in(text, keep_raw=True):
     return out
 
 
-def _story_texts(data):
+def _story_texts(data, include_sample=False):
     texts = [str(data.get("hook") or "")]
     for b in data.get("beats") or []:
         if isinstance(b, dict):
             texts += [str(b.get("text") or ""), str(b.get("highlight") or "")]
     cap = data.get("caption") if isinstance(data.get("caption"), dict) else {}
     texts += [str(cap.get(k) or "") for k in ("opener", "body", "question", "save_line")]
-    texts += [str(data.get("cta") or "")] + hook_phrases(data)
+    texts += [str(data.get("cta") or "")] + ([str(data.get("sample_prompt") or "")] if include_sample else []) + hook_phrases(data)
     return texts
 
 
@@ -325,7 +327,15 @@ def check_story(data, article_text, extra_allowed=(), mode="news"):
         hard.append("must be written in Bahasa Indonesia, not English: " + ", ".join(dict.fromkeys(lang_errs)))
 
     if mode == "tip":
-        return hard + tip_rule_errors(_story_texts(data)), soft
+        sp = str(data.get("sample_prompt") or "").strip()
+        if not sp:
+            hard.append("missing 'sample_prompt' (the full ready-to-copy prompt for the caption)")
+        else:
+            if looks_english(sp):
+                hard.append("must be written in Bahasa Indonesia, not English: sample_prompt")
+            if len(sp) > SAMPLE_PROMPT_MAX:
+                soft.append(f"sample_prompt {len(sp)} chars (> {SAMPLE_PROMPT_MAX})")
+        return hard + tip_rule_errors(_story_texts(data, include_sample=True)), soft
     allowed = numbers_in(article_text) | {str(n) for n in extra_allowed}
     invented = sorted({n for t in _story_texts(data) for n in numbers_in(t, keep_raw=False)} - allowed)
     if invented:
@@ -347,7 +357,8 @@ def normalize_mood(raw):
     return mood if mood in MOODS else ""
 
 
-def apply_story_limits(data):
+def apply_story_limits(data, mode="news"):
+    """Truncate soft issues in place. mode="news" drops any sample_prompt (only tips carry one)."""
     data["hook"] = " ".join(str(data.get("hook") or "").split()[:HOOK_MAX_WORDS])
     hook_l = data["hook"].lower()
     data["hook_highlight"] = [p for p in hook_phrases(data)
@@ -359,6 +370,7 @@ def apply_story_limits(data):
             b["highlight"] = hl if hl and hl in text else ""
             b["text"] = text
     data["cta"] = _truncate(data.get("cta"), CTA_MAX)
+    data["sample_prompt"] = _truncate(data.get("sample_prompt"), SAMPLE_PROMPT_MAX) if mode == "tip" else ""
     data["mood"] = normalize_mood(data.get("mood"))
     if isinstance(data.get("caption"), dict):
         data["caption"]["opener"] = _truncate(data["caption"].get("opener"), OPENER_MAX)
@@ -372,7 +384,11 @@ def apply_story_limits(data):
 
 def build_caption(data, source, link):
     cap = data.get("caption") or {}
-    parts = [str(cap.get(k) or "").strip() for k in ("opener", "body", "question", "save_line")]
+    head = [str(cap.get("opener") or "").strip()]
+    sp = str(data.get("sample_prompt") or "").strip()
+    if sp:  # right after the opener, so it survives the CAPTION_MAX cut
+        head.append("📋 Salin prompt ini:\n" + sp)
+    parts = head + [str(cap.get(k) or "").strip() for k in ("body", "question", "save_line")]
     if link:  # a tip has no source article
         parts.append(f"Sumber: {source} ({link})")
     parts.append(" ".join(data.get("hashtags") or []))

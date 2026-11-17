@@ -12,7 +12,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from ig_reel.story import (  # noqa: E402
     apply_story_limits, build_caption, check_story, extract_article_text, feed_body, format_date_id, grounding_text,
-    interleave, numbers_in, order_by_source, MOODS, STORY_SCHEMA_HINT, normalize_mood,
+    interleave, numbers_in, order_by_source, MOODS, STORY_SCHEMA_HINT, normalize_mood, SAMPLE_PROMPT_MAX,
 )
 
 # ---------- story ----------
@@ -203,8 +203,33 @@ TIP = {"hook": "Jawaban AI kamu masih ngawur?",
        "image_prompts": ["a", "b", "c", "d"],
        "caption": {"opener": "Jawaban AI sering tidak sesuai dengan yang kamu mau?", "body": "Coba minta dia bertanya dulu.",
                    "question": "Kamu sudah pernah coba cara ini?", "save_line": "Simpan dulu biar tidak lupa."},
-       "hashtags": ["#TipsAI", "#Claude", "#ChatGPT", "#BelajarAI", "#Produktif"]}
+       "hashtags": ["#TipsAI", "#Claude", "#ChatGPT", "#BelajarAI", "#Produktif"],
+       "sample_prompt": "Hapus semua objek yang mengganggu di foto ini, lalu ganti latarnya dengan jalan kota malam yang basah oleh hujan, cahaya neon lembut."}
 assert check_story(TIP, "", mode="tip") == ([], []), check_story(TIP, "", mode="tip")
+# sample_prompt: required for tips, Indonesian, tip rules, soft length cap; dropped for news
+t = {k: v for k, v in copy.deepcopy(TIP).items() if k != "sample_prompt"}
+assert any("sample_prompt" in x for x in check_story(t, "", mode="tip")[0])
+for bad, rule in (("Remove every distracting object in this photo and replace the background with a rainy city street.", "Indonesia"),
+                  ("Hapus objek di foto ini, hasilnya setara jasa edit Rp 50.000 untuk kamu.", "prices")):
+    t = copy.deepcopy(TIP)
+    t["sample_prompt"] = bad
+    assert any(rule in x for x in check_story(t, "", mode="tip")[0]), (bad, check_story(t, "", mode="tip"))
+t = copy.deepcopy(TIP)
+t["sample_prompt"] = ("Hapus objek yang mengganggu di foto ini dan ganti latarnya dengan kota malam. " * 6)[:450]
+assert any("sample_prompt" in x for x in check_story(t, "", mode="tip")[1])
+apply_story_limits(t, mode="tip")
+assert 0 < len(t["sample_prompt"]) <= SAMPLE_PROMPT_MAX == 400
+cap = build_caption(TIP, "Claude", None)
+block = "📋 Salin prompt ini:\n" + TIP["sample_prompt"]
+assert block in cap and cap.index(TIP["caption"]["opener"]) < cap.index(block) < cap.index(TIP["caption"]["body"]), cap
+_long = copy.deepcopy(TIP)
+_long["caption"]["body"] = "Coba cara ini ya. " * 120
+assert block in build_caption(_long, "Claude", None)
+s = copy.deepcopy(STORY)
+s["sample_prompt"] = "Buat 99 variasi foto."
+assert check_story(s, ARTICLE, mode="news") == ([], []), check_story(s, ARTICLE, mode="news")
+apply_story_limits(s, mode="news")
+assert s["sample_prompt"] == "" and "Salin prompt" not in build_caption(s, "NASA", "https://x")
 for bad_text, rule in (("Paket ini cuma Rp 300.000 per bulan untuk kamu.", "prices"), ("Hasilnya jadi 50% lebih cepat dari yang biasa.", "percentages"),
                        ("Pakai GPT-4 supaya hasilnya lebih pas dengan kamu.", "versions"), ("Pakai Claude 3.5 supaya hasilnya lebih pas.", "versions"),
                        ("Pilih Sonnet supaya hasilnya lebih pas dengan kamu.", "versions"), ("Ikuti 25 langkah ini dengan teliti ya.", "above 10")):
@@ -517,6 +542,20 @@ assert "MASALAHNYA" in _tipctx and "Tips: Claude" in _tipctx and "YANG DITEMUKAN
 assert "TIPS AI" in scene_html("hook", TIP, IMGS, {**META, "hook_kicker": "TIPS AI"})
 assert "FAKTA SAINS" in scene_html("hook", TIP, IMGS, META)
 assert "Ikuti @tes buat tips" in cta and "kaliajatau" not in cta and "Kirim ke teman" in cta
+# highlight: one box per word so the phrase wraps with the sentence; trailing punctuation stays on the last word
+from ig_reel.scenes import _beat_text  # noqa: E402
+_bt = _beat_text("Jaringan parut ada di katup dan pembuluh darah utama.", "katup dan pembuluh darah utama", 1.0)
+assert _bt.count('class="hlbox"') == 5, _bt
+_last = _bt.split('class="hl"')[-1]
+assert "utama." in re.sub(r"<[^>]+>", "", _last) and not re.sub(r"<[^>]+>", "", _bt.split("utama")[1]).replace(".", "", 1).strip(), _bt
+assert "ada di katup dan pembuluh darah utama." in re.sub(r"<[^>]+>", "", _bt)
+# prompt pointers: only when the story carries a sample_prompt
+_tm = {**META, "kickers": TIP_KICKERS, "source_label": "Tips", "source": "Claude"}
+assert "PROMPT LENGKAP DI CAPTION" in scene_html("cta", TIP, IMGS, _tm)
+assert "lengkapnya di caption" in scene_html("why", TIP, IMGS, _tm)
+_np = {**TIP, "sample_prompt": ""}
+assert "PROMPT LENGKAP" not in scene_html("cta", _np, IMGS, _tm) and "lengkapnya di caption" not in scene_html("why", _np, IMGS, _tm)
+assert "PROMPT LENGKAP" not in cta
 evil = copy.deepcopy(STORY)
 evil["beats"][0]["text"] = "<script>alert(1)</script> teks"
 ctx = scene_html("context", evil, IMGS, META)
@@ -553,6 +592,7 @@ else:
             b["highlight"] = ""
     longest["cta"] = ("Kirim ke teman yang suka luar angkasa dan sains 🚀 " + "x" * 20)[:60]
     longest["mood"] = "mysterious"
+    longest["sample_prompt"] = TIP["sample_prompt"]  # the longest CTA card also carries the prompt chip
     t0 = time.time()
     out = work / "reel.mp4"
     res = render_reel(longest, imgs, {"source": "NASA", "date": "12 Nov 2026", "handle": "@tes", "follow_line": "Ikuti @tes buat tips",

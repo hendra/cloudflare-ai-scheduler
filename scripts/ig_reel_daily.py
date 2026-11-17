@@ -405,12 +405,28 @@ def fetch_article(cand):
     return text
 
 
+# Shared craft rules for both writing prompts: who the viewer is and what makes them stop scrolling.
+CRAFT_RULES = """Gaya penulisan (PENTING — penonton memutuskan dalam 1 detik):
+- Penonton: orang Indonesia yang sedang scroll di HP. Kalau hook tidak bikin penasaran, mereka langsung lewat.
+- Hook = buka pertanyaan atau celah rasa ingin tahu, atau sapa langsung pakai "kamu". Bukan label topik.
+  Buruk: "Jantung menua tak merata" → Bagus: "Bagian jantungmu ini menua duluan"
+  Buruk: "Tips edit foto dengan AI" → Bagus: "Objek ganggu di fotomu? Hapus pakai 1 kalimat"
+- Setiap beat dibuka dengan hal paling menarik. JANGAN membuka dengan nama jurnal, institut, universitas, atau peneliti
+  (sumber sudah tertulis di layar). Buruk: "Menurut studi di Aging Cell, peneliti JAX…" → Bagus: "Ternyata tiap bagian jantung menua dengan kecepatan beda."
+- Kata sehari-hari, kalimat pendek, tanpa istilah teknis. Kalau terpaksa pakai istilah, jelaskan dengan kata biasa.
+- payoff = satu kalimat yang bikin orang mau menyimpan Reel ini.
+- CTA menyebut tipe teman yang cocok (mis. "Kirim ke temanmu yang hobi edit foto"). Tips BUKAN "cerita": jangan tulis "share cerita ini" untuk tips."""
+
+
 def write_story(cand, article):
     """One AI call writes the story only from `article`; validated, one repair retry, then truncated."""
     prompt = f"""Kamu penulis naskah {ACCOUNT['persona']}.
 Tulis SATU cerita dari artikel di bawah, dengan alur: hook (rasa penasaran) → context (apa yang ditemukan) →
 twist (detail paling mengejutkan, sorot satu angka/frasa kunci) → why (kenapa penting buat kita) → payoff (satu kalimat
 yang layak disimpan). CTA = ajakan kirim/share yang spesifik untuk cerita ini (sebut tipe teman yang cocok).
+sample_prompt dikosongkan ("") untuk berita.
+
+{CRAFT_RULES}
 
 Aturan WAJIB:
 - SEMUA teks (hook, beats, cta, caption) dalam Bahasa Indonesia, walaupun artikelnya berbahasa Inggris.
@@ -456,11 +472,15 @@ def write_tip(theme, avoid):
     prompt = f"""Kamu penulis naskah {ACCOUNT['persona']}.
 Tulis SATU tips praktis untuk {theme['tool']} dengan tema: {topic}.
 Alur beats: context = masalah yang sering dialami orang → twist = triknya (sorot frasa kuncinya) →
-why = contoh prompt siap salin (pendek, dalam Bahasa Indonesia) → payoff = hasil yang didapat, satu kalimat layak disimpan.
+why = versi pendek dari contoh prompt (maks 120 karakter) → payoff = hasil yang didapat, satu kalimat layak disimpan.
+sample_prompt = prompt LENGKAP siap salin (1–3 kalimat, detail dan spesifik, maks 400 karakter, Bahasa Indonesia); ini ditaruh
+di caption dan video memberi tahu penonton bahwa prompt lengkapnya ada di caption.
 CTA = ajakan kirim/share yang spesifik untuk tips ini (sebut tipe teman yang cocok).
 
+{CRAFT_RULES}
+
 Aturan WAJIB:
-- SEMUA teks (hook, beats, cta, caption) dalam Bahasa Indonesia, TERMASUK contoh prompt di beat "why"
+- SEMUA teks (hook, beats, cta, caption, sample_prompt) dalam Bahasa Indonesia, TERMASUK contoh prompt di beat "why"
   (mis. "Sebelum menjawab, tanyakan dulu 3 hal yang perlu kamu tahu dari saya."). Jangan menulis prompt berbahasa Inggris.
 - Tips harus benar untuk {theme['tool']} secara umum dan bisa langsung dicoba siapa pun.
 - JANGAN sebut harga, paket berbayar, persentase, batas pemakaian, tanggal, nama versi model, atau lokasi menu/tombol.
@@ -488,7 +508,7 @@ Jawab HANYA JSON dengan skema:
         hard, soft = check_story(data, "", mode="tip")
         if hard:
             raise RuntimeError("; ".join(hard))
-    apply_story_limits(data)
+    apply_story_limits(data, mode="tip")
     return data
 
 
