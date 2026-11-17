@@ -12,7 +12,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from ig_reel.story import (  # noqa: E402
     apply_story_limits, build_caption, check_story, extract_article_text, feed_body, format_date_id, grounding_text,
-    interleave, numbers_in, order_by_source, MOODS, STORY_SCHEMA_HINT, normalize_mood,
+    interleave, numbers_in, order_by_source, MOODS, STORY_SCHEMA_HINT, normalize_mood, SAMPLE_PROMPT_MAX,
 )
 
 # ---------- story ----------
@@ -203,8 +203,32 @@ TIP = {"hook": "Jawaban AI kamu masih ngawur?",
        "image_prompts": ["a", "b", "c", "d"],
        "caption": {"opener": "Jawaban AI sering tidak sesuai dengan yang kamu mau?", "body": "Coba minta dia bertanya dulu.",
                    "question": "Kamu sudah pernah coba cara ini?", "save_line": "Simpan dulu biar tidak lupa."},
-       "hashtags": ["#TipsAI", "#Claude", "#ChatGPT", "#BelajarAI", "#Produktif"]}
+       "hashtags": ["#TipsAI", "#Claude", "#ChatGPT", "#BelajarAI", "#Produktif"],
+       "sample_prompt": "Hapus semua objek yang mengganggu di foto ini, lalu ganti latarnya dengan jalan kota malam yang basah oleh hujan, cahaya neon lembut."}
 assert check_story(TIP, "", mode="tip") == ([], []), check_story(TIP, "", mode="tip")
+# sample_prompt: required for tips, Indonesian, tip rules, soft length cap; dropped for news
+t = {k: v for k, v in copy.deepcopy(TIP).items() if k != "sample_prompt"}
+assert any("sample_prompt" in x for x in check_story(t, "", mode="tip")[0])
+for bad, rule in (("Remove every distracting object in this photo and replace the background with a rainy city street.", "Indonesia"),
+                  ("Hapus objek di foto ini, hasilnya setara jasa edit Rp 50.000 untuk kamu.", "prices")):
+    t = copy.deepcopy(TIP)
+    t["sample_prompt"] = bad
+    assert any(rule in x for x in check_story(t, "", mode="tip")[0]), (bad, check_story(t, "", mode="tip"))
+t = copy.deepcopy(TIP)
+t["sample_prompt"] = ("Hapus objek yang mengganggu di foto ini dan ganti latarnya dengan kota malam. " * 6)[:450]
+assert any("sample_prompt" in x for x in check_story(t, "", mode="tip")[1])
+apply_story_limits(t, mode="tip")
+assert 0 < len(t["sample_prompt"]) <= SAMPLE_PROMPT_MAX == 400
+cap = build_caption(TIP, "Claude", None)
+block = "📋 Salin prompt ini:\n" + TIP["sample_prompt"]
+assert block in cap and cap.index(TIP["caption"]["opener"]) < cap.index(block) < cap.index(TIP["caption"]["body"]), cap
+_long = copy.deepcopy(TIP)
+_long["caption"]["body"] = "Coba cara ini ya. " * 120
+assert block in build_caption(_long, "Claude", None)
+s = copy.deepcopy(STORY)
+s["sample_prompt"] = "Hapus objek di foto ini."
+apply_story_limits(s, mode="news")
+assert s["sample_prompt"] == "" and "Salin prompt" not in build_caption(s, "NASA", "https://x")
 for bad_text, rule in (("Paket ini cuma Rp 300.000 per bulan untuk kamu.", "prices"), ("Hasilnya jadi 50% lebih cepat dari yang biasa.", "percentages"),
                        ("Pakai GPT-4 supaya hasilnya lebih pas dengan kamu.", "versions"), ("Pakai Claude 3.5 supaya hasilnya lebih pas.", "versions"),
                        ("Pilih Sonnet supaya hasilnya lebih pas dengan kamu.", "versions"), ("Ikuti 25 langkah ini dengan teliti ya.", "above 10")):

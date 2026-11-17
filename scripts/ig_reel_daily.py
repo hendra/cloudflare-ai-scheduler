@@ -488,7 +488,7 @@ Jawab HANYA JSON dengan skema:
         hard, soft = check_story(data, "", mode="tip")
         if hard:
             raise RuntimeError("; ".join(hard))
-    apply_story_limits(data)
+    apply_story_limits(data, mode="tip")
     return data
 
 
