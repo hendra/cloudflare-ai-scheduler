@@ -11,8 +11,10 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from ig_reel.story import (  # noqa: E402
-    apply_story_limits, build_caption, check_story, extract_article_text, feed_body, format_date_id, grounding_text,
-    interleave, numbers_in, order_by_source, MOODS, STORY_SCHEMA_HINT, normalize_mood, SAMPLE_PROMPT_MAX,
+    apply_story_limits, build_caption, canonical_url, check_story, extract_article_text, extract_buffer_prompts,
+    extract_buffer_seen, feed_body, filter_unseen_news, format_date_id, grounding_text, interleave, is_similar_title,
+    normalize_title, numbers_in, order_by_source, tip_duplicate_error, MOODS, STORY_SCHEMA_HINT, normalize_mood,
+    SAMPLE_PROMPT_MAX,
 )
 
 # ---------- story ----------
@@ -243,6 +245,42 @@ assert any("Indonesia" in x for x in check_story(t, "", mode="tip")[0])
 # The news rule still applies outside tip mode: the same text fails there (its "3" is in no article).
 assert any("numbers not found" in x for x in check_story(TIP, "")[0])
 assert "http" not in build_caption(TIP, "Claude", None) and "Sumber" not in build_caption(TIP, "Claude", None)
+
+# ---------- deduplication ----------
+assert canonical_url("https://Example.com/news/?utm_source=ig&b=2&a=1#frag") == "https://example.com/news?a=1&b=2"
+assert canonical_url("https://Example.com/") == "https://example.com/"
+assert canonical_url("https://example.com/p/?fbclid=1&gclid=2&igshid=3&mc_cid=4&mc_eid=5&ref=x&source=y") == "https://example.com/p"
+assert canonical_url("ftp://example.com/a") == "" and canonical_url("not a url") == "" and canonical_url("") == ""
+
+assert normalize_title("Caf\u00e9 &amp; Webb\u2019s 1st Exo_Planet!") == "cafe webb s 1st exo planet"
+assert is_similar_title("Webb finds glass rain on exoplanet", "NASA Webb Finds Glass Rain on Exoplanet!") is True
+assert is_similar_title("Webb finds glass rain on exoplanet", "Deep sea octopus builds hydrothermal nest") is False
+assert is_similar_title("", "Webb finds glass rain") is False
+
+assert extract_buffer_seen([
+    "Bayangkan hujan kaca.\n\nIsi.\n\nSumber: NASA (https://nasa.gov/story/?utm_medium=ig)"
+]) == ({"https://nasa.gov/story"}, ["Bayangkan hujan kaca."])
+assert extract_buffer_seen([
+    "Trik AI cepat.\n\n📋 Salin prompt ini:\nBuat poster film retro.\n\n#TipsAI",
+    "",
+]) == (set(), ["Trik AI cepat."])
+assert extract_buffer_prompts([
+    "Trik AI cepat.\n\n📋 Salin prompt ini:\nBuat poster film retro.\n\n#TipsAI",
+    "Biasa saja.",
+]) == ["Buat poster film retro."]
+
+_cands = [
+    {"title": "NASA Webb Finds Glass Rain on Exoplanet!", "link": "https://nasa.gov/story/?utm_source=rss"},
+    {"title": "Webb finds glass rain on exoplanet", "link": "https://other.example.com/glass"},
+    {"title": "New battery chemistry doubles range", "link": "https://mit.edu/battery"},
+]
+assert [c["link"] for c in filter_unseen_news(
+    _cands, {"https://nasa.gov/story"}, ["NASA Webb Finds Glass Rain on Exoplanet!"]
+)] == ["https://mit.edu/battery"]
+
+assert tip_duplicate_error(TIP, ["Jawaban AI kamu masih ngawur?"], []) is not None
+assert tip_duplicate_error(TIP, [], [TIP["sample_prompt"]]) is not None
+assert tip_duplicate_error(TIP, ["Cara edit foto malam"], ["Buat gambar kucing di pantai."]) is None
 
 # ---------- accounts ----------
 import datetime as _d  # noqa: E402

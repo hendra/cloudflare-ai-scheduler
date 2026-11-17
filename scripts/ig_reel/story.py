@@ -8,6 +8,8 @@ import email.utils as _eu
 from decimal import Decimal, InvalidOperation
 import html as _html
 import re
+import unicodedata as _ud
+import urllib.parse as _up
 
 ROLES = ("context", "twist", "why", "payoff")
 MOODS = ("curious", "wonder", "energetic", "mysterious", "uplifting")  # soundtrack mood, see music.py
@@ -393,3 +395,122 @@ def build_caption(data, source, link):
         parts.append(f"Sumber: {source} ({link})")
     parts.append(" ".join(data.get("hashtags") or []))
     return "\n\n".join(p for p in parts if p)[:CAPTION_MAX]
+
+
+_TRACKING_PARAMS = {"ref", "source", "fbclid", "gclid", "igshid", "mc_cid", "mc_eid"}
+_DEDUPE_STOPWORDS = {"the", "and", "dan", "yang"}
+
+
+def canonical_url(raw_url: str) -> str:
+    if not isinstance(raw_url, str):
+        return ""
+    trimmed = raw_url.strip()
+    if not trimmed:
+        return ""
+    try:
+        u = _up.urlsplit(trimmed)
+        port = u.port
+    except ValueError:
+        return ""
+    scheme = u.scheme.lower()
+    if scheme not in ("http", "https"):
+        return ""
+    hostname = (u.hostname or "").lower()
+    if not hostname:
+        return ""
+    host = f"[{hostname}]" if ":" in hostname else hostname
+    if port is not None and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)):
+        netloc = f"{host}:{port}"
+    else:
+        netloc = host
+    path = u.path.rstrip("/") or "/"
+    kept = [
+        (k, v) for k, v in _up.parse_qsl(u.query, keep_blank_values=True)
+        if not k.lower().startswith("utm_") and k.lower() not in _TRACKING_PARAMS
+    ]
+    kept.sort(key=lambda kv: (kv[0], kv[1]))
+    query = _up.urlencode(kept) if kept else ""
+    return _up.urlunsplit((scheme, netloc, path, query, ""))
+
+
+def normalize_title(text: str) -> str:
+    s = _ud.normalize("NFKD", _html.unescape(str(text or "")))
+    s = "".join(ch for ch in s if _ud.category(ch) != "Mn").lower()
+    return " ".join(re.sub(r"(?:[^\w]|_)+", " ", s).split())
+
+
+def _meaningful_tokens(normalized: str) -> set[str]:
+    return {w for w in normalized.split() if len(w) >= 3 and w not in _DEDUPE_STOPWORDS}
+
+
+def is_similar_title(a: str, b: str) -> bool:
+    na = normalize_title(a)
+    nb = normalize_title(b)
+    if not na or not nb:
+        return False
+    if na == nb:
+        return True
+    ta = _meaningful_tokens(na)
+    tb = _meaningful_tokens(nb)
+    if not ta or not tb:
+        return False
+    shared = len(ta & tb)
+    jaccard = shared / len(ta | tb)
+    if shared >= 3 and jaccard >= 0.65:
+        return True
+    if shared >= 2 and (len(ta) <= 2 or len(tb) <= 2) and jaccard >= 0.75:
+        return True
+    return False
+
+
+def extract_buffer_seen(captions: list[str]) -> tuple[set[str], list[str]]:
+    seen_urls: set[str] = set()
+    seen_hooks: list[str] = []
+    for cap in captions or []:
+        text = str(cap or "").strip()
+        if not text:
+            continue
+        first_line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
+        if first_line:
+            seen_hooks.append(first_line)
+        for m in re.finditer(r"Sumber:\s*[^\n]*\((https?://[^)\s]+)\)", text, re.I):
+            u = canonical_url(m.group(1))
+            if u:
+                seen_urls.add(u)
+    return seen_urls, seen_hooks
+
+
+def extract_buffer_prompts(captions: list[str]) -> list[str]:
+    prompts: list[str] = []
+    marker = "📋 Salin prompt ini:\n"
+    for cap in captions or []:
+        text = str(cap or "")
+        idx = text.find(marker)
+        if idx != -1:
+            para = text[idx + len(marker):].split("\n\n", 1)[0].strip()
+            if para:
+                prompts.append(para)
+    return prompts
+
+
+def filter_unseen_news(candidates: list[dict], seen_urls: set[str], seen_titles: list[str]) -> list[dict]:
+    out = []
+    for c in candidates or []:
+        cu = canonical_url(str(c.get("link") or ""))
+        if cu and cu in seen_urls:
+            continue
+        title = str(c.get("title") or "")
+        if title and any(is_similar_title(title, t) for t in seen_titles):
+            continue
+        out.append(c)
+    return out
+
+
+def tip_duplicate_error(data: dict, seen_hooks: list[str], seen_prompts: list[str]) -> str | None:
+    hook = str(data.get("hook") or "").strip()
+    if hook and any(is_similar_title(hook, h) for h in seen_hooks):
+        return f"duplicate tip hook (matches recent post): {hook[:80]}"
+    sp = str(data.get("sample_prompt") or "").strip()
+    if sp and any(is_similar_title(sp, p) for p in seen_prompts):
+        return f"duplicate sample_prompt (matches recent post): {sp[:80]}"
+    return None
