@@ -84,7 +84,7 @@ STYLE_SUFFIX = ("cinematic film still, dramatic volumetric lighting, teal-and-am
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from ig_reel.accounts import account_target_errors, load_account, music_style, slot_name, theme_plan, theme_ring, wants_news  # noqa: E402
-from ig_reel.reel import render_reel  # noqa: E402
+from ig_reel.reel import music_line, render_reel  # noqa: E402
 from ig_reel.scenes import TIP_KICKERS  # noqa: E402
 from ig_reel.story import (  # noqa: E402
     STORY_SCHEMA_HINT, TIP_MAX_NUMBER, age_days, apply_story_limits, build_caption, check_story, extract_article_text, feed_body,
@@ -763,7 +763,7 @@ def main():
     if MODE == "tip" and not themes:
         fail(f"account {ACCOUNT['id']} has no themes, so it has no tip mode")
     meta = {"handle": ACCOUNT["handle"], "follow_line": ACCOUNT["follow_line"], "hook_kicker": ACCOUNT["hook_kicker"],
-            "music_style": music_style(ACCOUNT)}
+            "account": ACCOUNT["id"], "music_style": music_style(ACCOUNT)}
 
     # news: one story written only from a feed article; tip: a theme tip when the slot or the feeds have no news
     story = cand = None
@@ -811,7 +811,7 @@ def main():
     res = render_reel(story, images, meta,
                       f"{TODAY}-{NOW:%H%M}", reel)
     log(f"reel: built {reel} ({reel.stat().st_size / 1e6:.1f} MB, {res['seconds']}s, "
-        f"music {res['music']['style']}/{res['music']['mood']} {res['music']['key']} {'-'.join(res['music']['progression'])})")
+        f"music {music_line(res['music'])})")
     full_caption = build_caption(story, source, link)
     log(f"images via: {image_providers}")
 
@@ -820,7 +820,7 @@ def main():
         log(f"caption:\n{full_caption}")
         log("REPORT " + json.dumps({"status": "dry-run", "account": ACCOUNT["id"], "mode": mode, "topic": story["hook"], "path": str(reel),
                                     "posted": False, "images": image_providers,
-                                    "music_style": res["music"]["style"], "music_mood": res["music"]["mood"],
+                                    "music": music_line(res["music"]), "music_mood": res["music"]["mood"],
                                     "sources": sources}))
         return
 
@@ -838,7 +838,7 @@ def main():
     post_id, link = buffer_create_and_confirm(url, full_caption)
     log("REPORT " + json.dumps({"status": "sent", "account": ACCOUNT["id"], "mode": mode, "topic": story["hook"], "post_id": post_id,
                                 "reel": link, "posted": True, "images": image_providers,
-                                "music_style": res["music"]["style"], "music_mood": res["music"]["mood"],
+                                "music": music_line(res["music"]), "music_mood": res["music"]["mood"],
                                 "sources": sources}))
 
 

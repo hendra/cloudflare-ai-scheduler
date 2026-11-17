@@ -64,13 +64,16 @@ def validate_account(cfg):
     if music is not None:
         if not isinstance(music, dict):
             errs.append('music: must be an object like {"style": "' + "|".join(MUSIC_STYLES) + '"}')
+        elif set(music) - {"style"}:
+            errs.append("music: unknown key(s) " + ", ".join(sorted(set(music) - {"style"})) + '; only "style"')
         elif "style" in music and music["style"] not in MUSIC_STYLES:
             errs.append("music.style: must be one of " + ", ".join(MUSIC_STYLES))
     return errs
 
 
 def music_style(cfg):
-    """The account's soundtrack style; accounts without a music block get the default."""
+    """The account's synth style, used when its music_library folder has no track; accounts
+    without a music block get the default."""
     return (cfg.get("music") or {}).get("style", DEFAULT_MUSIC_STYLE)
 
 

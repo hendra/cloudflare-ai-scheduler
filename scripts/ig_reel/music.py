@@ -1,4 +1,5 @@
-"""Original, royalty-free soundtrack synthesised on the Reel's beat grid.
+"""Fallback soundtrack synthesised on the Reel's beat grid — used only when the account has no
+track in music_library/ (see library.py). Level matches the old track (about −20.5 dBFS RMS).
 
 Two inputs shape a track besides the seed:
 - mood (from the story, see story.MOODS) picks the scale, the chord progressions, the rhythm
@@ -18,14 +19,12 @@ above 150 Hz so they survive phone speakers. The key steps with the slot (mornin
 four daily Reels always sit in four different keys; the same seed, style and mood render
 byte-identical audio. A missing or unknown mood is derived from the seed — never an error.
 """
-import hashlib
-import re
-
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import butter, sosfilt
 
 from .accounts import DEFAULT_MUSIC_STYLE, MUSIC_STYLES
+from .library import day_slot, seed_hash
 from .story import MOODS
 from .timeline import BPM, scene_starts
 
@@ -55,10 +54,10 @@ STYLES = {
 }
 MOTIFS = {"cinematic": (0, 4, 2), "electronic": (0, 2, 4, 7)}  # scale degrees on consecutive half-beats
 TAIL_S = 1.0
+SYNTH_RMS = 10 ** (-20.5 / 20)
 
 
-def _hash(text):
-    return int(hashlib.sha256(str(text).encode()).hexdigest()[:12], 16)
+_hash = seed_hash
 
 
 def pick_track(seed, mood=None):
@@ -68,11 +67,9 @@ def pick_track(seed, mood=None):
     if mood not in MOODS:
         mood = MOODS[_hash(seed) % len(MOODS)]
     keys = sorted(KEY_ROOTS)
-    m = re.match(r"^(\d{4}-\d{2}-\d{2})-(\d{2})\d{2}$", seed)
-    if m:
-        hour = int(m.group(2))
-        slot = 0 if hour < 10 else 1 if hour < 14 else 2 if hour < 18 else 3
-        key = keys[(_hash(m.group(1)) + slot) % len(keys)]
+    ds = day_slot(seed)
+    if ds:
+        key = keys[(_hash(ds[0]) + ds[1]) % len(keys)]
     else:
         key = keys[_hash("key|" + seed) % len(keys)]
     progs = MOOD_SPECS[mood][2]
@@ -264,7 +261,9 @@ def compose(seed, beats, out_wav, style=DEFAULT_MUSIC_STYLE, mood=None, bpm=BPM,
     mix = np.tanh(mix * 1.6)  # gentle saturation: evens out the level between styles and moods
     fade = int(1.5 * sr)
     mix[-fade:] *= np.linspace(1, 0, fade)[:, None]
-    mix *= 0.891 / max(np.abs(mix).max(), 1e-9)  # peak −1 dBFS
+    # loudness of the old single-style track (about −20.5 dBFS RMS), peaks never above −1 dBFS
+    mix *= SYNTH_RMS / max(np.sqrt((mix ** 2).mean()), 1e-9)
+    mix *= min(1.0, 0.891 / max(np.abs(mix).max(), 1e-9))
     wavfile.write(out_wav, sr, (mix * 32767).astype(np.int16))
     return {"style": style, "mood": mood, "key": f"{key_name} {scale_name}",
             "progression": [str(d + 1) for d in prog], "seconds": round(n / sr, 3)}
@@ -277,4 +276,6 @@ if __name__ == "__main__":  # listen to one track: python3 -m ig_reel.music <sty
 
     if len(sys.argv) != 5:
         sys.exit("usage: python3 -m ig_reel.music <style> <mood> <seed> <out.wav>")
+    if sys.argv[2] not in MOODS:
+        sys.exit(f"unknown mood {sys.argv[2]!r}; known: {', '.join(MOODS)}")
     print(compose(sys.argv[3], TOTAL_BEATS, sys.argv[4], style=sys.argv[1], mood=sys.argv[2]))

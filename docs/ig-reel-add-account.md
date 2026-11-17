@@ -24,9 +24,11 @@ Copy `scripts/ig_reel/accounts/ai-labs.json` to `scripts/ig_reel/accounts/<id>.j
 | `dedupe_posts` | How many recent Buffer posts the AI is told not to repeat (28 = one week at 4/day). |
 | `buffer_channel_id`, `buffer_org_id` | The account's own Buffer IDs (not secret). A post always goes to this channel; Buffer rejects a token that does not own it. |
 | `cloudinary_cloud_name` | The account's Cloudinary cloud name. A real run refuses to upload when the `CLOUDINARY_CLOUD_NAME` secret differs. `null` = not pinned (only `kaliajatau`, which uses the repo-level secrets). |
-| `music` | Optional. `{"style": "cinematic"}` (warm pad, soft pluck, low drum — the default when omitted) or `{"style": "electronic"}` (pumping synth pad, bright echoing pluck, blips and glitch stutters). The style gives the account its voices and its opening motif; each post's mood then shapes the notes. A new style is added in code: `MUSIC_STYLES` in `scripts/ig_reel/accounts.py`, `STYLES` and `MOTIFS` in `scripts/ig_reel/music.py`. Listen first: `cd scripts && python3 -m ig_reel.music <style> <mood> <seed> <out.wav>`. |
+| `music` | Optional; only used when the account has no tracks in `scripts/ig_reel/music_library/<id>/` (see below). `{"style": "cinematic"}` (warm pad, soft pluck, low drum — the default when omitted) or `{"style": "electronic"}` (pumping synth pad, bright echoing pluck, blips and glitch stutters). The style gives the account its voices and its opening motif; each post's mood then shapes the notes. A new style is added in code: `MUSIC_STYLES` in `scripts/ig_reel/accounts.py`, `STYLES` and `MOTIFS` in `scripts/ig_reel/music.py`. Listen first: `cd scripts && python3 -m ig_reel.music <style> <mood> <seed> <out.wav>`. |
 
 `python3 scripts/ig_reel/selfcheck.py` validates every account file.
+
+**Music tracks.** Put the account's soundtracks in `scripts/ig_reel/music_library/<id>/`, named `<mood>-<n>.mp3`. The mood is one of `curious`, `wonder`, `energetic`, `mysterious` or `uplifting`, for example `wonder-1.mp3`. Generate them with the prompts in `docs/ig-reel-suno-prompts.md` and cut each to 30 s before committing: `ffmpeg -i in.mp3 -t 30 -map_metadata -1 -b:a 192k out.mp3`. The Reel trims, fades and sets the loudness itself. Without any tracks, the account gets the synth in its `music` style.
 
 ## 2. GitHub environment `ig-<id>`
 

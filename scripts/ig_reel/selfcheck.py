@@ -295,6 +295,7 @@ assert account_target_errors(PINNED, "mycloud") == [] and len(account_target_err
 assert len(account_target_errors(PINNED, "")) == 1
 assert account_target_errors(LABS, LABS["cloudinary_cloud_name"]) == [] and len(account_target_errors(LABS, "opqimovw")) == 1
 assert validate_account({**KALI, "cloudinary_cloud_name": ""})
+assert any("unknown key" in e for e in validate_account({**KALI, "music": {"stlye": "electronic"}}))
 # music style: named in the account file, default cinematic, malformed blocks are readable errors
 assert MUSIC_STYLES == ("cinematic", "electronic")
 assert music_style(LABS) == "electronic" and music_style(KALI) == "cinematic"
@@ -393,6 +394,8 @@ if HAVE_NUMPY:
         freqs = np.fft.rfftfreq(len(x), 1 / 44100)
         assert spec[(freqs >= 150) & (freqs <= 4000)].sum() / spec.sum() >= 0.6, hm
     assert max(rms_db.values()) - min(rms_db.values()) <= 4.0, rms_db
+    # never louder than the old track (−20.5 dBFS RMS)
+    assert max(rms_db.values()) <= -20.0, rms_db
     try:
         compose(SEED, 46, tmp / "bad.wav", style="jazz")
         raise AssertionError("unknown style must raise")
@@ -401,8 +404,72 @@ if HAVE_NUMPY:
     # the render hands the account's style and the story's mood to the synth
     import inspect
     from ig_reel import reel as _reel
-    _src = inspect.getsource(_reel.render_reel)
-    assert 'meta_base.get("music_style"' in _src and 'story.get("mood")' in _src
+    _src = inspect.getsource(_reel.soundtrack)
+    assert 'meta_base.get("music_style"' in _src and 'meta_base.get("account")' in _src
+    assert 'story.get("mood")' in inspect.getsource(_reel.render_reel)
+    # no library track → synth, tagged as such
+    syn = _reel.soundtrack({"account": "no-such-account", "music_style": "electronic"}, "wonder", SEED, tmp / "s.wav")
+    assert syn["source"] == "synth" and syn["style"] == "electronic", syn
+    assert _reel.music_line(syn).startswith("synth electronic/wonder")
+
+# ---------- music library (pure; render needs ffmpeg) ----------
+from ig_reel.library import LIBRARY, account_tracks, day_slot, pick_library_track  # noqa: E402
+import shutil  # noqa: E402
+import tempfile as _tf  # noqa: E402
+
+_lib = pathlib.Path(_tf.mkdtemp())
+(_lib / "acc").mkdir()
+for name in ("wonder-1.mp3", "wonder-2.mp3", "curious-1.mp3", "sedih-1.mp3", "notes.txt", "wonder.mp3"):
+    (_lib / "acc" / name).write_bytes(b"")
+assert {m: [p.name for p in ps] for m, ps in account_tracks("acc", _lib).items()} == \
+    {"curious": ["curious-1.mp3"], "wonder": ["wonder-1.mp3", "wonder-2.mp3"]}
+assert pick_library_track("missing", "wonder", "2026-11-17-0815", _lib) is None
+assert pick_library_track("", "wonder", "2026-11-17-0815", _lib) is None
+assert pick_library_track("acc", "curious", "2026-11-17-0815", _lib).name == "curious-1.mp3"
+# same inputs → same track; mood without tracks (or unknown) → any of the account's tracks
+assert pick_library_track("acc", "wonder", "x", _lib) == pick_library_track("acc", "wonder", "x", _lib)
+for m in ("energetic", "", None, "sedih"):
+    assert pick_library_track("acc", m, "2026-11-17-0815", _lib).name in ("curious-1.mp3", "wonder-1.mp3", "wonder-2.mp3")
+# one day's slots step through the pool: consecutive slots differ when there are ≥2 tracks
+for day in range(1, 31):
+    picks = [pick_library_track("acc", "wonder", f"2026-11-{day:02d}-{hm}", _lib).name for hm in ("0815", "1145", "1635", "1930")]
+    assert all(a != b for a, b in zip(picks, picks[1:])), (day, picks)
+assert day_slot("2026-11-17-1930") == ("2026-11-17", 3) and day_slot("manual") is None
+shutil.rmtree(_lib)
+# the committed library: every file is named <mood>-<n>.mp3 and both live accounts have tracks
+for acc in ("kaliajatau", "ai-labs"):
+    folder = LIBRARY / acc
+    assert folder.is_dir() and account_tracks(acc), acc
+    bad = [p.name for p in folder.iterdir() if not any(p in ps for ps in account_tracks(acc).values())]
+    assert not bad, (acc, bad)
+
+if shutil.which("ffmpeg") and shutil.which("ffprobe") and HAVE_NUMPY:
+    from ig_reel.library import render_library_track
+    _t = pathlib.Path(_tf.mkdtemp())
+    for acc in ("kaliajatau", "ai-labs"):
+        for ps in account_tracks(acc).values():
+            for track in ps:
+                out = _t / "lib.wav"
+                info = render_library_track(track, out, 28.6)
+                _sr, d = wavfile.read(out)
+                assert _sr == 44100 and d.ndim == 2 and abs(len(d) / _sr - 28.6) < 0.02, (track, len(d) / _sr)
+                x = d.astype(np.float64) / 32767
+                rms = 20 * np.log10(np.sqrt((x ** 2).mean()))
+                assert -24 <= rms <= -18 and np.abs(x).max() <= 0.9, (track, rms)  # about the old level, never louder
+                assert np.abs(x[-int(0.05 * _sr):]).max() < 0.02, track  # faded out
+                assert info["source"] == "library" and info["track"] == f"{acc}/{track.name}", info
+    # a broken library file never blocks the Reel: the synth takes over
+    _bad = pathlib.Path(_tf.mkdtemp())
+    (_bad / "broken").mkdir()
+    (_bad / "broken" / "wonder-1.mp3").write_bytes(b"not audio")
+    _reel.pick_library_track = lambda a, m, s: pick_library_track(a, m, s, _bad)
+    fb = _reel.soundtrack({"account": "broken", "music_style": "cinematic"}, "wonder", SEED, _t / "fb.wav")
+    _reel.pick_library_track = pick_library_track
+    assert fb["source"] == "synth", fb
+    lib = _reel.soundtrack({"account": "ai-labs"}, "energetic", SEED, _t / "lib2.wav")
+    assert lib["source"] == "library" and _reel.music_line(lib).startswith("library ai-labs/"), lib
+else:
+    print("selfcheck: ffmpeg or numpy missing — library render skipped")
 
 # ---------- scenes ----------
 from ig_reel.scenes import scene_html  # noqa: E402
