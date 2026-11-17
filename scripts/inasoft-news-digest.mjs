@@ -19,6 +19,7 @@
 import { writeFileSync } from "node:fs";
 import { callModel, providerChain, PROVIDERS } from "./ai-providers.mjs";
 import { safeMrkdwn, slackLink, postSlack, postSlackParts } from "./slack.mjs";
+import { canonicalUrl, buildPublishedIndex, filterUnseenCandidates, fetchPublished, recordPublished } from "./published.mjs";
 
 const DRY_RUN = String(process.env.DRY_RUN || "false") === "true";
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
@@ -128,6 +129,15 @@ async function main() {
   console.log(`ai: provider chain ${chain.join(" -> ")} (usable: ${usable.join(", ") || "none"})`);
   if (usable.length === 0) await fail("no AI provider has credentials");
 
+  let publishedRows;
+  try {
+    publishedRows = await fetchPublished({ pipeline: "inasoft-news", days: 60, limit: 500, dryRun: DRY_RUN });
+  } catch (e) {
+    await fail(`published ledger fetch failed: ${String(e?.message || e).slice(0, 220)}`);
+    return;
+  }
+  const publishedIndex = buildPublishedIndex(publishedRows);
+
   // 1) collect signals
   const all = [];
   for (const [name, url] of SOURCES) {
@@ -137,8 +147,18 @@ async function main() {
   console.log(`signals collected: ${all.length} items from ${SOURCES.length} sources`);
   if (all.length < 4) await fail("too few items from sources; refusing to fabricate");
 
+  const unseen = filterUnseenCandidates(all, publishedIndex, {
+    getUrl: (s) => s.url,
+    getTitle: (s) => s.title,
+  });
+  console.log(`unseen signals after dedupe: ${unseen.length} (filtered ${all.length - unseen.length})`);
+  if (unseen.length < 4) {
+    console.log(`skipping: only ${unseen.length} unseen items (need 4)`);
+    process.exit(0);
+  }
+
   // 2) ask AI to SELECT with grounded refs — composition is deterministic afterwards
-  const lines = all.map((s, i) => `${i + 1}. [${s.source}] ${s.title} | ${s.url} | ${s.date || "(date unknown)"} | ${s.summary.slice(0, 140)}`).join("\n");
+  const lines = unseen.map((s, i) => `${i + 1}. [${s.source}] ${s.title} | ${s.url} | ${s.date || "(date unknown)"} | ${s.summary.slice(0, 140)}`).join("\n");
   const prompt = `You are a technology news editor for INASOFT. From the candidate stories below (numbered 1..N), select exactly ONE story per category. Pick candidates of different categories without repeating a ref twice. Facts and figures must come ONLY from the chosen candidate's fields — do not add external knowledge, numbers, dates, or URLs.
 
 Output ONLY this JSON (no prose, no fences):
@@ -168,7 +188,7 @@ ${lines}`;
   const byCat = new Map(CATEGORIES.map(c => [c.key, null]));
   for (const s of stories) {
     const idx = parseInt(s.ref, 10) - 1;
-    const cand = all[idx];
+    const cand = unseen[idx];
     if (cand === undefined) await fail(`AI returned invalid ref ${s.ref}`);
     if (seenRefs.has(idx)) await fail(`AI repeated ref ${s.ref} across categories`);
     seenRefs.add(idx);
@@ -222,6 +242,17 @@ ${lines}`;
     return;
   }
   console.log(`posted (${r.posted} part(s)) to #news`);
+  const rec = await recordPublished({
+    pipeline: "inasoft-news",
+    dryRun: DRY_RUN,
+    items: ordered.map((s) => ({
+      item_key: canonicalUrl(s.url) || s.url,
+      title: s.headline,
+      url: s.url,
+      meta: { category: s.category, source: s.source },
+    })),
+  });
+  console.log(`published ledger: recorded ${rec.inserted} item(s)`);
 }
 
 main().catch(async (e) => { await fail(`unexpected error: ${String(e?.message || e).slice(0, 300)}`); });

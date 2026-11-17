@@ -7,6 +7,7 @@ const {
   normalizeTitle,
   isSimilarTitle,
   buildPublishedIndex,
+  filterUnseenCandidates,
   fetchPublished,
   recordPublished,
 } = await import("./published.mjs");
@@ -64,6 +65,77 @@ assert.equal(idx.urls.has("https://ex.com/b"), true);
 assert.equal(idx.titles.includes("Alpha Post"), true);
 assert.equal(idx.metaList.length, 1);
 assert.equal(idx.metaList[0].keyword, "alpha");
+
+// 3b. filterUnseenCandidates (news URL/title dedupe + minimum-4 check; job URL/dedupeKey collision)
+assert.equal(typeof filterUnseenCandidates, "function");
+
+const newsIdx = buildPublishedIndex([
+  {
+    item_key: "https://tech.example.com/gpt-5",
+    title: "Introducing OpenAI GPT-5 for Developers",
+    url: "https://tech.example.com/gpt-5",
+  },
+]);
+const newsCandidates = [
+  { url: "https://tech.example.com/gpt-5/?utm_source=rss", title: "Completely different headline" }, // URL match
+  { url: "https://other.example.com/story", title: "OpenAI introduces GPT-5 for developers!" }, // similar title to index
+  { url: "https://a.example.com/rails-8?ref=hn", title: "Ruby on Rails 8.1 Released" }, // keep
+  { url: "https://a.example.com/rails-8/", title: "Ruby on Rails 8.1 Released" }, // within-run canonical URL dup
+  { url: "https://b.example.com/rails-8-mirror", title: "Ruby on Rails 8.1 released today!" }, // within-run similar title dup
+  { url: "https://c.example.com/postgres", title: "PostgreSQL 18 Vacuum Improvements" }, // keep
+  { url: "https://d.example.com/deno", title: "Deno 3 Runtime Benchmarks" }, // keep
+];
+const unseenNews = filterUnseenCandidates(newsCandidates, newsIdx, {
+  getUrl: (s) => s.url,
+  getTitle: (s) => s.title,
+});
+assert.equal(unseenNews.length, 3);
+assert.deepEqual(
+  unseenNews.map((s) => s.url),
+  [
+    "https://a.example.com/rails-8?ref=hn",
+    "https://c.example.com/postgres",
+    "https://d.example.com/deno",
+  ],
+);
+assert.equal(unseenNews.length < 4, true); // triggers digest minimum-4 clean skip
+
+const jobDedupeKey = (j) =>
+  (j.company || "").toLowerCase().replace(/[^a-z0-9]+/g, "") +
+  "|" +
+  (j.title || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+const jobIdx = buildPublishedIndex([
+  {
+    item_key: "https://jobs.example.com/acme-rails",
+    title: "Acme — Senior Rails Engineer",
+    url: "https://jobs.example.com/acme-rails",
+    meta_json: JSON.stringify({ dedupeKey: "acme|seniorrailsengineer" }),
+  },
+  {
+    item_key: "job:beta|staffrails",
+    title: "Beta — Staff Rails",
+    url: "",
+    meta_json: JSON.stringify({ dedupeKey: "beta|staffrails" }),
+  },
+]);
+const jobSeenKeys = new Set([
+  ...jobIdx.keys,
+  ...jobIdx.metaList.map((m) => m.dedupeKey).filter(Boolean),
+]);
+const jobCandidates = [
+  { company: "Acme Corp", title: "Rails Dev", url: "https://jobs.example.com/acme-rails/?utm_source=remotive" }, // URL match
+  { company: "Acme", title: "Senior Rails Engineer", url: "https://remoteok.com/l/123" }, // dedupeKey match via meta
+  { company: "Beta", title: "Staff Rails", url: "https://hn.example.com/item?id=99" }, // dedupeKey match from URL-less record
+  { company: "Gamma", title: "Senior Rails Engineer", url: "https://gamma.example.com/jobs/rails" }, // same title, different company -> keep
+];
+const unseenJobs = filterUnseenCandidates(jobCandidates, jobIdx, {
+  getUrl: (j) => j.url,
+  getKey: jobDedupeKey,
+  extraKeys: jobSeenKeys,
+});
+assert.equal(unseenJobs.length, 1);
+assert.equal(unseenJobs[0].company, "Gamma");
 
 // 4. fetchPublished env & dryRun semantics
 const savedUrl = process.env.SCHEDULER_URL;

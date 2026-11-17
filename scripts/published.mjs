@@ -154,6 +154,42 @@ export function buildPublishedIndex(rows) {
   return { keys, urls, titles, metaList };
 }
 
+export function filterUnseenCandidates(
+  items,
+  index,
+  { getUrl, getTitle, getKey, extraKeys } = {},
+) {
+  const seenUrls = new Set(index?.urls || []);
+  const seenKeys = new Set(index?.keys || []);
+  if (extraKeys) {
+    for (const k of extraKeys) {
+      if (k) seenKeys.add(String(k));
+    }
+  }
+  const seenTitles = [...(index?.titles || [])];
+  const out = [];
+
+  for (const item of items || []) {
+    const url = typeof getUrl === "function" ? canonicalUrl(getUrl(item)) : "";
+    if (url && seenUrls.has(url)) continue;
+
+    const rawKey = typeof getKey === "function" ? getKey(item) : "";
+    const key = rawKey ? String(rawKey) : "";
+    if (key && seenKeys.has(key)) continue;
+
+    const rawTitle = typeof getTitle === "function" ? getTitle(item) : "";
+    const title = rawTitle ? String(rawTitle) : "";
+    if (title && seenTitles.some((t) => isSimilarTitle(title, t))) continue;
+
+    out.push(item);
+    if (url) seenUrls.add(url);
+    if (key) seenKeys.add(key);
+    if (title) seenTitles.push(title);
+  }
+
+  return out;
+}
+
 export async function fetchPublished({ pipeline, days, limit, dryRun = false } = {}) {
   if (!pipeline) throw new Error("fetchPublished: pipeline is required");
 
