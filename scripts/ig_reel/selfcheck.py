@@ -541,6 +541,20 @@ assert "MASALAHNYA" in _tipctx and "Tips: Claude" in _tipctx and "YANG DITEMUKAN
 assert "TIPS AI" in scene_html("hook", TIP, IMGS, {**META, "hook_kicker": "TIPS AI"})
 assert "FAKTA SAINS" in scene_html("hook", TIP, IMGS, META)
 assert "Ikuti @tes buat tips" in cta and "kaliajatau" not in cta and "Kirim ke teman" in cta
+# highlight: one box per word so the phrase wraps with the sentence; trailing punctuation stays on the last word
+from ig_reel.scenes import _beat_text  # noqa: E402
+_bt = _beat_text("Jaringan parut ada di katup dan pembuluh darah utama.", "katup dan pembuluh darah utama", 1.0)
+assert _bt.count('class="hlbox"') == 5, _bt
+_last = _bt.split('class="hl"')[-1]
+assert "utama." in re.sub(r"<[^>]+>", "", _last) and not re.sub(r"<[^>]+>", "", _bt.split("utama")[1]).replace(".", "", 1).strip(), _bt
+assert "ada di katup dan pembuluh darah utama." in re.sub(r"<[^>]+>", "", _bt)
+# prompt pointers: only when the story carries a sample_prompt
+_tm = {**META, "kickers": TIP_KICKERS, "source_label": "Tips", "source": "Claude"}
+assert "PROMPT LENGKAP DI CAPTION" in scene_html("cta", TIP, IMGS, _tm)
+assert "lengkapnya di caption" in scene_html("why", TIP, IMGS, _tm)
+_np = {**TIP, "sample_prompt": ""}
+assert "PROMPT LENGKAP" not in scene_html("cta", _np, IMGS, _tm) and "lengkapnya di caption" not in scene_html("why", _np, IMGS, _tm)
+assert "PROMPT LENGKAP" not in cta
 evil = copy.deepcopy(STORY)
 evil["beats"][0]["text"] = "<script>alert(1)</script> teks"
 ctx = scene_html("context", evil, IMGS, META)
@@ -577,6 +591,7 @@ else:
             b["highlight"] = ""
     longest["cta"] = ("Kirim ke teman yang suka luar angkasa dan sains 🚀 " + "x" * 20)[:60]
     longest["mood"] = "mysterious"
+    longest["sample_prompt"] = TIP["sample_prompt"]  # the longest CTA card also carries the prompt chip
     t0 = time.time()
     out = work / "reel.mp4"
     res = render_reel(longest, imgs, {"source": "NASA", "date": "12 Nov 2026", "handle": "@tes", "follow_line": "Ikuti @tes buat tips",
