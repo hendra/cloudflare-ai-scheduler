@@ -1,6 +1,10 @@
 // Shared D1 published-items ledger client and URL/title deduplication helpers.
 // Zero-dependency Node 20 ESM. Consumes Worker GET/POST /api/published.
 
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
+
 const TRACKING_PARAMS = new Set([
   "ref",
   "source",
@@ -284,4 +288,188 @@ export async function recordPublished({ pipeline, items, dryRun = false } = {}) 
   }
 
   return { ok: true, inserted };
+}
+
+function parseFrontmatterField(fm, key) {
+  const m = fm.match(new RegExp(`(?:^|\\n)${key}:\\s*(.+?)\\r?$`, "m"));
+  if (!m) return "";
+  const raw = m[1].trim();
+  if (!raw) return "";
+  if (raw.startsWith('"') && raw.endsWith('"') && raw.length >= 2) {
+    try {
+      return String(JSON.parse(raw)).trim();
+    } catch {
+      return raw.slice(1, -1).trim();
+    }
+  }
+  if (raw.startsWith("'") && raw.endsWith("'") && raw.length >= 2) {
+    return raw.slice(1, -1).replace(/''/g, "'").trim();
+  }
+  return raw;
+}
+
+export function loadBlogCorpus(siteDir) {
+  const blogDir = join(siteDir, "src/content/blog");
+  if (!existsSync(blogDir)) return [];
+  const out = [];
+  for (const f of readdirSync(blogDir)) {
+    if (!f.endsWith(".md")) continue;
+    const raw = readFileSync(join(blogDir, f), "utf8");
+    const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    const fm = fmMatch ? fmMatch[1] : raw;
+    out.push({
+      slug: f.replace(/\.md$/, ""),
+      title: parseFrontmatterField(fm, "title") || f,
+      keyword: parseFrontmatterField(fm, "keyword"),
+      seoTitle: parseFrontmatterField(fm, "seoTitle"),
+    });
+  }
+  return out;
+}
+
+export function loadOpenPrs({ siteDir, pat } = {}) {
+  const slugs = new Set();
+  const titles = [];
+  if (!pat) {
+    console.warn("::warning::loadOpenPrs skipped: missing PAT");
+    return { slugs, titles };
+  }
+  try {
+    const raw = execFileSync(
+      "gh",
+      ["pr", "list", "--state", "open", "--json", "headRefName,title", "--limit", "50"],
+      {
+        cwd: siteDir,
+        env: { ...process.env, GH_TOKEN: pat },
+        stdio: "pipe",
+        timeout: REQUEST_TIMEOUT_MS,
+      },
+    ).toString();
+    const prs = JSON.parse(raw);
+    if (Array.isArray(prs)) {
+      for (const pr of prs) {
+        const ref = typeof pr?.headRefName === "string" ? pr.headRefName.trim() : "";
+        if (ref.startsWith("blog/")) {
+          const slug = ref.slice("blog/".length).trim().toLowerCase();
+          if (slug) slugs.add(slug);
+        }
+        const title = typeof pr?.title === "string" ? pr.title.trim() : "";
+        if (title) titles.push(title);
+      }
+    }
+  } catch (err) {
+    console.warn(`::warning::loadOpenPrs failed: ${String(err?.message || err).slice(0, 200)}`);
+  }
+  return { slugs, titles };
+}
+
+export function buildBlogHistory({
+  corpus = [],
+  openPrs = { slugs: new Set(), titles: [] },
+  publishedRows = [],
+} = {}) {
+  const idx = buildPublishedIndex(publishedRows);
+  const slugs = new Set();
+  const urls = new Set(idx.urls);
+  const titleSet = new Set();
+  const titles = [];
+  const keywords = new Set();
+
+  const addSlug = (s) => {
+    const clean = String(s || "").trim().toLowerCase();
+    if (clean) slugs.add(clean);
+  };
+  const addTitle = (t) => {
+    const clean = String(t || "").trim();
+    if (clean && !titleSet.has(clean)) {
+      titleSet.add(clean);
+      titles.push(clean);
+    }
+  };
+  const addKeyword = (kw) => {
+    const nk = normalizeTitle(kw);
+    if (nk) keywords.add(nk);
+  };
+
+  for (const c of corpus) {
+    addSlug(c.slug);
+    addTitle(c.title);
+    if (c.seoTitle) addTitle(c.seoTitle);
+    if (c.keyword) addKeyword(c.keyword);
+  }
+  for (const s of openPrs?.slugs || []) addSlug(s);
+  for (const t of openPrs?.titles || []) addTitle(t);
+  for (const k of idx.keys) addSlug(k);
+  for (const t of idx.titles) addTitle(t);
+  for (const m of idx.metaList) {
+    if (m?.keyword) addKeyword(m.keyword);
+  }
+
+  return { slugs, urls, titles, keywords };
+}
+
+export function buildBlogAvoidList({
+  corpus = [],
+  openPrs = { titles: [] },
+  publishedRows = [],
+  max = 150,
+} = {}) {
+  const byNorm = new Map();
+  const addEntry = (title, keyword = "") => {
+    const cleanTitle = String(title || "").trim();
+    const cleanKw = String(keyword || "").trim();
+    const key = normalizeTitle(cleanTitle);
+    if (!cleanTitle || !key) return;
+    const existing = byNorm.get(key);
+    if (!existing) byNorm.set(key, { title: cleanTitle, keyword: cleanKw });
+    else if (!existing.keyword && cleanKw) existing.keyword = cleanKw;
+  };
+
+  for (const t of openPrs?.titles || []) addEntry(t);
+  for (const row of publishedRows || []) {
+    if (!row || typeof row !== "object") continue;
+    let kw = "";
+    if (row.meta_json) {
+      try { kw = JSON.parse(row.meta_json)?.keyword || ""; } catch {}
+    }
+    addEntry(row.title, kw);
+  }
+  for (const c of corpus || []) addEntry(c.title, c.keyword);
+
+  return [...byNorm.values()]
+    .slice(0, max)
+    .map(({ title, keyword }) => (keyword ? `${title} [kw: ${keyword}]` : title));
+}
+
+export function checkTopicCollision(candidate, history) {
+  const { slug, title, topic, keyword, signalUrl } = candidate || {};
+  const { slugs, urls, titles, keywords } = history || {};
+
+  const normSlug = String(slug || "").trim().toLowerCase();
+  if (normSlug && slugs?.has(normSlug)) {
+    return `duplicate slug "${normSlug}"`;
+  }
+
+  const canonUrl = canonicalUrl(signalUrl);
+  if (canonUrl && urls?.has(canonUrl)) {
+    return `duplicate signalUrl "${canonUrl}"`;
+  }
+
+  const titleList = Array.isArray(titles) ? titles : [];
+  if (title) {
+    const matchedTitle = titleList.find((t) => isSimilarTitle(title, t));
+    if (matchedTitle) return `similar title to "${matchedTitle}"`;
+  }
+
+  if (topic) {
+    const matchedTopic = titleList.find((t) => isSimilarTitle(topic, t));
+    if (matchedTopic) return `similar topic to "${matchedTopic}"`;
+  }
+
+  const normKw = normalizeTitle(keyword);
+  if (normKw && keywords?.has(normKw)) {
+    return `duplicate keyword "${normKw}"`;
+  }
+
+  return null;
 }

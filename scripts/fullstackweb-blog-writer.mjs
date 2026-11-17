@@ -3,6 +3,16 @@ import { callModel } from "./ai-providers.mjs";
 import { generateCover } from "./cover/render.mjs";
 import { mergePr } from "./site-pr.mjs";
 import { indexArticle, sitemapLocs } from "./site-index.mjs";
+import {
+  fetchPublished,
+  recordPublished,
+  filterUnseenCandidates,
+  loadOpenPrs,
+  checkTopicCollision,
+  loadBlogCorpus,
+  buildBlogHistory,
+  buildBlogAvoidList,
+} from "./published.mjs";
 // FullstackWeb.dev blog writer (PR + auto-merge) — deterministic, zero dependencies.
 //
 // Flow: fetch signals (HN front page + GitHub Trending) → load existing corpus
@@ -22,9 +32,11 @@ import { indexArticle, sitemapLocs } from "./site-index.mjs";
 //   PUBLIC_FORMSPREE_FORM_ID  (astro env schema requires it at build time)
 // Exit: 0 ok (PR opened or dry-run printed), 1 failure (Slack note attempted).
 
-import { readFileSync, readdirSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
+import { writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { execFileSync, execSync } from "node:child_process";
 import { join } from "node:path";
+
+const PIPELINE = "blog:fullstackweb";
 
 const DRY_RUN = String(process.env.DRY_RUN || "false") === "true";
 const AI_STUB = process.env.AI_STUB === "true";
@@ -105,16 +117,7 @@ function parseTrending(html) {
 }
 
 // ---------- corpus ----------
-function loadCorpus(dir) {
-  const blogDir = join(dir, "src/content/blog");
-  const out = [];
-  for (const f of readdirSync(blogDir)) {
-    if (!f.endsWith(".md")) continue;
-    const m = readFileSync(join(blogDir, f), "utf8").match(/^title:\s*(.+)$/m);
-    out.push({ slug: f.replace(/\.md$/, ""), title: m ? m[1].replace(/^["']|["']$/g, "").trim() : f });
-  }
-  return out;
-}
+const loadCorpus = loadBlogCorpus;
 
 // ---------- AI-stub article (offline testing only) ----------
 function stubArticle() {
@@ -208,33 +211,85 @@ function frontmatter(a) {
 (async () => {
   if (!existsSync(join(SITE_DIR, "package.json"))) await fail(`site checkout not found at ${SITE_DIR} (set SITE_DIR)`);
   const corpus = loadCorpus(SITE_DIR);
-  const corpusSlugs = corpus.map((c) => c.slug);
-  console.log(`corpus: ${corpus.length} existing posts`);
+  let publishedRows;
+  try {
+    publishedRows = await fetchPublished({ pipeline: PIPELINE, limit: 500, dryRun: DRY_RUN });
+  } catch (e) {
+    await fail(`published ledger fetch failed: ${String(e?.message || e).slice(0, 220)}`);
+    return;
+  }
+  const openPrs = loadOpenPrs({ siteDir: SITE_DIR, pat: FULLSTACKWEB_PAT });
+  const history = buildBlogHistory({ corpus, openPrs, publishedRows });
+  const corpusSlugs = [...history.slugs];
+  console.log(`corpus: ${corpus.length} posts | open PRs: ${openPrs.slugs.size} | D1 ledger: ${publishedRows.length} | total known slugs: ${corpusSlugs.length}`);
 
   // 1) signals
-  const signals = [];
-  try { signals.push(...parseTrending((await fetchText("https://github.com/trending?since=daily")).text)); console.log(`trending: ${signals.length}`); } catch (e) { console.error("trending fetch failed:", e.message); }
+  const rawSignals = [];
+  try { rawSignals.push(...parseTrending((await fetchText("https://github.com/trending?since=daily")).text)); console.log(`trending: ${rawSignals.length}`); } catch (e) { console.error("trending fetch failed:", e.message); }
   try {
     const hn = JSON.parse((await fetchText("https://hn.algolia.com/api/v1/search_by_date?tags=front_page&hitsPerPage=30")).text);
     const hnStories = (hn.hits || []).filter((h) => (h.points || 0) >= 30).map((h) => ({ source: "hacker-news", title: h.title, url: h.url || `https://news.ycombinator.com/item?id=${h.objectID}`, description: h.title, signals: `${h.points} points, ${h.num_comments} comments` }));
-    signals.push(...hnStories);
+    rawSignals.push(...hnStories);
     console.log(`hn front page: ${hnStories.length}`);
   } catch (e) { console.error("hn fetch failed:", e.message); }
-  if (signals.length === 0) await fail("all signal sources failed");
+  if (rawSignals.length === 0) await fail("all signal sources failed");
+
+  const signals = filterUnseenCandidates(rawSignals, { urls: history.urls, titles: history.titles }, {
+    getUrl: (s) => s.url,
+    getTitle: (s) => s.title,
+  });
+  console.log(`unseen signals: ${signals.length}/${rawSignals.length} (filtered ${rawSignals.length - signals.length})`);
+  if (signals.length === 0) {
+    console.log("skipping: no unseen signals remain after deduplication");
+    process.exit(0);
+  }
 
   // 2) topic selection
+  const avoidPosts = buildBlogAvoidList({ corpus, openPrs, publishedRows, max: 150 });
   const topicPrompt = `You pick ONE blog topic for FullstackWeb.dev (fullstackweb.dev) — independent senior full-stack and AI engineer; readers: senior developers and tech leads; pillars: AI engineering, React and Next.js, Node.js and TypeScript, Ruby on Rails, backend APIs, cloud and DevOps, developer tools, open source. Pick the signal with the strongest, most durable angle for that audience.
-Reply with ONLY this JSON (no prose): {"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","description":"120-160 chars","slug":"kebab-case-slug","category":"one of: Dev Tools|Web/Frontend|AI/LLM|Backend|Infra/DevOps|Data|Ruby on Rails","services":[${JSON.stringify(SERVICE_VALUES)}]}
-Avoid all of these existing posts: ${corpus.slice(0, 80).map((c) => c.title).join(" | ")}
+Reply with ONLY this JSON (no prose): {"signalIndex":<1..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","description":"120-160 chars","slug":"kebab-case-slug","category":"one of: Dev Tools|Web/Frontend|AI/LLM|Backend|Infra/DevOps|Data|Ruby on Rails","services":[${JSON.stringify(SERVICE_VALUES)}]}
+Avoid all of these existing posts: ${avoidPosts.join(" | ")}
 Signals:
 ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.slice(0, 160)} (${s.signals})`).join("\n")}`;
-  let topic = AI_STUB ? { topic: "Fullstack TypeScript migration strategy", keyword: "typescript migration", angle: "practical guide", rationale: "stub", title: "Migrating a Large Editor to TypeScript: A Practical Guide", description: "Practical guide to migrating large JavaScript codebases to TypeScript without a big-bang rewrite: tsconfig strategy, incremental adoption, and CI gating that keeps the build green.", slug: "typescript-migration-large-codebase-guide", category: "Node.js and TypeScript", services: ["nodejs-typescript-development", "full-stack-development"], coverAlt: "Diagram of a staged TypeScript migration: deprecated options cleaned first, then the native compiler replaces type-checking" } : null;
+  let topic = AI_STUB ? { signalIndex: 1, topic: "Fullstack TypeScript migration strategy", keyword: "typescript migration", angle: "practical guide", rationale: "stub", title: "Migrating a Large Editor to TypeScript: A Practical Guide", description: "Practical guide to migrating large JavaScript codebases to TypeScript without a big-bang rewrite: tsconfig strategy, incremental adoption, and CI gating that keeps the build green.", slug: "typescript-migration-large-codebase-guide", category: "Node.js and TypeScript", services: ["nodejs-typescript-development", "full-stack-development"], coverAlt: "Diagram of a staged TypeScript migration: deprecated options cleaned first, then the native compiler replaces type-checking" } : null;
+  let chosenSignal = topic ? (signals[(topic.signalIndex || 1) - 1] || null) : null;
   if (!topic) {
+    let feedback = "";
+    let collisions = 0;
     for (let attempt = 1; attempt <= 3 && !topic; attempt++) {
-      try { topic = parseJSONObject(await callModel(topicPrompt + (attempt > 1 ? "\n\nPrevious reply invalid; reply with ONLY the JSON object." : ""), { maxTokens: 4096 })); }
-      catch (e) { console.error(`topic attempt ${attempt}:`, e.message); }
+      try {
+        const candidate = parseJSONObject(await callModel(topicPrompt + feedback, { maxTokens: 4096 }));
+        if (!candidate || typeof candidate !== "object") {
+          console.error(`topic attempt ${attempt}: invalid JSON`);
+          feedback = "\n\nPrevious reply invalid; reply with ONLY the JSON object.";
+          continue;
+        }
+        const sigIdx = Number.parseInt(candidate.signalIndex, 10);
+        const sig = Number.isInteger(sigIdx) && sigIdx >= 1 && sigIdx <= signals.length ? signals[sigIdx - 1] : null;
+        const collision = checkTopicCollision(
+          { slug: candidate.slug, title: candidate.title, topic: candidate.topic, keyword: candidate.keyword, signalUrl: sig?.url || "" },
+          history,
+        );
+        if (collision) {
+          collisions++;
+          console.log(`topic attempt ${attempt} rejected (${collision})`);
+          feedback = `\n\nPrevious topic rejected (${collision}); pick a DIFFERENT signal from Signals.`;
+          continue;
+        }
+        topic = candidate;
+        chosenSignal = sig;
+      } catch (e) {
+        console.error(`topic attempt ${attempt}:`, e.message);
+        feedback = "\n\nPrevious reply invalid; reply with ONLY the JSON object.";
+      }
     }
-    if (!topic) await fail("topic selection failed after 3 attempts");
+    if (!topic) {
+      if (collisions > 0) {
+        console.log(`skipping: all topic attempts collided with existing content (${collisions} collision(s))`);
+        process.exit(0);
+      }
+      await fail("topic selection failed after 3 attempts");
+    }
   }
   const meta = topic; // meta is emitted in the same JSON object as the topic
   console.log(`topic: ${topic.topic} | keyword: ${topic.keyword} | angle: ${topic.angle}`);
@@ -368,6 +423,17 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   const pr = execFileSync("gh", ["pr", "create", "--base", "main", "--head", branch, "--title", `content: add ${article.slug}`, "--body-file", prBodyPath], { cwd: SITE_DIR, env: gitEnv, stdio: "pipe" }).toString().trim();
   try { unlinkSync(prBodyPath); } catch {}
   console.log("PR opened:", pr);
+  const rec = await recordPublished({
+    pipeline: PIPELINE,
+    dryRun: DRY_RUN,
+    items: [{
+      item_key: article.slug,
+      title: article.title,
+      url: chosenSignal?.url || "",
+      meta: { keyword: article.keyword, topic: topic.topic, pr },
+    }],
+  });
+  console.log(`published ledger: recorded ${rec.inserted} item(s)`);
   const knownLocs = await sitemapLocs(SITE_URL); // snapshot before merge: only a NEW loc counts as the article
   const m = mergePr(pr, { env: gitEnv });
   if (m.merged) console.log("PR merged:", pr);
