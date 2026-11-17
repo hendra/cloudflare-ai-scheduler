@@ -226,7 +226,8 @@ _long = copy.deepcopy(TIP)
 _long["caption"]["body"] = "Coba cara ini ya. " * 120
 assert block in build_caption(_long, "Claude", None)
 s = copy.deepcopy(STORY)
-s["sample_prompt"] = "Hapus objek di foto ini."
+s["sample_prompt"] = "Buat 99 variasi foto."
+assert check_story(s, ARTICLE, mode="news") == ([], []), check_story(s, ARTICLE, mode="news")
 apply_story_limits(s, mode="news")
 assert s["sample_prompt"] == "" and "Salin prompt" not in build_caption(s, "NASA", "https://x")
 for bad_text, rule in (("Paket ini cuma Rp 300.000 per bulan untuk kamu.", "prices"), ("Hasilnya jadi 50% lebih cepat dari yang biasa.", "percentages"),

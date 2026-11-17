@@ -213,14 +213,14 @@ def numbers_in(text, keep_raw=True):
     return out
 
 
-def _story_texts(data):
+def _story_texts(data, include_sample=False):
     texts = [str(data.get("hook") or "")]
     for b in data.get("beats") or []:
         if isinstance(b, dict):
             texts += [str(b.get("text") or ""), str(b.get("highlight") or "")]
     cap = data.get("caption") if isinstance(data.get("caption"), dict) else {}
     texts += [str(cap.get(k) or "") for k in ("opener", "body", "question", "save_line")]
-    texts += [str(data.get("cta") or ""), str(data.get("sample_prompt") or "")] + hook_phrases(data)
+    texts += [str(data.get("cta") or "")] + ([str(data.get("sample_prompt") or "")] if include_sample else []) + hook_phrases(data)
     return texts
 
 
@@ -335,7 +335,7 @@ def check_story(data, article_text, extra_allowed=(), mode="news"):
                 hard.append("must be written in Bahasa Indonesia, not English: sample_prompt")
             if len(sp) > SAMPLE_PROMPT_MAX:
                 soft.append(f"sample_prompt {len(sp)} chars (> {SAMPLE_PROMPT_MAX})")
-        return hard + tip_rule_errors(_story_texts(data)), soft
+        return hard + tip_rule_errors(_story_texts(data, include_sample=True)), soft
     allowed = numbers_in(article_text) | {str(n) for n in extra_allowed}
     invented = sorted({n for t in _story_texts(data) for n in numbers_in(t, keep_raw=False)} - allowed)
     if invented:
