@@ -219,7 +219,7 @@ Free gives only a few downloads (reported as 7 trial downloads for the life of t
 1. `ai-labs/energetic-1` (the mood where the synth sounded weakest), and
 2. `kaliajatau/wonder-1` (this account's most typical science-wonder post).
 
-Put them at the paths above. Before committing, cut each one to 30 s so the repo stays small: `ffmpeg -i in.mp3 -t 30 -map_metadata -1 -b:a 192k out.mp3`. Adding a track needs no code change, because the pipeline picks up any `<mood>-<n>.mp3` in the account folder. Then tell me whether the sound is right. Next step: one `dry_run=true` Reel per account with these tracks, so you can judge them in a real video before we design the library.
+Put them at the paths above. Before committing, cut each one to 30 s so the repo stays small: `ffmpeg -i in.mp3 -af silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.05 -t 30 -map_metadata -1 -b:a 192k out.mp3` (cuts Suno's leading silence too). Adding a track needs no code change, because the pipeline picks up any `<mood>-<n>.mp3` in the account folder. Then tell me whether the sound is right. Next step: one `dry_run=true` Reel per account with these tracks, so you can judge them in a real video before we design the library.
 
 **Listening checklist** for each take, first 30 s only:
 

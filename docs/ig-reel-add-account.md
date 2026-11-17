@@ -28,7 +28,7 @@ Copy `scripts/ig_reel/accounts/ai-labs.json` to `scripts/ig_reel/accounts/<id>.j
 
 `python3 scripts/ig_reel/selfcheck.py` validates every account file.
 
-**Music tracks.** Put the account's soundtracks in `scripts/ig_reel/music_library/<id>/`, named `<mood>-<n>.mp3`. The mood is one of `curious`, `wonder`, `energetic`, `mysterious` or `uplifting`, for example `wonder-1.mp3`. Generate them with the prompts in `docs/ig-reel-suno-prompts.md` and cut each to 30 s before committing: `ffmpeg -i in.mp3 -t 30 -map_metadata -1 -b:a 192k out.mp3`. The Reel trims, fades and sets the loudness itself. Without any tracks, the account gets the synth in its `music` style.
+**Music tracks.** Put the account's soundtracks in `scripts/ig_reel/music_library/<id>/`, named `<mood>-<n>.mp3`. The mood is one of `curious`, `wonder`, `energetic`, `mysterious` or `uplifting`, for example `wonder-1.mp3`. Generate them with the prompts in `docs/ig-reel-suno-prompts.md` and cut each to 30 s before committing: `ffmpeg -i in.mp3 -af silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.05 -t 30 -map_metadata -1 -b:a 192k out.mp3` (cuts Suno's leading silence too). The Reel trims, fades and sets the loudness itself. Without any tracks, the account gets the synth in its `music` style.
 
 ## 2. GitHub environment `ig-<id>`
 
