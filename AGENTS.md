@@ -13,6 +13,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 - `wrangler.jsonc` is gitignored and generated from `wrangler.template.jsonc` by `npm run gen:config`. Edit the template, never the generated file.
 - No tests or lint scripts. Verification = `npm run typecheck` + `curl` checks + a `dry_run=true` dispatch per workflow.
 - Manual run: `POST /api/run` with `Authorization: Bearer $MANUAL_RUN_TOKEN` and body `{"schedulerId":"..."}`.
+- Ledger self-check: `npm run published:selfcheck`.
 
 ## Architecture
 
@@ -26,6 +27,8 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 - IG Reel accounts: one workflow, many accounts. `scripts/ig_reel/accounts/<id>.json` (handle, niche, feeds, tip themes with optional `weight` 1-3, pinned Buffer channel + Cloudinary cloud) + GitHub environment `ig-<id>` (that account's secrets, same names) + 4 D1 rows with `inputs.account`. `kaliajatau` = default, repo-level secrets. `ai-labs` (Claude/ChatGPT/Gemini creative tips — photo, video and animation creation/editing first, plus prompt, content, voice, work, learning and coding tips, 27 themes, creative ones weighted 2×; fresh announcement in the morning slot, else a theme tip) is **live** since 2026-11-15 (rows `ig-reel-ai-labs*` enabled, handle `@ailabs01.id`; environment `ig-ai-labs` holds its secrets). A real run refuses to post when its secrets don't match the account file. Add one: `docs/ig-reel-add-account.md`.
 - Blog indexing: `scripts/site-index.mjs` — after auto-merge, waits for the article in the live sitemap, then IndexNow (Bing) + Search Console sitemap resubmit (Google, secret `GSC_SERVICE_ACCOUNT_JSON`). Check: `npm run index:selfcheck`.
 - Blog covers: `scripts/cover/` — one AI cover-spec JSON (`spec.mjs`), three site skins copied from each site's oldest cover (`templates.mjs`), rendered by headless Chrome (`render.mjs`, `generateCover()`). Check: `npm run cover:selfcheck`. fullstackweb covers are title-less (owner decision).
+- Published-items ledger: `migrations/0021_published_items.sql` + `GET/POST /api/published` (Bearer `MANUAL_RUN_TOKEN`); helpers in `scripts/published.mjs` (`canonicalUrl`, `normalizeTitle`, `isSimilarTitle`, `fetchPublished`, `recordPublished`, `loadOpenPrs`, `buildBlogHistory`, `checkTopicCollision`). Check: `npm run published:selfcheck`.
+- Every content pipeline reads the ledger before publishing and skips cleanly (exit 0, nothing posted) when nothing new remains. `SCHEDULER_URL` (Actions variable) + `MANUAL_RUN_TOKEN` (Actions secret) are required or real runs fail closed.
 - D1 rows enabled (8 base + 4 multi-fire clones; blog writers use one cron-list row each): `github-trending-daily`, `github-trending-weekly`, `rails-job-search-daily`, `rails-job-search-daily-2000`, `railsdev-blog-writer`, `fullstackweb-blog-writer`, `inasoft-blog-writer`, `inasoft-news-digest`, `ig-reel-daily`, `ig-reel-daily-1145`, `ig-reel-daily-1635`, `ig-reel-daily-1930`, `ig-reel-ai-labs`, `ig-reel-ai-labs-1145`, `ig-reel-ai-labs-1635`, `ig-reel-ai-labs-1930`.
 
 ## Non-obvious gotchas

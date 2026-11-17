@@ -183,7 +183,13 @@ function frontmatter(a) {
     await fail(`published ledger fetch failed: ${String(e?.message || e).slice(0, 220)}`);
     return;
   }
-  const openPrs = loadOpenPrs({ siteDir: SITE_DIR, pat: RAILSDEV_PAT });
+  let openPrs;
+  try {
+    openPrs = loadOpenPrs({ siteDir: SITE_DIR, pat: RAILSDEV_PAT, dryRun: DRY_RUN });
+  } catch (e) {
+    await fail(`open PR lookup failed: ${String(e?.message || e).slice(0, 220)}`);
+    return;
+  }
   const history = buildBlogHistory({ corpus, openPrs, publishedRows });
   const corpusSlugs = [...history.slugs];
   console.log(`corpus: ${corpus.length} posts | open PRs: ${openPrs.slugs.size} | D1 ledger: ${publishedRows.length} | total known slugs: ${corpusSlugs.length}`);
@@ -397,6 +403,10 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   const pr = execFileSync("gh", ["pr", "create", "--base", "main", "--head", branch, "--title", `content: add ${article.slug}`, "--body-file", prBodyPath], { cwd: SITE_DIR, env: gitEnv, stdio: "pipe" }).toString().trim();
   try { unlinkSync(prBodyPath); } catch {}
   console.log("PR opened:", pr);
+  const knownLocs = await sitemapLocs(SITE_URL); // snapshot before merge: only a NEW loc counts as the article
+  const m = mergePr(pr, { env: gitEnv });
+  if (m.merged) console.log("PR merged:", pr);
+  else console.log(`::warning title=Auto-merge failed::${m.error} — PR ${pr} left open; merge it by hand.`);
   const rec = await recordPublished({
     pipeline: PIPELINE,
     dryRun: DRY_RUN,
@@ -408,10 +418,6 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     }],
   });
   console.log(`published ledger: recorded ${rec.inserted} item(s)`);
-  const knownLocs = await sitemapLocs(SITE_URL); // snapshot before merge: only a NEW loc counts as the article
-  const m = mergePr(pr, { env: gitEnv });
-  if (m.merged) console.log("PR merged:", pr);
-  else console.log(`::warning title=Auto-merge failed::${m.error} — PR ${pr} left open; merge it by hand.`);
   // Indexing never fails the run: the article is already published.
   const ix = m.merged ? await indexArticle({ siteUrl: SITE_URL, slug: article.slug, indexNowKey: INDEXNOW_KEY, env: process.env, knownLocs }) : null;
   if (ix) console.log("indexing:", JSON.stringify(ix));

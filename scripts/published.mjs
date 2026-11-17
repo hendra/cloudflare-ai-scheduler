@@ -59,6 +59,9 @@ export function canonicalUrl(rawUrl) {
   if (u.protocol !== "http:" && u.protocol !== "https:") return "";
 
   u.hash = "";
+  // Match the Python canonical_url, which rebuilds netloc from host+port only.
+  u.username = "";
+  u.password = "";
   u.pathname = u.pathname.replace(/\/+$/, "") || "/";
 
   const kept = [];
@@ -327,11 +330,13 @@ export function loadBlogCorpus(siteDir) {
   return out;
 }
 
-export function loadOpenPrs({ siteDir, pat } = {}) {
+export function loadOpenPrs({ siteDir, pat, dryRun = false } = {}) {
   const slugs = new Set();
   const titles = [];
   if (!pat) {
-    console.warn("::warning::loadOpenPrs skipped: missing PAT");
+    const reason = "missing PAT";
+    if (!dryRun) throw new Error(`loadOpenPrs failed: ${reason}`);
+    console.warn(`::warning::loadOpenPrs skipped: ${reason}`);
     return { slugs, titles };
   }
   try {
@@ -358,7 +363,9 @@ export function loadOpenPrs({ siteDir, pat } = {}) {
       }
     }
   } catch (err) {
-    console.warn(`::warning::loadOpenPrs failed: ${String(err?.message || err).slice(0, 200)}`);
+    const reason = String(err?.message || err).slice(0, 200);
+    if (!dryRun) throw new Error(`loadOpenPrs failed: ${reason}`);
+    console.warn(`::warning::loadOpenPrs failed: ${reason}`);
   }
   return { slugs, titles };
 }

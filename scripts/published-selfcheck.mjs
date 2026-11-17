@@ -25,6 +25,7 @@ assert.equal(canonicalUrl("https://example.com/"), "https://example.com/");
 assert.equal(canonicalUrl("https://example.com"), "https://example.com/");
 assert.equal(canonicalUrl("javascript:alert(1)"), "");
 assert.equal(canonicalUrl("not a url"), "");
+assert.equal(canonicalUrl("https://user:pass@Example.com/a/"), "https://example.com/a");
 assert.equal(
   canonicalUrl("https://news.ycombinator.com/item?id=42&fbclid=abc&gclid=def&ref=hn&source=rss&mc_cid=1&mc_eid=2&igshid=x"),
   "https://news.ycombinator.com/item?id=42",
@@ -367,13 +368,40 @@ assert.equal(noHit, null);
   const warns = [];
   console.warn = (...args) => warns.push(args.join(" "));
   try {
-    const res = loadOpenPrs({ siteDir: process.cwd(), pat: "" });
+    const res = loadOpenPrs({ siteDir: process.cwd(), pat: "", dryRun: true });
     assert.equal(res.slugs instanceof Set, true);
     assert.equal(res.slugs.size, 0);
     assert.deepEqual(res.titles, []);
     assert.ok(warns.some((w) => w.includes("loadOpenPrs")));
   } finally {
     console.warn = origWarn;
+  }
+}
+
+// 5g2. loadOpenPrs fails closed in a real run: gh failure or missing PAT throws
+{
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const noRepo = mkdtempSync(join(tmpdir(), "no-git-"));
+  const origWarn = console.warn;
+  const warns = [];
+  console.warn = (...args) => warns.push(args.join(" "));
+  try {
+    const res = loadOpenPrs({ siteDir: noRepo, pat: "fake-token-for-selfcheck", dryRun: true });
+    assert.equal(res.slugs.size, 0);
+    assert.deepEqual(res.titles, []);
+    assert.ok(warns.some((w) => w.includes("loadOpenPrs")));
+
+    assert.throws(
+      () => loadOpenPrs({ siteDir: noRepo, pat: "fake-token-for-selfcheck", dryRun: false }),
+      /loadOpenPrs failed/,
+    );
+    assert.throws(() => loadOpenPrs({ siteDir: noRepo, pat: "fake-token-for-selfcheck" }), /loadOpenPrs failed/);
+    assert.throws(() => loadOpenPrs({ siteDir: noRepo, pat: "" }), /loadOpenPrs failed/);
+  } finally {
+    console.warn = origWarn;
+    rmSync(noRepo, { recursive: true, force: true });
   }
 }
 
