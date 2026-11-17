@@ -61,6 +61,12 @@ const idx = buildPublishedIndex([
     url: "https://ex.com/b/",
     meta_json: "{bad json",
   },
+  {
+    item_key: "slug-3",
+    title: "Gamma Post",
+    url: "https://ex.com/c",
+    meta_json: '["array-ignored"]',
+  },
 ]);
 assert.equal(idx.keys.has("slug-1"), true);
 assert.equal(idx.keys.has("slug-2"), true);

@@ -148,7 +148,7 @@ export function buildPublishedIndex(rows) {
     if (row.meta_json) {
       try {
         const parsed = JSON.parse(row.meta_json);
-        if (parsed && typeof parsed === "object") metaList.push(parsed);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) metaList.push(parsed);
       } catch {
         // Ignore malformed historical metadata.
       }

@@ -141,7 +141,7 @@ async function main() {
   // 1) collect signals
   const all = [];
   for (const [name, url] of SOURCES) {
-    const items = await fetchFeed(url, name, 4);
+    const items = await fetchFeed(url, name, 10);
     all.push(...items);
   }
   console.log(`signals collected: ${all.length} items from ${SOURCES.length} sources`);

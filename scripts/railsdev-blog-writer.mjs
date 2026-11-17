@@ -221,12 +221,16 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
   if (!topic) {
     let feedback = "";
     let collisions = 0;
+    const collisionReasons = [];
+    let lastWasCollision = false;
     for (let attempt = 1; attempt <= 3 && !topic; attempt++) {
       try {
         const candidate = parseJSONObject(await callModel(topicPrompt + feedback, { maxTokens: 4096 }));
         if (!candidate || typeof candidate !== "object") {
+          lastWasCollision = false;
           console.error(`topic attempt ${attempt}: invalid JSON`);
-          feedback = "\n\nPrevious reply invalid; reply with ONLY the JSON object.";
+          const prior = collisionReasons.length ? ` Previously rejected: ${collisionReasons.join("; ")}.` : "";
+          feedback = `\n\nPrevious reply invalid; reply with ONLY the JSON object.${prior}`;
           continue;
         }
         const sigIdx = Number.parseInt(candidate.signalIndex, 10);
@@ -237,19 +241,25 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
         );
         if (collision) {
           collisions++;
+          lastWasCollision = true;
+          const label = candidate.slug || candidate.title || candidate.topic || `signal #${candidate.signalIndex ?? "?"}`;
+          collisionReasons.push(`${label} (${collision})`);
           console.log(`topic attempt ${attempt} rejected (${collision})`);
-          feedback = `\n\nPrevious topic rejected (${collision}); pick a DIFFERENT signal from Signals.`;
+          feedback = `\n\nPrevious topic(s) rejected (${collisionReasons.join("; ")}); pick a DIFFERENT signal from Signals.`;
           continue;
         }
+        lastWasCollision = false;
         topic = candidate;
         chosenSignal = sig;
       } catch (e) {
+        lastWasCollision = false;
         console.error(`topic attempt ${attempt}:`, e.message);
-        feedback = "\n\nPrevious reply invalid; reply with ONLY the JSON object.";
+        const prior = collisionReasons.length ? ` Previously rejected: ${collisionReasons.join("; ")}.` : "";
+        feedback = `\n\nPrevious reply invalid; reply with ONLY the JSON object.${prior}`;
       }
     }
     if (!topic) {
-      if (collisions > 0) {
+      if (collisions > 0 && lastWasCollision) {
         console.log(`skipping: all topic attempts collided with existing content (${collisions} collision(s))`);
         process.exit(0);
       }
