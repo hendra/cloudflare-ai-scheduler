@@ -42,5 +42,6 @@
   "dedupe_posts": 120,
   "buffer_channel_id": "6af92062ece6dfde5fcba082",
   "buffer_org_id": "67654dffc44cce0b50102d9e",
-  "cloudinary_cloud_name": "sabtvf1z"
+  "cloudinary_cloud_name": "sabtvf1z",
+  "music": {"style": "electronic"}
 }

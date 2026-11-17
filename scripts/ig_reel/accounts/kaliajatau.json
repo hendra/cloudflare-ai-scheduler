@@ -15,5 +15,6 @@
   "dedupe_posts": 28,
   "buffer_channel_id": "6aed5544e29c69a1717ba62e",
   "buffer_org_id": "6aed53e7ec5c7c6d73f3e437",
-  "cloudinary_cloud_name": null
+  "cloudinary_cloud_name": null,
+  "music": {"style": "cinematic"}
 }

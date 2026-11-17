@@ -3,10 +3,12 @@ import pathlib
 import shutil
 import subprocess
 
+from .accounts import DEFAULT_MUSIC_STYLE
 from .capture import Capturer
+from .library import pick_library_track, render_library_track
 from .music import TAIL_S, compose
 from .scenes import scene_html
-from .timeline import FPS, SCENE_BEATS, TOTAL_BEATS, frames_for
+from .timeline import BPM, FPS, SCENE_BEATS, TOTAL_BEATS, frames_for
 
 
 def assemble(frames_dir, wav, out_mp4):
@@ -20,6 +22,25 @@ def assemble(frames_dir, wav, out_mp4):
         "-c:v", "libx264", "-crf", "18", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-r", str(FPS),
         "-c:a", "aac", "-b:a", "192k", "-shortest", "-movflags", "+faststart",
         str(out_mp4)], check=True)
+
+
+def soundtrack(meta_base, mood, seed, wav):
+    """The account's library track for this post's mood (music_library/<account>/), else the synth
+    in the account's style. A broken library file falls back to the synth: music never blocks a post."""
+    track = pick_library_track(meta_base.get("account"), mood, seed)
+    if track:
+        try:
+            return render_library_track(track, wav, TOTAL_BEATS * 60 / BPM + TAIL_S)
+        except Exception as e:  # noqa: BLE001 — any ffmpeg failure → synth
+            print(f"music: library track {track} failed ({e}); using the synth", flush=True)
+    return {"source": "synth", **compose(seed, TOTAL_BEATS, wav, style=meta_base.get("music_style", DEFAULT_MUSIC_STYLE), mood=mood)}
+
+
+def music_line(music):
+    """One log/REPORT line for soundtrack()'s result."""
+    if music.get("source") == "library":
+        return f"library {music['track']}"
+    return f"synth {music['style']}/{music['mood']} {music['key']} {'-'.join(music['progression'])}"
 
 
 FONT_SCALES = (1.0, 0.9, 0.8, 0.7)
@@ -46,7 +67,8 @@ def fit_scales(cap, story, images, meta_base, work):
 
 
 def render_reel(story, images, meta_base, seed, out_mp4):
-    """images: {1..4: Path}. meta_base: {"source","date","handle","follow_line"} (+ optional source_label, kickers, hook_kicker). Returns
+    """images: {1..4: Path}. meta_base: {"source","date","handle","follow_line"} (+ optional source_label, kickers, hook_kicker,
+    account = account id for music_library/, music_style = the synth fallback's style). The soundtrack mood comes from story["mood"]. Returns
     {"seconds","frames","overflow","hook_visible_at_0","music"}; raises if text leaves the safe area."""
     out_mp4 = pathlib.Path(out_mp4)
     work = out_mp4.parent / (out_mp4.stem + "_frames")
@@ -75,7 +97,7 @@ def render_reel(story, images, meta_base, seed, out_mp4):
         raise RuntimeError("text outside the safe area: " + " | ".join(overflow))
 
     wav = work / "music.wav"
-    music = compose(seed, TOTAL_BEATS, wav)
+    music = soundtrack(meta_base, story.get("mood"), seed, wav)
     assemble(work, wav, out_mp4)
     return {"seconds": music["seconds"], "frames": frame, "overflow": overflow,
             "hook_visible_at_0": hook_ok, "music": music, "font_scales": scales}
