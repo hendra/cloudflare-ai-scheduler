@@ -87,8 +87,9 @@ from ig_reel.accounts import account_target_errors, load_account, music_style, s
 from ig_reel.reel import music_line, render_reel  # noqa: E402
 from ig_reel.scenes import TIP_KICKERS  # noqa: E402
 from ig_reel.story import (  # noqa: E402
-    STORY_SCHEMA_HINT, TIP_MAX_NUMBER, age_days, apply_story_limits, build_caption, check_story, extract_article_text, feed_body,
-    format_date_id, grounding_text, interleave, order_by_source,
+    STORY_SCHEMA_HINT, TIP_MAX_NUMBER, age_days, apply_story_limits, build_caption, canonical_url, check_story,
+    extract_article_text, extract_buffer_prompts, extract_buffer_seen, feed_body, filter_unseen_news, format_date_id,
+    grounding_text, interleave, is_similar_title, normalize_title, order_by_source, tip_duplicate_error,
 )
 
 UA = "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0"
@@ -190,7 +191,7 @@ def _posts_query(first, after=None, paged=False):
     cursor = f', after: "{after}"' if after else ""
     page = " pageInfo { hasNextPage endCursor }" if paged else ""
     return ('query { posts(first: %d%s, input: { organizationId: "%s", '
-            'filter: { status: [sent], channelIds: ["%s"] } }) { '
+            'filter: { status: [sent, scheduled], channelIds: ["%s"] } }) { '
             'edges { node { text createdAt } }%s } }' % (first, cursor, BUFFER_ORG, BUFFER_CHANNEL, page))
 
 
@@ -199,7 +200,7 @@ def _edge_texts(d):
 
 
 def recent_post_captions():
-    """Texts of the account's last DEDUPE_POSTS sent posts (the AI's do-not-repeat list)."""
+    """Texts of the account's last DEDUPE_POSTS sent/scheduled posts (the AI's do-not-repeat list)."""
     if not BUFFER_TOKEN:
         if DRY_RUN:
             log("buffer: BUFFER_ACCESS_TOKEN unset — skipping duplicate check (dry run)")
@@ -224,8 +225,148 @@ def recent_post_captions():
             texts = paged[:DEDUPE_POSTS]
         except Exception as e:
             log(f"buffer: paged duplicate check failed ({e}) — using the first {len(texts)} posts only")
-    log(f"buffer: fetched {len(texts)} recent sent posts for dedup (look-back {DEDUPE_POSTS})")
+    log(f"buffer: fetched {len(texts)} recent sent/scheduled posts for dedup (look-back {DEDUPE_POSTS})")
     return texts
+
+
+LEDGER_TIMEOUT = 15
+LEDGER_RETRY_DELAYS = (1, 2)
+
+
+def _ledger_env():
+    base_url = os.environ.get("SCHEDULER_URL", "").strip().rstrip("/")
+    token = os.environ.get("MANUAL_RUN_TOKEN", "").strip()
+    return base_url, token
+
+
+def fetch_published_ledger(pipeline, limit=500):
+    """Fetch previously published items for `pipeline` from Worker D1 ledger."""
+    base_url, token = _ledger_env()
+    if not base_url or not token:
+        if DRY_RUN:
+            log("ledger: SCHEDULER_URL/MANUAL_RUN_TOKEN unset — skipping D1 ledger fetch (dry run)")
+            return []
+        fail("SCHEDULER_URL and MANUAL_RUN_TOKEN required for a real run")
+
+    url = f"{base_url}/api/published?pipeline={urllib.parse.quote(pipeline, safe='')}&limit={int(limit)}"
+    headers = {"Authorization": f"Bearer {token}", "User-Agent": UA}
+    last_err = None
+    for attempt in range(len(LEDGER_RETRY_DELAYS) + 1):
+        try:
+            raw = http(url, headers=headers, timeout=LEDGER_TIMEOUT)
+            data = json.loads(raw)
+            items = data.get("items") if isinstance(data, dict) else []
+            items = items if isinstance(items, list) else []
+            log(f"ledger: fetched {len(items)} published items for {pipeline}")
+            return items
+        except urllib.error.HTTPError as e:
+            body = ""
+            try:
+                body = e.read().decode("utf-8", "replace")[:200]
+            except Exception:
+                pass
+            last_err = f"HTTP {e.code}: {body}"
+            if e.code < 500:
+                break
+        except Exception as e:
+            last_err = str(e)[:200]
+        if attempt < len(LEDGER_RETRY_DELAYS):
+            time.sleep(LEDGER_RETRY_DELAYS[attempt])
+
+    if DRY_RUN:
+        log(f"::warning::ledger fetch failed ({last_err}) — continuing with empty D1 list (dry run)")
+        return []
+    fail(f"D1 ledger fetch failed for {pipeline}: {last_err}")
+
+
+def record_published_ledger(pipeline, items):
+    """Record newly published items to Worker D1 ledger; warns without failing after a Buffer post."""
+    if DRY_RUN or not items:
+        return
+    base_url, token = _ledger_env()
+    if not base_url or not token:
+        log("::warning::D1 ledger record skipped: missing SCHEDULER_URL or MANUAL_RUN_TOKEN")
+        return
+    try:
+        resp = http_json(
+            f"{base_url}/api/published",
+            {"pipeline": pipeline, "items": items},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=LEDGER_TIMEOUT,
+        )
+        log(f"ledger: recorded {resp.get('inserted', len(items))} item(s) for {pipeline}")
+    except Exception as e:
+        log(f"::warning::D1 ledger record failed for {pipeline}: {str(e)[:200]}")
+
+
+def _dedupe_list(items):
+    out, seen = [], set()
+    for x in items:
+        s = str(x or "").strip()
+        if s and s not in seen:
+            seen.add(s)
+            out.append(s)
+    return out
+
+
+def build_seen_state(d1_items, buffer_captions, dedupe_posts):
+    """Combine D1 ledger rows and Buffer captions into dedup sets and avoid lists."""
+    buf_urls, buf_hooks = extract_buffer_seen(buffer_captions)
+    buf_prompts = extract_buffer_prompts(buffer_captions)
+
+    d1_urls = set()
+    d1_titles = []
+    d1_hooks = []
+    d1_tip_hooks = []
+    d1_tip_prompts = []
+
+    for row in d1_items or []:
+        if not isinstance(row, dict):
+            continue
+        u = canonical_url(str(row.get("url") or "")) or canonical_url(str(row.get("item_key") or ""))
+        if u:
+            d1_urls.add(u)
+        title = str(row.get("title") or "").strip()
+        meta_obj = {}
+        if row.get("meta_json"):
+            try:
+                parsed = json.loads(row["meta_json"])
+                if isinstance(parsed, dict):
+                    meta_obj = parsed
+            except Exception:
+                pass
+        cand_title = str(meta_obj.get("cand_title") or "").strip()
+        row_mode = str(meta_obj.get("mode") or "").strip()
+        is_tip = row_mode == "tip" or str(row.get("item_key") or "").startswith("tip:")
+        if title:
+            d1_hooks.append(title)
+            if not is_tip:
+                d1_titles.append(title)
+        if cand_title:
+            d1_titles.append(cand_title)
+        if is_tip:
+            if title:
+                d1_tip_hooks.append(title)
+            sp = str(meta_obj.get("sample_prompt") or "").strip()
+            if sp:
+                d1_tip_prompts.append(sp)
+
+    seen_urls = d1_urls | buf_urls
+    seen_titles = _dedupe_list(d1_titles)
+    seen_hooks = _dedupe_list(d1_hooks + buf_hooks)
+    seen_tip_hooks = _dedupe_list(d1_tip_hooks + buf_hooks)[:dedupe_posts]
+    seen_tip_prompts = _dedupe_list(d1_tip_prompts + buf_prompts)[:dedupe_posts]
+    news_avoid = _dedupe_list(d1_titles + seen_hooks)[:max(dedupe_posts, 60)]
+    tip_avoid = _dedupe_list(seen_tip_hooks + seen_tip_prompts)[:max(dedupe_posts, 60)]
+    return {
+        "seen_urls": seen_urls,
+        "seen_titles": seen_titles,
+        "seen_hooks": seen_hooks,
+        "seen_tip_hooks": seen_tip_hooks,
+        "seen_tip_prompts": seen_tip_prompts,
+        "news_avoid": news_avoid,
+        "tip_avoid": tip_avoid,
+    }
 
 
 def verify_account_targets():
@@ -465,7 +606,11 @@ Artikel:
 
 
 
-def write_tip(theme, avoid):
+class DuplicateTipError(RuntimeError):
+    pass
+
+
+def write_tip(theme, avoid, seen_tip_hooks=(), seen_tip_prompts=()):
     """One AI call writes a theme tip (no source article); validated with the tip rules, one repair retry."""
     avoid_block = ("\n".join(f"- {t[:120]}" for t in avoid[:60])) or "(belum ada)"
     topic = TOPIC_HINT or theme['topic']
@@ -496,6 +641,9 @@ Jawab HANYA JSON dengan skema:
     if not isinstance(data, dict):
         raise RuntimeError("AI tip is not a JSON object")
     hard, soft = check_story(data, "", mode="tip")
+    dup_err = tip_duplicate_error(data, seen_tip_hooks, seen_tip_prompts)
+    if dup_err:
+        hard = list(hard) + [dup_err]
     if soft:
         log("tip: truncating: " + "; ".join(soft))
     if hard:
@@ -505,21 +653,29 @@ Jawab HANYA JSON dengan skema:
                        + "\nJawab hanya JSON dengan skema yang sama.\n\nJSON:\n" + json.dumps(data, ensure_ascii=False))
         if not isinstance(data, dict):
             raise RuntimeError("AI tip repair is not a JSON object")
-        hard, soft = check_story(data, "", mode="tip")
+        base_hard, soft = check_story(data, "", mode="tip")
+        dup_err = tip_duplicate_error(data, seen_tip_hooks, seen_tip_prompts)
+        if dup_err and not base_hard:
+            raise DuplicateTipError(dup_err)
+        hard = list(base_hard) + ([dup_err] if dup_err else [])
         if hard:
             raise RuntimeError("; ".join(hard))
     apply_story_limits(data, mode="tip")
     return data
 
 
-def find_news_story(recent):
+def find_news_story(avoid, seen_urls, seen_titles, seen_hooks):
     """(story, candidate) written only from a feed article, or (None, reason)."""
-    candidates = fetch_candidates()
+    raw_candidates = fetch_candidates()
     need = 1 if ACCOUNT.get("news_max_age_days") else 6
-    if len(candidates) < need:
-        return None, f"only {len(candidates)} RSS candidates found; refusing to fabricate"
+    if len(raw_candidates) < need:
+        return None, f"only {len(raw_candidates)} RSS candidates found; refusing to fabricate"
+    candidates = filter_unseen_news(raw_candidates, seen_urls, seen_titles)
+    log(f"dedupe: {len(candidates)} of {len(raw_candidates)} RSS candidates unseen")
+    if not candidates:
+        return None, "all_published"
     reasons = []
-    for ref in pick_shortlist(candidates, recent):
+    for ref in pick_shortlist(candidates, avoid):
         c = candidates[ref - 1]
         try:
             article = fetch_article(c)
@@ -530,9 +686,15 @@ def find_news_story(recent):
             reasons.append(f"#{ref} article text only {len(article)} chars")
             continue
         try:
-            return write_story(c, article), c
+            story = write_story(c, article)
         except RuntimeError as e:
             reasons.append(f"#{ref} story invalid: {str(e)[:120]}")
+            continue
+        if any(is_similar_title(story["hook"], h) for h in seen_hooks):
+            log(f"story: #{ref} hook {story['hook']!r} matches recent post — trying next candidate")
+            reasons.append(f"#{ref} hook duplicates recent post")
+            continue
+        return story, c
     return None, "no shortlisted article yielded enough text and a valid story: " + "; ".join(reasons)
 
 # ---------- 5. Illustrations + scenes ----------
@@ -776,7 +938,10 @@ def main():
     verify_account_targets()
     check_kit()
     guard_no_placeholder_post()
+    pipeline = f"ig-reel:{ACCOUNT['id']}"
+    d1_items = fetch_published_ledger(pipeline, limit=500)
     recent = recent_post_captions()
+    seen = build_seen_state(d1_items, recent, DEDUPE_POSTS)
     if MODE not in ("auto", "news", "tip"):
         fail(f"MODE must be auto, news or tip, got {MODE!r}")
     themes = ACCOUNT["themes"]
@@ -788,31 +953,47 @@ def main():
     # news: one story written only from a feed article; tip: a theme tip when the slot or the feeds have no news
     story = cand = None
     if MODE == "news" or (MODE == "auto" and RSS_FEEDS and wants_news(ACCOUNT, SLOT)):
-        story, cand = find_news_story(recent)
+        story, cand = find_news_story(seen["news_avoid"], seen["seen_urls"], seen["seen_titles"], seen["seen_hooks"])
         if not story:
             if MODE == "news" or not themes:
+                if cand == "all_published":
+                    log("REPORT " + json.dumps({"status": "skipped", "account": ACCOUNT["id"],
+                                                "reason": "all candidates already published", "posted": False}))
+                    return
                 fail(cand)
             log(f"news: nothing usable ({cand}) — writing a tip instead")
+    chosen_theme = None
     if story:
-        mode, source, link = "news", cand["source"], cand["link"]
+        mode, source, source_link = "news", cand["source"], cand["link"]
         date = format_date_id(cand["date"])
-        sources = [f"{source} — {cand['title'][:80]} ({date}) [{link}]"]
+        sources = [f"{source} — {cand['title'][:80]} ({date}) [{source_link}]"]
         log(f"story: {story['hook']!r} from [{source}] {cand['title'][:80]}")
     else:
         reasons = []
+        dup_collisions = 0
+        tried = 0
         for theme in theme_plan(theme_ring(themes), NOW.date(), SLOT, TIP_TRIES):  # each theme once, weighted order
+            tried += 1
             try:
-                story = write_tip(theme, recent)
+                story = write_tip(theme, seen["tip_avoid"], seen["seen_tip_hooks"], seen["seen_tip_prompts"])
+                chosen_theme = theme
                 break
+            except DuplicateTipError as e:
+                dup_collisions += 1
+                reasons.append(f"{theme['tool']} — {theme['topic']}: {str(e)[:140]}")
             except RuntimeError as e:
                 reasons.append(f"{theme['tool']} — {theme['topic']}: {str(e)[:140]}")
         if not story:
+            if tried > 0 and dup_collisions == tried:
+                log("REPORT " + json.dumps({"status": "skipped", "account": ACCOUNT["id"],
+                                            "reason": "all tip attempts collided with recent tips", "posted": False}))
+                return
             fail("no valid tip after " + str(TIP_TRIES) + " themes: " + "; ".join(reasons))
-        mode, source, link = "tip", theme["tool"], None
+        mode, source, source_link = "tip", chosen_theme["tool"], None
         date = format_date_id(NOW.isoformat())
-        sources = [f"tip: {source} — {TOPIC_HINT or theme['topic']}"]
+        sources = [f"tip: {source} — {TOPIC_HINT or chosen_theme['topic']}"]
         meta.update(source_label="Tips", kickers=TIP_KICKERS)
-        log(f"tip: {story['hook']!r} for [{source}] {theme['topic']}")
+        log(f"tip: {story['hook']!r} for [{source}] {chosen_theme['topic']}")
     meta.update(source=source, date=date)
 
     images, image_providers = {}, []
@@ -832,7 +1013,7 @@ def main():
                       f"{TODAY}-{NOW:%H%M}", reel)
     log(f"reel: built {reel} ({reel.stat().st_size / 1e6:.1f} MB, {res['seconds']}s, "
         f"music {music_line(res['music'])})")
-    full_caption = build_caption(story, source, link)
+    full_caption = build_caption(story, source, source_link)
     log(f"images via: {image_providers}")
 
     if DRY_RUN:
@@ -855,9 +1036,36 @@ def main():
     if int(up.get("bytes", -1)) != reel.stat().st_size:
         fail(f"cloudinary size mismatch: local {reel.stat().st_size} vs {up.get('bytes')}")
     log(f"cloudinary: uploaded {url}")
-    post_id, link = buffer_create_and_confirm(url, full_caption)
+    post_id, reel_link = buffer_create_and_confirm(url, full_caption)
+    if mode == "news":
+        ledger_item = {
+            "item_key": canonical_url(source_link) or source_link,
+            "url": source_link,
+            "title": story["hook"],
+            "meta": {
+                "mode": "news",
+                "source": source,
+                "cand_title": cand["title"],
+                "post_id": post_id,
+                "reel": reel_link,
+            },
+        }
+    else:
+        ledger_item = {
+            "item_key": "tip:" + hashlib.sha256(normalize_title(story["hook"]).encode()).hexdigest()[:16],
+            "title": story["hook"],
+            "meta": {
+                "mode": "tip",
+                "tool": chosen_theme["tool"],
+                "topic": chosen_theme["topic"],
+                "sample_prompt": story["sample_prompt"],
+                "post_id": post_id,
+                "reel": reel_link,
+            },
+        }
+    record_published_ledger(pipeline, [ledger_item])
     log("REPORT " + json.dumps({"status": "sent", "account": ACCOUNT["id"], "mode": mode, "topic": story["hook"], "post_id": post_id,
-                                "reel": link, "posted": True, "images": image_providers,
+                                "reel": reel_link, "posted": True, "images": image_providers,
                                 "music": music_line(res["music"]), "music_mood": res["music"]["mood"],
                                 "sources": sources}))
 

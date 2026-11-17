@@ -1,6 +1,6 @@
 name: github-trending
 
-# GitHub Trending — Daily Top 10 → Slack #news
+# GitHub Trending — Daily Top 5 → Slack #news
 # scripts/github-trending-digest.mjs fetches the trending page (regex parse),
 # fetches READMEs, calls the AI chain (OpenCode Console → OpenRouter,
 # via scripts/ai-providers.mjs) and posts to Slack. Triggered by the Cloudflare

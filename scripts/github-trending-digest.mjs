@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { PROVIDERS, providerChain, callModel } from "./ai-providers.mjs";
-// GitHub Trending — Daily/Weekly Top 10 → Slack #news (deterministic, zero dependencies)
+// GitHub Trending — Daily/Weekly Top 5 → Slack #news (deterministic, zero dependencies)
 //
 // WEEKLY=true fetches github.com/trending?since=weekly and labels the digest
-// "Top 10 of the Week" (coverage: previous Monday–Sunday, Asia/Jakarta).
+// "Top 5 of the Week" (coverage: previous Monday–Sunday, Asia/Jakarta).
 //
 // Flow: fetch the trending page (regex parse, browser UA)
 //   → fallback: GitHub search API via `gh` (labelled "fallback: newly created
@@ -37,9 +37,10 @@ const SLACK_NEWS_CHANNEL_ID = process.env.SLACK_NEWS_CHANNEL_ID || "";
 // Provider chain: AI_PROVIDER (default openrouter) then AI_FALLBACKS in order;
 // providers without credentials are skipped. Model overrides: AI_MODEL (primary
 // only) or per-provider <PROVIDER>_MODEL.
+const TOP_N = 5;
 const CATEGORIES = ["AI/LLM","Agents/MCP","Dev Tools","Web/Frontend","Backend","Infra/DevOps","Data","Security","Other"];
 // Weekly mode (WEEKLY=true): fetches github.com/trending?since=weekly, labels the
-// digest "Top 10 of the Week", and uses the previous Monday–Sunday window in Asia/Jakarta.
+// digest "Top 5 of the Week", and uses the previous Monday–Sunday window in Asia/Jakarta.
 const WEEKLY = String(process.env.WEEKLY || "false") === "true";
 const now = new Date();
 const wibISO = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year:"numeric", month:"2-digit", day:"2-digit" }).format(now);
@@ -53,7 +54,7 @@ const weekEnd = new Date(weekStart.getTime() + 6 * 86400000);
 const wibDateStart = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year:"numeric", month:"2-digit", day:"2-digit" }).format(weekStart);
 const wibDateEnd   = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year:"numeric", month:"2-digit", day:"2-digit" }).format(weekEnd);
 const gainedLabel = WEEKLY ? "this week" : "today";
-const digestTitle = WEEKLY ? "Top 10 of the Week" : "Top 10 Today";
+const digestTitle = WEEKLY ? `Top ${TOP_N} of the Week` : `Top ${TOP_N} Today`;
 const trendTitle = WEEKLY ? "Trends of the Week" : "Trend of the Day";
 const footerKind = WEEKLY ? "weekly" : "daily";
 const headerLink = WEEKLY
@@ -112,11 +113,11 @@ async function collect() {
       forks: forksM ? num(forksM[1]) : null,
     });
   }
-  if (repos.length < 10) {
+  if (repos.length < TOP_N) {
     console.warn(`trending parse yielded only ${repos.length} repos; falling back to search API`);
     return collectFallback();
   }
-  return { repos: repos.slice(0, 10), fallback: false };
+  return { repos: repos.slice(0, TOP_N), fallback: false };
 }
 
 async function collectFallback() {
@@ -128,7 +129,7 @@ async function collectFallback() {
   try {
     const out = execFileSync(
       "gh",
-      ["api", `search/repositories?q=${created}&sort=stars&order=desc&per_page=10`, "--jq", '.items[] | [.full_name, (.description // ""), (.stargazers_count|tostring), (.forks_count|tostring), (.language // "unknown")] | @tsv'],
+      ["api", `search/repositories?q=${created}&sort=stars&order=desc&per_page=${TOP_N}`, "--jq", '.items[] | [.full_name, (.description // ""), (.stargazers_count|tostring), (.forks_count|tostring), (.language // "unknown")] | @tsv'],
       { encoding: "utf8", timeout: 60000 }
     );
     const repos = out.trim().split("\n").filter(Boolean).map((line) => {
@@ -175,12 +176,12 @@ async function analyze(repos) {
   const lines = repos.map((r, i) =>
     `${i + 1}. ${r.owner}/${r.name} | lang=${r.language} | stars=${r.stars ?? "n/a"} | today=${r.today ?? "n/a"} | forks=${r.forks ?? "n/a"}\n   desc: ${r.description || "(none)"}\n   readme excerpt: ${(r.readme || "(unavailable)").slice(0, 600)}`
   ).join("\n");
-  const prompt = `You are writing a developer newsletter blurb. For each of the 10 repositories below write:
+  const prompt = `You are writing a developer newsletter blurb. For each of the ${repos.length} repositories below write:
 - "what": what it is, 1-2 plain sentences (no hype).
 - "why": why it matters for developers, exactly 1 sentence, grounded in the README excerpt or description — no speculation presented as fact.
 - "category": exactly one of ${CATEGORIES.join(", ")}.
-Then write "trend": 2-3 sentences noting patterns across the 10 (dominant language/category).
-Reply with ONLY a JSON object, no prose: {"repos":[{"name":"owner/name","what":"...","why":"...","category":"..."}], "trend":"..."} — repos array must be in the same order as the input, exactly 10 items.
+Then write "trend": 2-3 sentences noting patterns across the ${repos.length} (dominant language/category).
+Reply with ONLY a JSON object, no prose: {"repos":[{"name":"owner/name","what":"...","why":"...","category":"..."}], "trend":"..."} — repos array must be in the same order as the input, exactly ${repos.length} items.
 Repositories:
 ${lines}`;
   let parsed = null;
@@ -231,9 +232,10 @@ function compose({ repos, fallback, trend }) {
   try { analysis = await analyze(repos); } catch (e) { console.error("AI analysis failed:", e.message); await fail(`AI analysis failed: ${e.message}`); return; }
   const { header, full, sectionLine } = compose({ repos: analysis.repos, fallback, trend: analysis.trend });
   const SLACK_LIMIT = 3500;
+  const mid = Math.ceil(analysis.repos.length / 2);
   const parts = full.length <= SLACK_LIMIT ? [full] : [
-    [header, analysis.repos.slice(0, 5).map((r, i) => sectionLine(r, i)).join("\n\n")].join("\n\n"),
-    [analysis.repos.slice(5).map((r, i) => sectionLine(r, i + 5)).join("\n\n"), `━━━━━━━━━━━━━━━━━━━━\n📈 _${trendTitle}_\n` + safeMrkdwn(analysis.trend) + `\n\n🤖 _Automated ${footerKind} GitHub trending digest_`].join("\n\n"),
+    [header, analysis.repos.slice(0, mid).map((r, i) => sectionLine(r, i)).join("\n\n")].join("\n\n"),
+    [analysis.repos.slice(mid).map((r, i) => sectionLine(r, i + mid)).join("\n\n"), `━━━━━━━━━━━━━━━━━━━━\n📈 _${trendTitle}_\n` + safeMrkdwn(analysis.trend) + `\n\n🤖 _Automated ${footerKind} GitHub trending digest_`].join("\n\n"),
   ];
   if (DRY_RUN) {
     console.log("=== DRY RUN — message(s) that would be posted to #news ===");

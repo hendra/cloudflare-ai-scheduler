@@ -17,6 +17,7 @@ import { PROVIDERS, providerChain, callModel } from "./ai-providers.mjs";
 
 import { writeFileSync } from "node:fs";
 import { safeMrkdwn, slackLink, splitForSlack, postSlack, postSlackParts } from "./slack.mjs";
+import { canonicalUrl, buildPublishedIndex, filterUnseenCandidates, fetchPublished, recordPublished } from "./published.mjs";
 
 const DRY_RUN = String(process.env.DRY_RUN || "false") === "true";
 const AI_STUB = process.env.AI_STUB === "true";
@@ -169,7 +170,7 @@ function render(ranked, sourceStatus, totalCandidates) {
   const header = `💼 _Rails Remote Jobs — ${wib} (Asia/Jakarta)_\nSources: ${sourceStatus.map(([n, ok, cnt]) => ok ? `✅ ${n} (${cnt})` : `❌ ${n}`).join(" · ")}\n${totalCandidates} fresh candidates (≤30d, deduped) — scored vs profile\n`;
   const body = shown.map((j, i) => `_${i + 1}. ${safeMrkdwn(j.company)} — ${safeMrkdwn(j.title)}_ · ${j.eligibility === "worldwide" ? "🌍 Worldwide" : j.eligibility === "international" ? "🌐 Intl" : j.eligibility === "country-restricted" ? "🔒 " + (safeMrkdwn(j.restricts) || "restricted") : "🕒 " + (safeMrkdwn(j.restricts) || "regional")} · *${j.tier} ${j.score}*${j.salary ? ` · ${safeMrkdwn(j.salary)}` : ""}\n→ ${slackLink(j.url, j.url)}\n💡 ${safeMrkdwn(j.why)}`).join("\n\n");
   const footer = `\n\n${notShown > 0 ? `_${notShown} more (Moderate/Low) not shown._` : ""}\n🤖 _Automated Rails job search · ${totalCandidates} candidates scored · verify eligibility per posting · sources: ${sourceStatus.filter(([, ok]) => ok).map(([n]) => n).join(", ")}_`;
-  return header + "\n" + body + footer;
+  return { text: header + "\n" + body + footer, shown };
 }
 
 
@@ -177,6 +178,19 @@ function render(ranked, sourceStatus, totalCandidates) {
 (async () => {
   if (!DRY_RUN && (!SLACK_BOT_TOKEN || !SLACK_JOBS_CHANNEL_ID)) { console.error("FATAL: SLACK_BOT_TOKEN and SLACK_JOBS_CHANNEL_ID required (or DRY_RUN=true)"); process.exit(1); }
   if (!providerChain().some((n) => PROVIDERS[n]?.key()) && !AI_STUB) { console.error("FATAL: no AI provider in the chain has credentials"); process.exit(1); }
+  let publishedRows;
+  try {
+    publishedRows = await fetchPublished({ pipeline: "rails-jobs", days: 45, limit: 500, dryRun: DRY_RUN });
+  } catch (e) {
+    await fail(`published ledger fetch failed: ${String(e?.message || e).slice(0, 220)}`);
+    return;
+  }
+  const publishedIndex = buildPublishedIndex(publishedRows);
+  const seenPublishedKeys = new Set([
+    ...publishedIndex.keys,
+    ...publishedIndex.metaList.map((m) => m.dedupeKey).filter(Boolean),
+  ]);
+
   const all = [];
   for (const [name, fn] of SOURCES) {
     try { const jobs = await fn(); all.push(...jobs); statuses.push([name, true, jobs.length]); console.log(`source ${name}: ${jobs.length} fresh jobs`); }
@@ -189,13 +203,23 @@ function render(ranked, sourceStatus, totalCandidates) {
     if (u && seenUrl.has(u)) continue; if (seenKey.has(k)) continue;
     if (u) seenUrl.add(u); seenKey.add(k); deduped.push(j);
   }
-  const candidates = deduped.filter((j) => FRESH(j.postedAt)).slice(0, 40);
-  console.log(`candidates after dedupe+fresh: ${candidates.length} (dropped ${deduped.length - candidates.length} undated/older)`);
-  if (candidates.length === 0) { await fail("no candidates from any source (all failed or nothing fresh)"); return; }
+  const fresh = deduped.filter((j) => FRESH(j.postedAt));
+  if (fresh.length === 0) { await fail("no candidates from any source (all failed or nothing fresh)"); return; }
+  const unseen = filterUnseenCandidates(fresh, publishedIndex, {
+    getUrl: (j) => j.url,
+    getKey: dedupeKey,
+    extraKeys: seenPublishedKeys,
+  });
+  const candidates = unseen.slice(0, 40);
+  console.log(`candidates after dedupe+fresh+ledger: ${candidates.length} (fresh: ${fresh.length}, dropped ${deduped.length - fresh.length} undated/older, filtered ${fresh.length - unseen.length} already published)`);
+  if (candidates.length === 0) {
+    console.log("skipping: no new fresh candidates (all already published)");
+    return;
+  }
   let scored;
   try { scored = await score(candidates); } catch (e) { await fail(`AI analysis failed: ${String(e).slice(0, 300)}`); return; }
   const ranked = scored.jobs.map((s) => ({ ...candidates[s.index], ...s }));
-  const msg = render(ranked, statuses, candidates.length);
+  const { text: msg, shown } = render(ranked, statuses, candidates.length);
   const parts = splitForSlack(msg, 3400);
   if (DRY_RUN) { console.log("=== DRY RUN — would post to #jobs ===\n" + parts.map((p, i) => `--- part ${i + 1} (${p.length} chars) ---\n${p}`).join("\n") + `\n=== end dry run ===`); return; }
   const r = await postSlackParts({ token: SLACK_BOT_TOKEN, channel: SLACK_JOBS_CHANNEL_ID, parts });
@@ -212,5 +236,16 @@ function render(ranked, sourceStatus, totalCandidates) {
     return;
   }
   console.log(`Slack post: ok (${r.posted} message(s))`);
-  console.log(JSON.stringify({ event: "rails-jobs-posted", date: wib, candidates: candidates.length, shown: Math.min(ranked.length, 12) }));
+  const rec = await recordPublished({
+    pipeline: "rails-jobs",
+    dryRun: DRY_RUN,
+    items: shown.map((j) => ({
+      item_key: canonicalUrl(j.url) || `job:${dedupeKey(j)}`,
+      title: `${j.company} — ${j.title}`,
+      url: j.url,
+      meta: { dedupeKey: dedupeKey(j), source: j.source, tier: j.tier, score: j.score },
+    })),
+  });
+  console.log(`published ledger: recorded ${rec.inserted} item(s)`);
+  console.log(JSON.stringify({ event: "rails-jobs-posted", date: wib, candidates: candidates.length, shown: shown.length }));
 })().catch((e) => fail(`unexpected error: ${String(e).slice(0, 300)}`));

@@ -1,10 +1,10 @@
 name: github-trending-weekly
 
-# GitHub Trending — Weekly Top 10 → Slack #news
+# GitHub Trending — Weekly Top 5 → Slack #news
 # Same pipeline as github-trending.yml (scripts/github-trending-digest.mjs)
 # with WEEKLY=true: fetches github.com/trending?since=weekly, covers the previous
-# Monday–Sunday (Asia/Jakarta), posts a "Top 10 of the Week" digest split into
-# two consecutive messages (header + repos 1–5, then repos 6–10 + trends).
+# Monday–Sunday (Asia/Jakarta), posts a "Top 5 of the Week" digest (splitting into
+# two consecutive messages only if over the Slack char limit).
 # Spec: prompts/github-trending-weekly.md
 
 on:

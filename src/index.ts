@@ -623,6 +623,105 @@ export default {
       return json(results);
     }
 
+    if (url.pathname === "/api/published" && request.method === "GET") {
+      const pipeline = url.searchParams.get("pipeline")?.trim() ?? "";
+      if (!pipeline) {
+        return json({ error: "Missing pipeline query parameter" }, 400);
+      }
+
+      const daysParam = url.searchParams.get("days");
+      let cutoff: string | null = null;
+      if (daysParam !== null && daysParam !== "") {
+        const days = Number(daysParam);
+        if (!Number.isFinite(days) || days < 1 || days > 3650) {
+          return json({ error: "days must be between 1 and 3650" }, 400);
+        }
+        cutoff = new Date(Date.now() - days * 86400_000).toISOString();
+      }
+
+      const limitParam = url.searchParams.get("limit");
+      const parsedLimit = limitParam !== null && limitParam !== "" ? Number(limitParam) : 500;
+      const limit = Number.isFinite(parsedLimit) ? Math.min(1000, Math.max(1, Math.trunc(parsedLimit))) : 500;
+
+      const query = cutoff
+        ? env.DB.prepare(`
+            SELECT id, item_key, title, url, meta_json, published_at
+            FROM published_items
+            WHERE pipeline = ? AND published_at >= ?
+            ORDER BY published_at DESC, id DESC
+            LIMIT ?
+          `).bind(pipeline, cutoff, limit)
+        : env.DB.prepare(`
+            SELECT id, item_key, title, url, meta_json, published_at
+            FROM published_items
+            WHERE pipeline = ?
+            ORDER BY published_at DESC, id DESC
+            LIMIT ?
+          `).bind(pipeline, limit);
+
+      const { results } = await query.all();
+      return json({ pipeline, items: results });
+    }
+
+    if (url.pathname === "/api/published" && request.method === "POST") {
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: "Invalid JSON body" }, 400);
+      }
+
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return json({ error: "Body must be a JSON object" }, 400);
+      }
+
+      const record = body as Record<string, unknown>;
+      const pipeline = typeof record.pipeline === "string" ? record.pipeline.trim() : "";
+      if (!pipeline) {
+        return json({ error: "pipeline must be a non-empty string" }, 400);
+      }
+
+      if (!Array.isArray(record.items) || record.items.length < 1 || record.items.length > 50) {
+        return json({ error: "items must be an array of 1..50 entries" }, 400);
+      }
+
+      const normalized: Array<{
+        item_key: string;
+        title: string | null;
+        url: string | null;
+        meta_json: string | null;
+      }> = [];
+
+      for (const entry of record.items) {
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+          return json({ error: "Each item must be an object with a non-empty item_key string" }, 400);
+        }
+        const item = entry as Record<string, unknown>;
+        const itemKey = typeof item.item_key === "string" ? item.item_key.trim() : "";
+        if (!itemKey) {
+          return json({ error: "Each item must have a non-empty item_key string" }, 400);
+        }
+        normalized.push({
+          item_key: itemKey,
+          title: typeof item.title === "string" ? item.title : null,
+          url: typeof item.url === "string" ? item.url : null,
+          meta_json: item.meta !== undefined ? JSON.stringify(item.meta) : null
+        });
+      }
+
+      const stmt = env.DB.prepare(`
+        INSERT OR IGNORE INTO published_items (pipeline, item_key, title, url, meta_json)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      const stmts = normalized.map((item) =>
+        stmt.bind(pipeline, item.item_key, item.title, item.url, item.meta_json)
+      );
+      const results = await env.DB.batch(stmts);
+      const inserted = results.reduce((sum, r) => sum + (r.meta?.changes ?? 0), 0);
+
+      return json({ ok: true, pipeline, received: normalized.length, inserted });
+    }
+
     return json({ error: "Not found" }, 404);
   }
 };

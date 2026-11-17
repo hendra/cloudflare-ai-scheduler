@@ -6,7 +6,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler — and, since late 2026
 
 | Automation | Schedule (UTC) | Destination | Status |
 |---|---|---|---|
-| GitHub Trending Top 10 (`github-trending-daily`) | `50 23 * * *` (06:50 WIB) | Slack `#news` | **enabled** |
+| GitHub Trending Top 5 (`github-trending-daily`) | `50 23 * * *` (06:50 WIB) | Slack `#news` | **enabled** |
 | GitHub Trending weekly (`github-trending-weekly`) | `10 0 * * 1` (Mon 07:10 WIB) | Slack `#news` | **enabled** |
 | Rails remote job search (`rails-job-search-daily` + `-2000`) | 06:45 + 20:00 WIB | Slack `#jobs` | **enabled** |
 | RailsDev.io blog writer (`railsdev-blog-writer` + `-1130`, `-1620`) | 07:45 + 11:30 + 16:20 WIB | PR on `hendra/railsdev-site` | **enabled** |

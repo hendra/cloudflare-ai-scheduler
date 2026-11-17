@@ -1,4 +1,4 @@
-# Weekly GitHub Trending Top 10 → Slack #news
+# Weekly GitHub Trending Top 5 → Slack #news
 
 ## Role
 
@@ -19,7 +19,7 @@ Every Monday, find the 10 most trending GitHub repositories of the PREVIOUS WEEK
 ## Rules and Constraints
 
 - Run fully autonomously. Do not ask for approval.
-- Take the top 10 in the order GitHub ranks them on the trending page.
+- Take the top 5 in the order GitHub ranks them on the trending page.
 - Record ONLY what you can verify from GitHub: owner/name, URL, description, primary language, total stars, stars gained this week (as shown on the trending page), forks, license, and latest-release date when visible.
 - Never invent star counts, growth numbers, or repositories. If a number isn't shown, omit it.
 - Why-it-trended statements are based on the README, releases or visible signals — no speculation presented as fact.
@@ -32,7 +32,7 @@ Every Monday, find the 10 most trending GitHub repositories of the PREVIOUS WEEK
 
 1. **Collect data**
    1. Determine today's date (Asia/Jakarta) and the covered period: the previous 7 days (previous Monday through Sunday).
-   2. Fetch https://github.com/trending?since=weekly (all languages). This page is the primary source and shows GitHub's rolling "this week" ranking, which at Monday morning covers the previous week. Take the top 10 in the order GitHub ranks them.
+   2. Fetch https://github.com/trending?since=weekly (all languages). This page is the primary source and shows GitHub's rolling "this week" ranking, which at Monday morning covers the previous week. Take the top 5 in the order GitHub ranks them.
    3. For each repo, record the verifiable fields listed in Rules and Constraints.
    4. Open each repo page (README, recent releases) to understand what it does and whether anything notable shipped during the week.
    5. If github.com/trending cannot be fetched, fall back to the GitHub search API via `gh` (e.g. `gh api "search/repositories?q=created:>=<previous Monday YYYY-MM-DD>&sort=stars&order=desc&per_page=10"`) and clearly label the digest as "fallback: repos created last week, ranked by stars" instead of "GitHub Trending".
@@ -54,7 +54,7 @@ Every Monday, find the 10 most trending GitHub repositories of the PREVIOUS WEEK
 Message format (Slack mrkdwn):
 
 ```
-📊 _GitHub Trending — Top 10 of the Week_
+📊 _GitHub Trending — Top 5 of the Week_
 📅 _Week:_ <YYYY-MM-DD> – <YYYY-MM-DD> | 🔗 <https://github.com/trending?since=weekly|github.com/trending (weekly)>
 
 ━━━━━━━━━━━━━━━━━━━━

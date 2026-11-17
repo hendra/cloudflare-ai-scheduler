@@ -45,6 +45,8 @@ jobs:
       - name: Run digest pipeline
         run: node scripts/inasoft-news-digest.mjs
         env:
+          SCHEDULER_URL: ${{ vars.SCHEDULER_URL }}
+          MANUAL_RUN_TOKEN: ${{ secrets.MANUAL_RUN_TOKEN }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_NEWS_CHANNEL_ID: ${{ secrets.SLACK_NEWS_CHANNEL_ID }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
