@@ -27,6 +27,12 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Published-ledger self-check
+        run: npm run published:selfcheck
+
+      - name: IG Reel self-check
+        run: python3 scripts/ig_reel/selfcheck.py
+
       - name: Check for merge-conflict markers
         run: |
           if git grep -n -E '^(<<<<<<< |>>>>>>> )' -- .; then

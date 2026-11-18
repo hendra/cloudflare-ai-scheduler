@@ -15,7 +15,15 @@ const TRACKING_PARAMS = new Set([
   "mc_eid",
 ]);
 
-const STOPWORDS = new Set(["the", "and", "dan", "yang"]);
+const STOPWORDS = new Set([
+  // function words (EN + ID)
+  "the", "and", "dan", "yang", "with", "for", "from", "into", "using", "how", "what",
+  "when", "why", "your", "you", "that", "this", "are", "was", "were", "its", "not",
+  "but", "can", "all", "any", "our", "cara", "bikin", "buat", "trik", "untuk", "dari",
+  "jadi", "dengan", "di", "ke", "ini", "itu", "agar", "supaya", "pada", "saat",
+  // filler that appears in most titles and carries no topic signal
+  "practical", "guide",
+]);
 
 const NAMED_ENTITIES = {
   amp: "&",
@@ -116,7 +124,8 @@ function stem(word) {
 function stemmedTokens(normalized) {
   const tokens = new Set();
   for (const w of normalized.split(" ")) {
-    if (w.length >= 3 && !STOPWORDS.has(w)) tokens.add(stem(w));
+    // [...w] counts code points, so JS and Python agree on astral characters
+    if ([...w].length >= 3 && !STOPWORDS.has(w)) tokens.add(stem(w));
   }
   return tokens;
 }
@@ -135,9 +144,14 @@ export function isSimilarTitle(a, b) {
   for (const tok of ta) {
     if (tb.has(tok)) shared += 1;
   }
+  const min = Math.min(ta.size, tb.size);
+
+  // Two-token titles are only similar when they are the same two tokens:
+  // "Rails 8 Guide" vs "Guide to Rails" yes, "Rails Deployment" vs "Rails Caching" no.
+  if (min <= 2) return shared === min && ta.size === tb.size;
   // shortcut: lexical only, so paraphrase with no shared words slips through.
   // Upgrade to an AI judge over the 5 nearest titles if that still bites.
-  return shared >= 2 && shared / Math.min(ta.size, tb.size) >= 0.7;
+  return shared >= 2 && shared / min >= 0.8;
 }
 
 export function buildPublishedIndex(rows) {

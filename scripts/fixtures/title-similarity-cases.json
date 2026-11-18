@@ -26,6 +26,22 @@
     ["Ruby on Rails Authentication with Devise", "Rails API Pagination Patterns"],
     ["Cutting Rails Boot Time", "Making Your Rails App Start Faster"],
     ["Cara edit foto malam", "Membuat video pendek dari foto"],
-    ["Trik bikin poster film", "Cara membuat poster bergaya film"]
+    ["Trik bikin poster film", "Cara membuat poster bergaya film"],
+
+    ["Rails Authentication with Devise", "Rails Authentication with Pundit"],
+    ["Rails Authorization with Devise", "Rails Authorization with Pundit"],
+    ["Testing Rails with RSpec", "Testing Rails with Minitest"],
+    ["Deploying Rails with Kamal", "Deploying Rails with Docker"],
+    ["Rails Background Jobs with Sidekiq", "Rails Background Jobs with Solid Queue"],
+    ["Rails API Pagination Patterns", "Rails API Versioning Patterns"],
+    ["Rails Performance Tuning", "Rails Security Tuning"],
+    ["Using Redis for Caching", "Using Postgres for Caching"],
+    ["Rails Note Taking", "Rails Not Something"],
+
+    ["Cara edit foto malam", "Cara edit video malam"],
+    ["Cara hapus latar foto", "Cara hapus latar video"],
+    ["Trik simpan foto di cloud", "Trik simpan video di cloud"],
+    ["Prompt untuk foto produk", "Prompt untuk video produk"],
+    ["Cara bikin caption Reels", "Cara bikin hook Reels"]
   ]
 }
