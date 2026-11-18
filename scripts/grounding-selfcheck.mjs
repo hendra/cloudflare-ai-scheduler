@@ -2,7 +2,8 @@
 // Run: node scripts/grounding-selfcheck.mjs
 import assert from "node:assert/strict";
 
-const { numbersIn, riskyNumbers, proseOnly, extractPageText, fetchSourceText } = await import("./grounding.mjs");
+const { numbersIn, riskyNumbers, proseOnly, extractPageText, fetchSourceText, checkGrounding } =
+  await import("./grounding.mjs");
 
 // --- numbersIn: Indonesian vs English scale words, thousands vs decimal ---
 assert.deepEqual([...numbersIn("8.700 pengguna")], ["8700"]);
@@ -55,4 +56,15 @@ globalThis.fetch = stubFetch(longHtml, "text/html", 404);
 assert.equal((await fetchSourceText("https://a.test/missing")).ok, false, "non-2xx is dead");
 globalThis.fetch = realFetch;
 
-console.log("grounding-selfcheck: fetch ok");
+// --- checkGrounding: invented numbers and dead sources both fail ---
+const sources = [{ url: "https://nodejs.org/api/stream.html", text: "Streams buffer up to 16 KB by default. ".repeat(8) + "Released in 2026." }];
+assert.equal(checkGrounding({ body: "Streams buffer up to 16 KB by default.", sources }).ok, true);
+const bad = checkGrounding({ body: "Streams are 40% faster and use 512 MB.", sources });
+assert.equal(bad.ok, false);
+assert.deepEqual(bad.unverified.sort(), ["40", "512"]);
+const dead = checkGrounding({ body: "Streams buffer up to 16 KB by default.", sources: [{ url: "https://x.test/a", text: "" }] });
+assert.equal(dead.ok, false);
+assert.deepEqual(dead.deadSources, ["https://x.test/a"]);
+assert.equal(checkGrounding({ body: "```js\nconst n = 512;\n```\nStreams buffer up to 16 KB.", sources }).ok, true);
+
+console.log("grounding-selfcheck: ok");

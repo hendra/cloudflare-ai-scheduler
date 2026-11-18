@@ -18,6 +18,7 @@
     "selfcheck": "node scripts/ai-providers-selfcheck.mjs",
     "aeo:selfcheck": "node scripts/blog-aeo-selfcheck.mjs",
     "grounding:selfcheck": "node scripts/grounding-selfcheck.mjs",
+    "blog:grounding:selfcheck": "node scripts/blog-grounding-selfcheck.mjs",
     "published:selfcheck": "node scripts/published-selfcheck.mjs",
     "index:selfcheck": "node scripts/site-index-selfcheck.mjs",
     "cover:selfcheck": "node scripts/cover/selfcheck.mjs",

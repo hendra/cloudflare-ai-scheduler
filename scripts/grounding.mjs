@@ -156,3 +156,23 @@ export async function fetchSourceText(url, { timeout = 25_000 } = {}) {
     return fail();
   }
 }
+
+// ---------- the gate ----------
+
+// Every risky number in the prose must appear in at least one readable source, and every
+// cited source must be readable. Sources that returned no text are dead, not harmless.
+export function checkGrounding({ body = "", sources = [], minChars = MIN_SOURCE_CHARS } = {}) {
+  const deadSources = [];
+  const allowed = new Set();
+  for (const src of sources) {
+    const text = String(src?.text || "");
+    if (text.trim().length < minChars) { deadSources.push(String(src?.url || "")); continue; }
+    for (const n of numbersIn(text, { keepRaw: false })) allowed.add(n);
+  }
+  const unverified = riskyNumbers(proseOnly(body)).filter((n) => !allowed.has(n));
+  const errs = [
+    ...deadSources.map((u) => `cited source has no readable text: ${u}`),
+    ...unverified.map((n) => `number not found in any source: ${n}`),
+  ];
+  return { ok: errs.length === 0, errs, unverified, deadSources };
+}
