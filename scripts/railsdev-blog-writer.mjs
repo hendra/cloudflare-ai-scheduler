@@ -47,6 +47,14 @@ const RAILSDEV_PAT = process.env.RAILSDEV_PAT || "";
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
 const SLACK_CHANNEL = process.env.SLACK_RAILSDEV_CHANNEL_ID || "";
 const SERVICE_VALUES = ["MVP Build", "Rails Upgrade", "Custom Module", "AI Integration", "Code Audit"];
+// Canonical service page each contactServices enum maps to (relative URLs only).
+const SERVICE_LINKS = {
+  "MVP Build": "/services/saas-mvp-development",
+  "Rails Upgrade": "/services/legacy-rails-modernization",
+  "Custom Module": "/services/custom-web-application-development",
+  "Code Audit": "/services/ruby-on-rails-consulting",
+  "AI Integration": "/services/ai-software-development",
+};
 const strip = (s) => String(s || "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
 
 // ---------- tiny helpers ----------
@@ -110,7 +118,7 @@ const loadCorpus = loadBlogCorpus;
 
 // ---------- AI-stub article (offline testing only) ----------
 function stubArticle() {
-  const body = `## The problem\n\nRails teams keep re-litigating the same decision. ${"Stubbed section on the core tradeoffs. ".repeat(90)}\n\n## How this works\n\n\`\`\`ruby\n# frozen_string_literal: true\nclass Migrator\n  def call\n    ActiveRecord::Migration.maintain_test_schema!\n  end\nend\n\`\`\`\n\n${"Rails internals explained step by step. ".repeat(90)}\n\n## Common mistakes\n\n${"Patterns to avoid when adopting this at scale, drawn from team experience. ".repeat(90)}\n\n## Verification\n\n> Verification note: stubbed content for pipeline testing only. Not for publication.\n\n## FAQ\n\n${"Frequently asked questions and direct answers. ".repeat(70)}\n\n## Conclusion\n\n${"Wrap-up and next steps for your team. ".repeat(70)}`;
+  const body = `Rails migration testing is the practice of exercising schema changes against a real database state before deploying so production locks and data corruption are caught in CI. ${"Stubbed lead context on why migration testing matters. ".repeat(4)}\n\n## The problem\n\nRails teams keep re-litigating the same decision. For background, see the [official Rails Migrations guide](https://guides.rubyonrails.org/active_record_migrations.html) and our [Rails Upgrade service](/services/legacy-rails-modernization). ${"Stubbed section on the core tradeoffs. ".repeat(90)}\n\n## How this works\n\n\`\`\`ruby\n# frozen_string_literal: true\nclass Migrator\n  def call\n    ActiveRecord::Migration.maintain_test_schema!\n  end\nend\n\`\`\`\n\n${"Rails internals explained step by step. ".repeat(90)}\n\n## Common mistakes\n\n${"Patterns to avoid when adopting this at scale, drawn from team experience. ".repeat(90)}\n\n## Verification\n\n> Verification note: stubbed content for pipeline testing only. Not for publication.\n\n## Frequently asked questions\n\n### How do you test a Rails migration safely?\n\nRun it up, down, and up again in CI against seeded data before merging.\n\n### Should migrations use model classes directly?\n\nNo — declare a local stub class inside the migration or use raw SQL so future model changes do not break old migrations.\n\n## Conclusion\n\nTest every migration locally and in CI before it touches production. If you need help planning a zero-downtime upgrade, [book a discovery call](/#contact). ${"Wrap-up and next steps for your team. ".repeat(65)}`;
   return { title: "Rails Migration Testing: A Practical Guide", seoTitle: "Rails Migration Testing: A Practical Guide", description: "Practical guide to writing and verifying Rails migrations in large apps: PostgreSQL pitfalls, Active Record internals and zero-downtime deploy testing.", keyword: "rails migration testing", slug: "rails-migration-testing-guide", service: "Rails Upgrade", coverAlt: "Diagram of a Rails migration being tested against a PostgreSQL database, with rollback steps", body };
 }
 
@@ -155,13 +163,23 @@ function validateArticle(a, corpusSlugs) {
   const bodyNoFences = String(a.body || "").split(/```/).filter((_, i) => i % 2 === 0).join("\n");
   req(!/lorem(?:\s|_)ipsum|\{placeholder\}|\[insert/i.test(bodyNoFences), "placeholder token in body");
   const kw = a.keyword || "";
-  const norm = (t) => String(t || "").toLowerCase().replace(/[\u2010\u2011\u2012\u2013\u2014-]/g, " ").replace(/\s+/g, " ").trim();
+  const norm = (t) => String(t || "").toLowerCase().replace(/[\u2010\u2011\u2012\u2013\u2014-]/g, " ").replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim();
   const kwWords = norm(kw).split(/\s+/).filter((w) => w.length > 2);
+  const firstParagraph = bodyNoFences.trim().split(/\n\s*\n/)[0] || "";
+  req(norm(firstParagraph).includes(norm(kw)), "keyword missing from first paragraph");
   const hay = norm((a.title || "") + " " + (a.description || "") + " " + bodyNoFences.slice(0, 2000));
   req(kwWords.every((w) => hay.includes(w)), "keyword words missing from title/description/intro");
   req(/verification note/i.test(a.body), "no verification note");
-  const links = a.body.match(/\]\((https?:\/\/[^)\s]+)\)/g) || [];
-  return { ok: errs.length === 0, errs, wordCount: words, links: [...new Set(links.map((l) => l.slice(2, -1)))].slice(0, 15) };
+  req(/^## Frequently asked questions\b/im.test(bodyNoFences), 'missing "## Frequently asked questions" section');
+  req(/^## Conclusion\b/im.test(bodyNoFences), 'missing "## Conclusion" section');
+  const internal = (bodyNoFences.match(/\]\((\/[^)\s]*)\)/g) || []).map((m) => m.slice(2, -1));
+  req(internal.some((h) => h.startsWith("/services/")), "missing /services/<slug> link");
+  req(internal.some((h) => h === "/#contact"), "missing /#contact CTA link");
+  req(new Set(internal).size >= 2, `only ${new Set(internal).size} distinct internal links (need >= 2)`);
+  const links = bodyNoFences.match(/\]\((https?:\/\/[^)\s]+)\)/g) || [];
+  const externalLinks = [...new Set(links.map((l) => l.slice(2, -1)))].filter((u) => !/^https?:\/\/(www\.)?railsdev\.io\b/.test(u));
+  req(externalLinks.length >= 1, "missing external primary-source citation (need >= 1)");
+  return { ok: errs.length === 0, errs, wordCount: words, links: externalLinks.slice(0, 15) };
 }
 
 // ---------- frontmatter ----------
@@ -278,15 +296,23 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
 
   // 3) article body (metadata already produced in the topic call)
   const existingLinks = corpus.slice(0, 40).map((c) => `/blog/${c.slug} — ${c.title}`).join("\n");
-  const bodyPrompt = `Write the body of one RailsDev.io (railsdev.io) blog article in English: first person, senior-Rails-consultant voice — practical, specific, opinionated, honest about uncertainty.
+  const serviceHref = SERVICE_LINKS[meta.service] || "/services/ruby-on-rails-development";
+  const bodyPrompt = `Write the body of one RailsDev.io (railsdev.io) blog article in English: first person ("I", never "we" for RailsDev), senior-Rails-consultant voice — practical, specific, opinionated, honest about uncertainty.
 Topic: ${topic.topic}. Keyword: "${meta.keyword}". Angle: ${topic.angle}. Title: ${meta.title}.
 Requirements:
 - 1800-2400 words. H2/H3 sections only, never a # H1 line.
+- First paragraph (before the first ## heading): include the exact keyword "${meta.keyword}" naturally and directly answer the core question ("X is ...").
 - At least one fenced ruby or bash code example.
 - An explicit blockquote "Verification note" for anything unverified; never invent benchmarks, versions, dates or statistics.
-- At most 2 internal links to these existing posts:
+- Required sections near the end:
+  - \`## Frequently asked questions\` with 4-6 \`###\` question headings and concise direct answers.
+  - \`## Conclusion\` ending with a natural CTA linking to \`/#contact\` (e.g. [book a discovery call](/#contact)).
+- Internal links (2-4 total, all relative paths):
+  - Link to the matching service page: \`${serviceHref}\`
+  - Link to \`/#contact\` in the Conclusion
+  - Optionally 1-2 links to these existing posts:
 ${existingLinks}
-- Reference ONLY real URLs (official docs and the like). If a fact can't be verified, say so in the verification note rather than asserting it.
+- Cite at least 1 real external primary source (official docs, GitHub repo, release notes — full \`https://...\` URL). If a fact can't be verified, say so in the verification note rather than asserting it.
 Return ONLY the article body as markdown: the opening paragraph and "##" sections. No title, no frontmatter, no preamble, no trailing notes.`;
   const body = AI_STUB ? stubArticle().body : await (async () => {
     let lastWords = 0;
@@ -371,7 +397,17 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   writeFileSync(mdPath, frontmatter(article));
   console.log("wrote", mdPath);
 
-  // 7) build must pass
+  // 7) post lint + build must pass
+  const checkScript = join(SITE_DIR, ".claude/skills/write-blog-article/scripts/check_post.mjs");
+  if (existsSync(checkScript)) {
+    console.log("running check_post.mjs …");
+    try { execFileSync("node", [checkScript, join("src/content/blog", `${article.slug}.md`)], { cwd: SITE_DIR, stdio: "pipe" }); }
+    catch (e) {
+      const out = (String(e.stdout || "") + "\n" + String(e.stderr || "")).trim();
+      await fail(`post AEO/GEO check failed:\n${out.slice(-800)}`);
+      return;
+    }
+  }
   console.log("running astro check && astro build …");
   try { execSync("npm run build", { cwd: SITE_DIR, stdio: "pipe", timeout: 600000, env: { ...process.env, GSC_SERVICE_ACCOUNT_JSON: undefined } }); }
   catch (e) {
