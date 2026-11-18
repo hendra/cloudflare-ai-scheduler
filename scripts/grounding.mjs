@@ -72,3 +72,87 @@ export function riskyNumbers(text) {
   for (const n of flagged) risky.add(n);
   return [...risky].sort();
 }
+
+// ---------- prose extraction ----------
+
+const FENCE_RE = /^```[\s\S]*?^```[ \t]*$/gm;
+const INLINE_CODE_RE = /`[^`\n]*`/g;
+const LINK_RE = /\[([^\]]*)\]\((?:[^()\s]*)\)/g;
+const BARE_URL_RE = /<?https?:\/\/[^\s>)\]]+/gi;
+const FRONTMATTER_RE = /^---\n[\s\S]*?\n---\n/;
+
+// The parts of a markdown body that can carry a claim: code samples and URLs cannot.
+export function proseOnly(markdown) {
+  return String(markdown)
+    .replace(FRONTMATTER_RE, "")
+    .replace(FENCE_RE, " ")
+    .replace(INLINE_CODE_RE, " ")
+    .replace(LINK_RE, "$1")
+    .replace(BARE_URL_RE, " ")
+    .replace(/\|\s*:?-{2,}:?\s*/g, " ")
+    .replace(/[|*_#>]/g, " ");
+}
+
+const DROP_BLOCKS_RE = /<(script|style|nav|header|footer|aside|noscript|svg)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
+const TEXT_BLOCKS_RE = /<(p|li|pre|dd|blockquote)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi;
+const TD_RE = /<td\b[^>]*>([\s\S]*?)<\/td\s*>/gi;
+const TAG_RE = /<[^>]+>/g;
+const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+
+function unescapeEntities(s) {
+  return s.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (m, name) => {
+    const key = String(name).toLowerCase();
+    if (key.startsWith("#x")) return String.fromCodePoint(parseInt(key.slice(2), 16) || 32);
+    if (key.startsWith("#")) return String.fromCodePoint(parseInt(key.slice(1), 10) || 32);
+    return ENTITIES[key] ?? m;
+  });
+}
+
+function toText(fragment) {
+  return unescapeEntities(fragment.replace(TAG_RE, " ")).replace(/\s+/g, " ").trim();
+}
+
+// Readable page text for grounding. Wider than IG Reel's <p>-only rule on purpose: the blog
+// prompt invites RFC/spec citations whose bodies live in <pre>/<li>/<td>.
+export function extractPageText(html, cap = 6000) {
+  const cleaned = String(html).replace(DROP_BLOCKS_RE, " ");
+  const parts = [];
+  for (const re of [TEXT_BLOCKS_RE, TD_RE]) {
+    for (const m of cleaned.matchAll(re)) {
+      const text = toText(m[m.length - 1]);
+      if (text) parts.push(text);
+    }
+  }
+  return parts.join("\n").slice(0, cap);
+}
+
+// ---------- source fetching ----------
+
+const UA = "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0";
+const MAX_BYTES = 2_000_000;
+const MIN_SOURCE_CHARS = 200;
+
+// A citation only grounds claims when it returns real page text: 2xx alone is not enough.
+export async function fetchSourceText(url, { timeout = 25_000 } = {}) {
+  const target = String(url || "").trim();
+  const fail = (status = 0) => ({ ok: false, status, text: "" });
+  let parsed;
+  try { parsed = new URL(target); } catch { return fail(); }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return fail();
+  try {
+    const res = await fetch(target, {
+      headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeout),
+    });
+    if (res.status < 200 || res.status >= 300) return fail(res.status);
+    const ctype = res.headers.get("content-type") || "";
+    if (!ctype.toLowerCase().includes("html")) return fail(res.status);
+    const buf = Buffer.from(await res.arrayBuffer()).subarray(0, MAX_BYTES);
+    const text = extractPageText(buf.toString("utf-8"));
+    if (text.length < MIN_SOURCE_CHARS) return fail(res.status);
+    return { ok: true, status: res.status, text };
+  } catch {
+    return fail();
+  }
+}

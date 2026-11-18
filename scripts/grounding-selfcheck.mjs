@@ -2,7 +2,7 @@
 // Run: node scripts/grounding-selfcheck.mjs
 import assert from "node:assert/strict";
 
-const { numbersIn, riskyNumbers } = await import("./grounding.mjs");
+const { numbersIn, riskyNumbers, proseOnly, extractPageText, fetchSourceText } = await import("./grounding.mjs");
 
 // --- numbersIn: Indonesian vs English scale words, thousands vs decimal ---
 assert.deepEqual([...numbersIn("8.700 pengguna")], ["8700"]);
@@ -20,4 +20,39 @@ assert.deepEqual(riskyNumbers("costs $19 per seat"), ["19"]);
 assert.deepEqual(riskyNumbers("GPT-4o and the older model"), ["4"]);
 assert.deepEqual(riskyNumbers("1,000 requests"), ["1000"]);
 
-console.log("grounding-selfcheck: numbers ok");
+// --- proseOnly: code and URLs are not claims ---
+const md = [
+  "Set memory to `--max-old-space-size=4096` and see 4096 MB.",
+  "```bash",
+  "curl -X POST https://api.example.com/v2/items?limit=500",
+  "```",
+  "Then read [the docs](https://nodejs.org/api/stream.html#api-12345).",
+].join("\n");
+const prose = proseOnly(md);
+assert.ok(prose.includes("4096 MB"), "plain prose numbers stay");
+assert.ok(!prose.includes("example.com"), "link URLs and fenced code must be stripped");
+assert.ok(!prose.includes("--max-old-space-size"), "inline code must be stripped");
+assert.ok(prose.includes("the docs"), "link text stays");
+
+// --- extractPageText: RFC-style <pre> bodies count ---
+const html = '<nav>skip me</nav><pre>1.  Introduction\n   The value MUST be 4096.</pre><p>Also 200.</p>';
+const text = extractPageText(html);
+assert.ok(text.includes("4096") && text.includes("200"));
+assert.ok(!text.includes("skip me"), "nav stripped");
+
+// --- fetchSourceText: 200 with no body text is a dead source, non-HTML is refused ---
+const stubFetch = (body, type = "text/html; charset=utf-8", status = 200) => async () =>
+  new Response(body, { status, headers: { "content-type": type } });
+const realFetch = globalThis.fetch;
+const longHtml = "<p>" + "Streams buffer chunks. ".repeat(20) + "</p>";
+globalThis.fetch = stubFetch(longHtml);
+assert.equal((await fetchSourceText("https://a.test/doc")).ok, true);
+globalThis.fetch = stubFetch("<p>short</p>");
+assert.equal((await fetchSourceText("https://a.test/doc")).ok, false, "200 with no body text is dead");
+globalThis.fetch = stubFetch(JSON.stringify({ ok: 1 }), "application/json");
+assert.equal((await fetchSourceText("https://a.test/api")).ok, false, "non-HTML is refused");
+globalThis.fetch = stubFetch(longHtml, "text/html", 404);
+assert.equal((await fetchSourceText("https://a.test/missing")).ok, false, "non-2xx is dead");
+globalThis.fetch = realFetch;
+
+console.log("grounding-selfcheck: fetch ok");
