@@ -1,0 +1,31 @@
+{
+  "similar": [
+    ["Rails Migration Testing: A Practical Guide", "Testing Rails Migrations in Production"],
+    ["Rails 8 Solid Queue in Production", "Solid Queue in Production with Rails 8"],
+    ["Zero-Downtime PostgreSQL Migrations in Rails", "Zero Downtime Database Migrations for PostgreSQL"],
+    ["How to Test Rails Migrations", "A Guide to Testing Database Migrations in Rails"],
+    ["Rails Caching Strategies", "Caching Strategies for Rails Apps"],
+    ["Turbo Streams vs Hotwire Frames", "Hotwire: Turbo Frames and Streams Explained"],
+    ["Scaling Sidekiq Workers", "Sidekiq Scaling: Running Many Workers"],
+    ["Ruby on Rails Authentication with Devise", "Devise Authentication in Rails"],
+    ["Rails 8 Guide", "Guide to Rails"],
+    ["Introducing [OI] GPT-5 for Developers", "[OI] introduces GPT-5 for developers!"],
+    ["Webb finds glass rain on exoplanet", "NASA Webb Finds Glass Rain on Exoplanet!"],
+    ["Migrating from Devise to Rails Authentication", "Rails Authentication Migration Away from Devise"]
+  ],
+  "distinct": [
+    ["Ruby on Rails 8 Release Notes", "PostgreSQL Vacuum Tuning Guide"],
+    ["Rails Authentication with Devise", "Rails Authorization with Pundit"],
+    ["Deno 3 Native HTTP Server Benchmarks for Backend Teams", "Zero-Downtime PostgreSQL Migrations in Rails"],
+    ["Rails Migrations", "Kubernetes Ingress Controllers"],
+    ["Turbo Streams vs Hotwire Frames", "Stimulus Controllers in Rails"],
+    ["Rails Caching Strategies", "Rails Job Queues with Sidekiq"],
+    ["Zero-Downtime PostgreSQL Migrations in Rails", "PostgreSQL Index Tuning"],
+    ["How to Test Rails Migrations", "Testing React Components"],
+    ["Scaling Sidekiq Workers", "Deploying Rails with Kamal"],
+    ["Ruby on Rails Authentication with Devise", "Rails API Pagination Patterns"],
+    ["Cutting Rails Boot Time", "Making Your Rails App Start Faster"],
+    ["Cara edit foto malam", "Membuat video pendek dari foto"],
+    ["Trik bikin poster film", "Cara membuat poster bergaya film"]
+  ]
+}
