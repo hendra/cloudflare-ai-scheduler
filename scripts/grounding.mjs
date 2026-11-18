@@ -99,8 +99,6 @@ export function riskyNumbers(text) {
   for (const n of numbersIn(src, { keepRaw: false })) {
     if (isYear(n)) continue;
     if (moneyStubs.has(n)) continue;
-    // "$1.5M" is one figure worth 1.5 million, not the 1.5 stub plus its own scale.
-    if (new RegExp(`(?<![\\d.,])${n.replace(/\./g, "\\.")}\\s*[KMBT]\\b`).test(src)) continue;
     if (/^\d+$/.test(n) && Number(n) < 10 && !flagged.has(n)) continue;
     risky.add(n);
   }
@@ -253,18 +251,25 @@ export function checkGrounding({ body = "", sources = [], minChars = MIN_SOURCE_
     for (let i = 1; i < parts.length; i++) prefixes.add(parts.slice(0, i).join("."));
   }
   const prose = proseOnly(body);
-  const isVersionMention = (n) =>
-    new RegExp(
-      `(?<![A-Za-z])(?:node|node\\.js|npm|rails|ruby|python|php|go|java|react|next\\.js|vue|postgres(?:ql)?|mysql|redis|chrome|firefox|safari|typescript|v)\\s*${n.replace(/\./g, "\\.")}(?!\\d|\\.\\d)`,
-      "i",
-    ).test(prose);
+  const VERSION_WORDS = "(?:node|node\\.js|npm|rails|ruby|python|php|go|java|react|next\\.js|vue|postgres(?:ql)?|mysql|redis|chrome|firefox|safari|typescript|v)";
+  const everyOccurrenceIsVersion = (n) => {
+    const esc = n.replace(/\./g, "\\.");
+    const occRe = new RegExp(`(?<![\\d.,])${esc}(?!\\d|[.,]\\d)`, "g");
+    const prefixRe = new RegExp(`(?<![A-Za-z])${VERSION_WORDS}\\s*$`, "i");
+    const unitAfterRe = /^\s*(?:%|persen|percent)\b/i;
+    let seen = false;
+    for (const m of prose.matchAll(occRe)) {
+      seen = true;
+      const before = prose.slice(0, m.index);
+      const after = prose.slice(m.index + m[0].length);
+      if (!prefixRe.test(before) || unitAfterRe.test(after)) return false;
+    }
+    return seen;
+  };
   const unverified = riskyNumbers(prose).filter((n) => {
     if (allowed.has(n)) return false;
     if (!/^\d+(\.\d+)*$/.test(n) || !prefixes.has(n)) return true;
-    // A percentage or a currency amount is never a version, whatever a source's version says.
-    const asUnit = new RegExp(`(?<![\\d.,])${n.replace(/\./g, "\\.")}\\s*(?:%|persen|[KMBT]\\b)`, "i");
-    if (asUnit.test(prose)) return true;
-    return !isVersionMention(n);
+    return !everyOccurrenceIsVersion(n);
   });
   const errs = [
     ...deadSources.map((u) => `cited source has no readable text: ${u}`),

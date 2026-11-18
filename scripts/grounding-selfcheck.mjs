@@ -180,4 +180,22 @@ assert.deepEqual(riskyNumbers(proseOnly("- Raise the pool:\n    1. open 4096 soc
 assert.deepEqual(riskyNumbers(proseOnly("- Tunables:\n        - 4096 sockets per worker")), ["4096"]);
 assert.deepEqual(riskyNumbers(proseOnly("    const n = 512;")), [], "a real indented code block is still code");
 
+// --- uppercase K/M/B/T without a currency symbol must still be checked ---
+for (const body of ["It handles 500 M requests.", "Temperature is 300 K.", "Magnetic field is 15 T."]) {
+  assert.ok(riskyNumbers(body).length > 0, body);
+}
+
+// --- version mention licenses ONLY if EVERY occurrence in the prose is a version ---
+const vSrc = [{ url: "x", text: "Node.js 20.11.1 shipped. " + "Filler text. ".repeat(40) }];
+for (const body of [
+  "Node 20 is current. Latency is 20 ms.",
+  "Node 20 is current. Needs 20 GB RAM.",
+  "Node 20 is current. Handles 20 requests.",
+  "Node 20 is current. It is 20 percent faster.",
+  "Node 20 is current. Hosting is $20.",
+]) {
+  assert.deepEqual(checkGrounding({ body, sources: vSrc }).unverified, ["20"], body);
+}
+assert.deepEqual(checkGrounding({ body: "Node 20 is current. Built on Node 20.", sources: vSrc }).unverified, [], "two version mentions stay grounded");
+
 console.log("grounding-selfcheck: ok");

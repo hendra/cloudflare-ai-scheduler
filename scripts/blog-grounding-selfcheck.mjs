@@ -124,4 +124,17 @@ const bareUrl = await groundArticle({
 assert.equal(bareUrl.ok, false);
 assert.deepEqual(bareUrl.deadSources, ["https://dead.test/x"]);
 
+// Trailing sentence punctuation on a bare URL must not corrupt the URL fetched.
+const barePunct = await groundArticle({
+  article: article("Limit is 999 MB."),
+  links: ["https://a.test/doc"],
+  signalUrl: null,
+  callModel: async () => "Limit is 512 MB. See https://a.test/extra. Or <https://a.test/extra2>!",
+  fetchSourceText: async (url) => {
+    assert.ok(!/[.>!]/.test(url.slice(-1)), "trailing punctuation leaked: " + url);
+    return fakeFetch(url);
+  },
+});
+assert.equal(barePunct.ok, true);
+
 console.log("blog-grounding-selfcheck: ok");

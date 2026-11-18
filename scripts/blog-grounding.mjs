@@ -75,7 +75,7 @@ export async function groundArticle({
   // Markdown links and bare URLs both count as citations, so neither can slip past unread.
   const cited = [
     ...[...repairedBody.matchAll(/\]\((https?:\/\/[^)\s]+)\)/g)].map((m) => m[1]),
-    ...[...repairedBody.matchAll(/(?<![("\[])(https?:\/\/[^\s)\]]+)/g)].map((m) => m[1]),
+    ...[...repairedBody.matchAll(/(?<![("\[])(https?:\/\/[^\s>)\]]+)/g)].map((m) => m[1].replace(/[.,;:!?]+$/, "")),
   ];
   const known = new Set(sources.map((s) => s.url));
   const { sources: extra, deadSources: extraDead } = await collectSources(
