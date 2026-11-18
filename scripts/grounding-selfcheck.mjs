@@ -108,4 +108,9 @@ assert.deepEqual(checkGrounding({ body: "Use 33 workers.", sources: verSrc }).un
 const divPage = "<div><div>" + "An article paragraph with real words in it. ".repeat(10) + "</div></div>";
 assert.ok(extractPageText(divPage).includes("article paragraph"), "div-only pages must yield text");
 
+// --- nested <div> soup must not truncate a page's structured text (nodejs.org regression) ---
+const nested = "<div><div>" + "<p>The default highWaterMark is 16384 bytes.</p>" + "<p>" + "Filler text here. ".repeat(20) + "</p></div></div>";
+const nestedText = extractPageText(nested);
+assert.ok(nestedText.includes("16384"), "nested divs must not cut structured text");
+
 console.log("grounding-selfcheck: ok");
