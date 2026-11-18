@@ -14,8 +14,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from ig_reel.story import (  # noqa: E402
     apply_story_limits, build_caption, canonical_url, check_story, extract_article_text, extract_buffer_prompts,
     extract_buffer_seen, feed_body, filter_unseen_news, format_date_id, grounding_text, interleave, is_similar_title,
-    normalize_title, numbers_in, order_by_source, tip_duplicate_error, MOODS, STORY_SCHEMA_HINT, normalize_mood,
-    SAMPLE_PROMPT_MAX,
+    normalize_title, numbers_in, order_by_source, proper_noun_errors, tip_duplicate_error, MOODS, STORY_SCHEMA_HINT,
+    normalize_mood, SAMPLE_PROMPT_MAX,
 )
 
 # ---------- story ----------
@@ -60,10 +60,10 @@ STORY = {
     "hook": "Planet ini hujan kaca menyamping",
     "hook_highlight": ["hujan kaca"],
     "beats": [
-        {"role": "context", "text": "Teleskop Webb milik NASA mengamati planet WASP-127b, 520 tahun cahaya dari Bumi.", "highlight": ""},
+        {"role": "context", "text": "Teleskop Webb milik NASA mengamati planet WASP-127b, 520 tahun cahaya dari planet ini.", "highlight": ""},
         {"role": "twist", "text": "Anginnya mencapai 8.700 km/jam — sekitar 7 kali kecepatan suara.", "highlight": "8.700 km/jam"},
         {"role": "why", "text": "Awan silikatnya, alias kaca, ikut terbawa angin menyamping.", "highlight": ""},
-        {"role": "payoff", "text": "Cuaca terburuk di Bumi kalah jauh dari planet ini.", "highlight": ""},
+        {"role": "payoff", "text": "Cuaca terburuk di planet ini kalah jauh dibanding cuaca kita.", "highlight": ""},
     ],
     "cta": "Kirim ke teman yang suka luar angkasa 🚀",
     "image_prompts": ["glass rain planet", "webb telescope", "storm winds", "silicate clouds"],
@@ -73,6 +73,38 @@ STORY = {
 }
 hard, soft = check_story(copy.deepcopy(STORY), ARTICLE)
 assert hard == [], hard
+
+# --- proper nouns: fabricated names are reported, real ones pass ---
+pn = copy.deepcopy(STORY)
+pn["beats"][1]["text"] = "Teleskop Zorblax menemukan oksigen di planet itu."
+errs = proper_noun_errors(pn, ARTICLE)
+assert any("Zorblax" in e for e in errs), errs
+
+pn_ok = copy.deepcopy(STORY)
+pn_ok["beats"][1]["text"] = "Teleskop James Webb menemukan oksigen di planet itu."
+assert proper_noun_errors(pn_ok, ARTICLE + " The James Webb Telescope found oxygen.") == []
+
+# First token of a field is exempt (Indonesian sentence starters, translated names).
+pn_first = copy.deepcopy(STORY)
+pn_first["hook"] = "Bumi makin panas"
+assert proper_noun_errors(pn_first, ARTICLE) == []
+
+# Captions and hashtags are not scanned.
+pn_cap = copy.deepcopy(STORY)
+pn_cap["caption"]["body"] = "Menurut NASA dan ESA, ini penting."
+assert proper_noun_errors(pn_cap, ARTICLE) == []
+
+# It is hard, so write_story upgrades its existing repair call (the model renames the object
+# to the article's own term or rephrases) and only then drops the candidate.
+pn_repair = copy.deepcopy(STORY)
+pn_repair["beats"][1]["text"] = "Teleskop Zorblax menemukan oksigen, anginnya 8.700 km/jam."
+hard_pn, _ = check_story(pn_repair, ARTICLE)
+assert any("Zorblax" in h for h in hard_pn), hard_pn
+
+# A translated name is repairable, not fatal: the repair prompt names it and the model rephrases.
+pn_translated = copy.deepcopy(STORY)
+pn_translated["beats"][1]["text"] = "Anginnya 8.700 km/jam, tujuh kali lebih cepat dari suara di Bumi."
+assert any("Bumi" in h for h in check_story(pn_translated, ARTICLE)[0])
 
 bad = copy.deepcopy(STORY)
 bad["beats"][1]["text"] = "Anginnya mencapai 9.000 km/jam."

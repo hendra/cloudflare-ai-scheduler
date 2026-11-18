@@ -593,6 +593,8 @@ Artikel:
         log("story: validation issues: " + "; ".join(hard))
         fix = ("Perbaiki JSON cerita di bawah agar lolos validasi. Pelanggaran:\n- " + "\n- ".join(hard + soft)
                + "\nTetap HANYA pakai informasi dari artikel; hapus angka yang tidak ada di artikel. "
+               + "Ganti nama diri yang tidak ada di artikel dengan nama yang ada di artikel, "
+               + "atau tulis ulang kalimatnya tanpa nama itu (mis. \"planet kita\"). "
                + "Jawab hanya JSON dengan skema yang sama.\n\nJSON:\n" + json.dumps(data, ensure_ascii=False)
                + "\n\nArtikel:\n" + article)
         data = ai_json(fix)

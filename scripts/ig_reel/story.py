@@ -172,6 +172,36 @@ def copied_from_article(text, article_text, min_words):
     return sum(w in article_words for w in words) / len(words) >= 0.75
 
 
+_PROPER_TOKEN = re.compile(r"[A-Za-z][\w'-]*")
+
+
+def proper_noun_errors(data, article_text):
+    """Capitalised names the article never mentions (soft: one repair call fixes or drops them).
+
+    Only the hook and the beats are scanned — captions and hashtags are not claims — and the
+    first token of each field is exempt, because it is usually a sentence starter and the
+    script is Indonesian while the article is English ("Earth" legitimately becomes "Bumi").
+    """
+    fields = [str(data.get("hook") or "")]
+    for b in data.get("beats") or []:
+        if isinstance(b, dict):
+            fields += [str(b.get("text") or ""), str(b.get("highlight") or "")]
+    haystack = str(article_text).lower()
+    errs = []
+    for text in fields:
+        tokens = text.split()
+        missing = []
+        for tok in tokens[1:]:
+            for word in _PROPER_TOKEN.findall(tok):
+                if not word[:1].isupper() or any(ch.isdigit() for ch in word):
+                    continue
+                if word.lower() not in haystack and word not in missing:
+                    missing.append(word)
+        if missing:
+            errs.append("proper noun not found in the article text: " + ", ".join(missing))
+    return errs
+
+
 def hook_phrases(data):
     """hook_highlight as a list (models sometimes return a single string)."""
     hl = data.get("hook_highlight")
@@ -327,6 +357,11 @@ def check_story(data, article_text, extra_allowed=(), mode="news"):
         lang_errs.append("beats (overall)")
     if lang_errs:
         hard.append("must be written in Bahasa Indonesia, not English: " + ", ".join(dict.fromkeys(lang_errs)))
+
+    # A hard finding, so write_story makes exactly one repair call (drop the name or use the
+    # article's own), then drops the candidate. Soft would only be truncated, never repaired.
+    if mode != "tip":
+        hard.extend(proper_noun_errors(data, article_text))
 
     if mode == "tip":
         sp = str(data.get("sample_prompt") or "").strip()
