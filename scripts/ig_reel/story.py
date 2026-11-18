@@ -172,6 +172,68 @@ def copied_from_article(text, article_text, min_words):
     return sum(w in article_words for w in words) / len(words) >= 0.75
 
 
+_PROPER_TOKEN = re.compile(r"[A-Za-z][\w'-]*")
+# Words the prompt itself tells the model to write ("Simpan Reel ini"); not source claims.
+_PLATFORM_WORDS = {"reel", "instagram", "tiktok", "youtube", "shorts"}
+
+
+def _sentence_starts(text):
+    """Indexes of tokens that open a sentence (first token, or right after . ! ? … :)."""
+    starts, at_start = set(), True
+    for i, tok in enumerate(text.split()):
+        if at_start:
+            starts.add(i)
+        at_start = tok.endswith((".", "!", "?", "…", ":", '"'))
+    return starts
+
+
+def _unknown_caps(data, article_text):
+    """(mid_sentence, sentence_initial) capitalised tokens the article never uses.
+
+    Acronyms, tokens with digits and platform words are not names. A token matches when the
+    article contains it anywhere (case-insensitive), so "Astronom" is grounded by "Astronomers".
+    """
+    fields = [str(data.get("hook") or "")]
+    for b in data.get("beats") or []:
+        if isinstance(b, dict):
+            fields += [str(b.get("text") or ""), str(b.get("highlight") or "")]
+    haystack = str(article_text).lower()
+    # Word boundary match: "Tim" must not match "estimate", while "NASA's" still matches NASA.
+    words = set(re.findall(r"[a-z]+", haystack))
+    mid, initial = [], []
+    for text in fields:
+        starts = _sentence_starts(text)
+        for i, tok in enumerate(text.split()):
+            for word in _PROPER_TOKEN.findall(tok):
+                low = word.lower()
+                if not word[:1].isupper() or any(ch.isdigit() for ch in word):
+                    continue
+                # Also allow a shared word-stem prefix ("Astronom" vs "Astronomers") when >= 5 chars.
+                if low in _PLATFORM_WORDS or low in words or (len(low) >= 5 and any(w.startswith(low) for w in words)):
+                    continue
+                bucket = initial if i in starts else mid
+                if word not in bucket:
+                    bucket.append(word)
+    return mid, initial
+
+
+def proper_noun_errors(data, article_text):
+    """Names in the MIDDLE of a sentence that the article never mentions — a hard finding.
+
+    Sentence-initial tokens are only advisory (proper_noun_advisories): Indonesian capitalises
+    every sentence, so a first-token rule flags ordinary words ("Anginnya", "Teleskop") and no
+    candidate ever passes, which stops the account posting.
+    """
+    mid, _ = _unknown_caps(data, article_text)
+    return ["proper noun not found in the article text: " + ", ".join(mid)] if mid else []
+
+
+def proper_noun_advisories(data, article_text):
+    """Sentence-initial words the article never uses: fed to the repair prompt, never fatal."""
+    _, initial = _unknown_caps(data, article_text)
+    return initial
+
+
 def hook_phrases(data):
     """hook_highlight as a list (models sometimes return a single string)."""
     hl = data.get("hook_highlight")
@@ -327,6 +389,11 @@ def check_story(data, article_text, extra_allowed=(), mode="news"):
         lang_errs.append("beats (overall)")
     if lang_errs:
         hard.append("must be written in Bahasa Indonesia, not English: " + ", ".join(dict.fromkeys(lang_errs)))
+
+    # A hard finding, so write_story makes exactly one repair call (drop the name or use the
+    # article's own), then drops the candidate. Soft would only be truncated, never repaired.
+    if mode != "tip":
+        hard.extend(proper_noun_errors(data, article_text))
 
     if mode == "tip":
         sp = str(data.get("sample_prompt") or "").strip()

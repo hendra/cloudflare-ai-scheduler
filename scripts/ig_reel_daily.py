@@ -89,7 +89,8 @@ from ig_reel.scenes import TIP_KICKERS  # noqa: E402
 from ig_reel.story import (  # noqa: E402
     STORY_SCHEMA_HINT, TIP_MAX_NUMBER, age_days, apply_story_limits, build_caption, canonical_url, check_story,
     extract_article_text, extract_buffer_prompts, extract_buffer_seen, feed_body, filter_unseen_news, format_date_id,
-    grounding_text, interleave, is_similar_title, normalize_title, order_by_source, tip_duplicate_error,
+    grounding_text, interleave, is_similar_title, normalize_title, order_by_source, proper_noun_advisories,
+    tip_duplicate_error,
 )
 
 UA = "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0"
@@ -591,8 +592,15 @@ Artikel:
         log("story: truncating: " + "; ".join(soft))
     if hard:  # soft-only issues are truncated below; a repair call could only make them worse
         log("story: validation issues: " + "; ".join(hard))
-        fix = ("Perbaiki JSON cerita di bawah agar lolos validasi. Pelanggaran:\n- " + "\n- ".join(hard + soft)
+        # Sentence-initial words cannot be told from names, so they are hints for the repair,
+        # not failures: the model renames them when it can, and the story still ships if not.
+        advisory = proper_noun_advisories(data, article)
+        hint = ("\nKata berhuruf besar di awal kalimat yang tidak ada di artikel: " + ", ".join(advisory)
+                + ". Kalau itu nama, ganti dengan istilah dari artikel.") if advisory else ""
+        fix = ("Perbaiki JSON cerita di bawah agar lolos validasi. Pelanggaran:\n- " + "\n- ".join(hard + soft) + hint
                + "\nTetap HANYA pakai informasi dari artikel; hapus angka yang tidak ada di artikel. "
+               + "Ganti nama diri yang tidak ada di artikel dengan nama yang ada di artikel, "
+               + "atau tulis ulang kalimatnya tanpa nama itu (mis. \"planet kita\"). "
                + "Jawab hanya JSON dengan skema yang sama.\n\nJSON:\n" + json.dumps(data, ensure_ascii=False)
                + "\n\nArtikel:\n" + article)
         data = ai_json(fix)

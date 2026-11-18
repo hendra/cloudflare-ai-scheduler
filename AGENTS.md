@@ -15,6 +15,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 - Manual run: `POST /api/run` with `Authorization: Bearer $MANUAL_RUN_TOKEN` and body `{"schedulerId":"..."}`.
 - Ledger self-check: `npm run published:selfcheck`.
 - AEO/GEO self-check: `npm run aeo:selfcheck`.
+- Grounding self-checks: `npm run grounding:selfcheck`, `npm run blog:grounding:selfcheck`.
 
 ## Architecture
 
@@ -29,6 +30,7 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 - Blog indexing: `scripts/site-index.mjs` — after auto-merge, waits for the article in the live sitemap, then IndexNow (Bing) + Search Console sitemap resubmit (Google, secret `GSC_SERVICE_ACCOUNT_JSON`). Check: `npm run index:selfcheck`.
 - Blog covers: `scripts/cover/` — one AI cover-spec JSON (`spec.mjs`), three site skins copied from each site's oldest cover (`templates.mjs`), rendered by headless Chrome (`render.mjs`, `generateCover()`). Check: `npm run cover:selfcheck`. fullstackweb covers are title-less (owner decision).
 - Published-items ledger: `migrations/0021_published_items.sql` + `GET/POST /api/published` (Bearer `MANUAL_RUN_TOKEN`); helpers in `scripts/published.mjs` (`canonicalUrl`, `normalizeTitle`, `isSimilarTitle`, `fetchPublished`, `recordPublished`, `loadOpenPrs`, `buildBlogHistory`, `checkTopicCollision`). Check: `npm run published:selfcheck`.
+- Blog grounding: `scripts/grounding.mjs` (number normalisation, prose extraction, `fetchSourceText`, `checkGrounding`) + `scripts/blog-grounding.mjs` (`groundArticle`) — all three blog writers fetch every cited page and the chosen signal page, then require each risky number in the prose to appear in those sources. One repair call carries the source texts; still ungrounded → Slack note and `exit 0`, nothing published. `riskyNumbers` exempts four-digit years and counts below 10.
 - Shared blog AEO/GEO rules: `scripts/blog-aeo.mjs` (`buildAeoGeoBodyRules`, `validateAeoGeo`, `servicePathFor`, `runSitePostCheck`) used by all three blog writers; check: `npm run aeo:selfcheck`.
 - Every content pipeline reads the ledger before publishing and skips cleanly (exit 0, nothing posted) when nothing new remains. `SCHEDULER_URL` (Actions variable) + `MANUAL_RUN_TOKEN` (Actions secret) are required or real runs fail closed.
 - D1 rows enabled (8 base + 4 multi-fire clones; blog writers use one cron-list row each): `github-trending-daily`, `github-trending-weekly`, `rails-job-search-daily`, `rails-job-search-daily-2000`, `railsdev-blog-writer`, `fullstackweb-blog-writer`, `inasoft-blog-writer`, `inasoft-news-digest`, `ig-reel-daily`, `ig-reel-daily-1145`, `ig-reel-daily-1635`, `ig-reel-daily-1930`, `ig-reel-ai-labs`, `ig-reel-ai-labs-1145`, `ig-reel-ai-labs-1635`, `ig-reel-ai-labs-1930`.

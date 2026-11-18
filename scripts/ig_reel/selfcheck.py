@@ -14,8 +14,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from ig_reel.story import (  # noqa: E402
     apply_story_limits, build_caption, canonical_url, check_story, extract_article_text, extract_buffer_prompts,
     extract_buffer_seen, feed_body, filter_unseen_news, format_date_id, grounding_text, interleave, is_similar_title,
-    normalize_title, numbers_in, order_by_source, tip_duplicate_error, MOODS, STORY_SCHEMA_HINT, normalize_mood,
-    SAMPLE_PROMPT_MAX,
+    normalize_title, numbers_in, order_by_source, proper_noun_advisories, proper_noun_errors, tip_duplicate_error,
+    MOODS, STORY_SCHEMA_HINT,
+    normalize_mood, SAMPLE_PROMPT_MAX,
 )
 
 # ---------- story ----------
@@ -60,10 +61,10 @@ STORY = {
     "hook": "Planet ini hujan kaca menyamping",
     "hook_highlight": ["hujan kaca"],
     "beats": [
-        {"role": "context", "text": "Teleskop Webb milik NASA mengamati planet WASP-127b, 520 tahun cahaya dari Bumi.", "highlight": ""},
+        {"role": "context", "text": "Teleskop Webb milik NASA mengamati planet WASP-127b, 520 tahun cahaya dari planet ini.", "highlight": ""},
         {"role": "twist", "text": "Anginnya mencapai 8.700 km/jam — sekitar 7 kali kecepatan suara.", "highlight": "8.700 km/jam"},
         {"role": "why", "text": "Awan silikatnya, alias kaca, ikut terbawa angin menyamping.", "highlight": ""},
-        {"role": "payoff", "text": "Cuaca terburuk di Bumi kalah jauh dari planet ini.", "highlight": ""},
+        {"role": "payoff", "text": "Cuaca terburuk di planet ini kalah jauh dibanding cuaca kita.", "highlight": ""},
     ],
     "cta": "Kirim ke teman yang suka luar angkasa 🚀",
     "image_prompts": ["glass rain planet", "webb telescope", "storm winds", "silicate clouds"],
@@ -73,6 +74,84 @@ STORY = {
 }
 hard, soft = check_story(copy.deepcopy(STORY), ARTICLE)
 assert hard == [], hard
+
+# --- regression: sentence-initial words are not names ---
+# Indonesian capitalises every sentence, so only a token in the MIDDLE of a sentence can be a
+# name. Every one of these was reported as an invented proper noun before the fix.
+multi = copy.deepcopy(STORY)
+multi["beats"][0]["text"] = "Astronom menemukan oksigen di atmosfer planet itu. Jaraknya 520 tahun cahaya."
+multi["beats"][1]["text"] = "Namun anginnya mencapai 8.700 km/jam. Jadi ini cuaca ekstrem."
+multi["beats"][2]["text"] = "Awan silikat ikut terbawa. Karena itu hujan kacanya menyamping."
+multi["beats"][3]["text"] = "Hasilnya planet ini unik. Simpan Reel ini kalau menarik."
+assert proper_noun_errors(multi, ARTICLE) == [], proper_noun_errors(multi, ARTICLE)
+
+# A name in the middle of a sentence is still caught.
+mid = copy.deepcopy(STORY)
+mid["beats"][0]["text"] = "Astronom menemukan oksigen. Menurut Zorblax, ini penting."
+assert any("Zorblax" in e for e in proper_noun_errors(mid, ARTICLE))
+
+# --- a name that OPENS a sentence is advisory, not fatal (it cannot be told from "Anginnya") ---
+opener = copy.deepcopy(STORY)
+opener["beats"][0]["text"] = "Zorblax menemukan oksigen di planet itu."
+assert "Zorblax" in proper_noun_advisories(opener, ARTICLE)
+assert proper_noun_errors(opener, ARTICLE) == [], "sentence-initial words must not fail the story"
+
+# The same name mid-sentence IS fatal.
+opener2 = copy.deepcopy(STORY)
+opener2["beats"][0]["text"] = "Astronom menemukan oksigen. Lalu Zorblax setuju."
+assert any("Zorblax" in e for e in proper_noun_errors(opener2, ARTICLE)), proper_noun_errors(opener2, ARTICLE)
+
+# Ordinary Indonesian sentence starters stay exempt.
+for starter in ["Jaraknya", "Namun", "Jadi", "Karena", "Hasilnya", "Ternyata", "Menurut"]:
+    t = copy.deepcopy(STORY)
+    t["beats"][0]["text"] = f"Astronom menemukan oksigen di planet itu. {starter} anginnya 8.700 km/jam."
+    assert proper_noun_errors(t, ARTICLE) == [], (starter, proper_noun_errors(t, ARTICLE))
+
+# Acronyms and Indonesian common nouns are not invented names.
+acr = copy.deepcopy(STORY)
+acr["beats"][0]["text"] = "Data API dan GPU NASA dipakai para astronom bulan November ini."
+assert proper_noun_errors(acr, ARTICLE + " API GPU NASA November") == [], proper_noun_errors(acr, ARTICLE)
+# An acronym the article never uses is still a mid-sentence unknown, so it is reported.
+assert any("GPU" in e for e in proper_noun_errors(acr, ARTICLE + " API NASA November"))
+
+# A short name is not grounded by a longer word that merely contains it ("Tim" in "estimate").
+short = copy.deepcopy(STORY)
+short["beats"][0]["text"] = "Astronom memperkirakan hal itu. Menurut Tim, ini penting."
+assert any("Tim" in e for e in proper_noun_errors(short, ARTICLE)), proper_noun_errors(short, ARTICLE)
+assert any("Tim" in e for e in proper_noun_errors(short, ARTICLE + " We estimate the odds.")), "substring must not ground a name"
+assert proper_noun_errors(short, ARTICLE + " Tim says so.") == []
+
+# --- proper nouns: fabricated names are reported, real ones pass ---
+pn = copy.deepcopy(STORY)
+pn["beats"][1]["text"] = "Teleskop Zorblax menemukan oksigen di planet itu."
+errs = proper_noun_errors(pn, ARTICLE)
+assert any("Zorblax" in e for e in errs), errs
+
+pn_ok = copy.deepcopy(STORY)
+pn_ok["beats"][1]["text"] = "Teleskop James Webb menemukan oksigen di planet itu."
+assert proper_noun_errors(pn_ok, ARTICLE + " The James Webb Telescope found oxygen.") == []
+
+# First token of a field is exempt (Indonesian sentence starters, translated names).
+pn_first = copy.deepcopy(STORY)
+pn_first["hook"] = "Bumi makin panas"
+assert proper_noun_errors(pn_first, ARTICLE) == []
+
+# Captions and hashtags are not scanned.
+pn_cap = copy.deepcopy(STORY)
+pn_cap["caption"]["body"] = "Menurut NASA dan ESA, ini penting."
+assert proper_noun_errors(pn_cap, ARTICLE) == []
+
+# It is hard, so write_story upgrades its existing repair call (the model renames the object
+# to the article's own term or rephrases) and only then drops the candidate.
+pn_repair = copy.deepcopy(STORY)
+pn_repair["beats"][1]["text"] = "Teleskop Zorblax menemukan oksigen, anginnya 8.700 km/jam."
+hard_pn, _ = check_story(pn_repair, ARTICLE)
+assert any("Zorblax" in h for h in hard_pn), hard_pn
+
+# A translated name is a name in mid-sentence, so the repair path sees it and can rephrase.
+pn_translated = copy.deepcopy(STORY)
+pn_translated["beats"][1]["text"] = "Anginnya 8.700 km/jam, tujuh kali lebih cepat dari suara di Bumi."
+assert any("Bumi" in h for h in check_story(pn_translated, ARTICLE)[0])
 
 bad = copy.deepcopy(STORY)
 bad["beats"][1]["text"] = "Anginnya mencapai 9.000 km/jam."

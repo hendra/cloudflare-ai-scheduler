@@ -373,7 +373,7 @@ export function validateAeoGeo(article = {}, cfg = {}) {
     : null;
   const externalLinks = [
     ...new Set(
-      [...prose.matchAll(/\]\((https:\/\/[^)\s]+)\)/g)]
+      [...prose.matchAll(/\]\((https?:\/\/[^)\s]+)\)/g)]
         .map((m) => m[1])
         .filter((u) => !ownDomainRe || !ownDomainRe.test(u)),
     ),
@@ -407,7 +407,7 @@ export function validateAeoGeo(article = {}, cfg = {}) {
     errs,
     metaErrs,
     bodyErrs,
-    links: externalLinks.slice(0, 15),
+    links: externalLinks,
     wordCount,
   };
 }
