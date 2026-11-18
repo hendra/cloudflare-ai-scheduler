@@ -3,7 +3,6 @@
 // A run that cannot be grounded returns ok:false; the caller skips the article (exit 0).
 import { checkGrounding, fetchSourceText as defaultFetch } from "./grounding.mjs";
 
-const MIN_SOURCE_CHARS = 200;
 const REPAIR_SOURCE_CAP = 6000;
 
 export async function collectSources(links, fetcher = defaultFetch) {
@@ -50,7 +49,7 @@ export async function groundArticle({
     if (res && res.ok) sources.push({ url: signalUrl, text: res.text });
   }
 
-  const first = checkGrounding({ body: article.body, sources, minChars: MIN_SOURCE_CHARS });
+  const first = checkGrounding({ body: article.body, sources });
   if (first.ok && deadSources.length === 0) return { ok: true, body: article.body, sources };
 
   const verdict = (v, body) =>
@@ -61,6 +60,6 @@ export async function groundArticle({
   const repair = await callModel(repairPrompt({ article, unverified: first.unverified, deadSources, sources }));
   const repairedBody = String(repair || "").trim();
   if (!repairedBody) return verdict(first, article.body);
-  const second = checkGrounding({ body: repairedBody, sources, minChars: MIN_SOURCE_CHARS });
+  const second = checkGrounding({ body: repairedBody, sources });
   return verdict(second, repairedBody);
 }

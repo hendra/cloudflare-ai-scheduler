@@ -407,7 +407,7 @@ export function validateAeoGeo(article = {}, cfg = {}) {
     errs,
     metaErrs,
     bodyErrs,
-    links: externalLinks.slice(0, 15),
+    links: externalLinks,
     wordCount,
   };
 }
