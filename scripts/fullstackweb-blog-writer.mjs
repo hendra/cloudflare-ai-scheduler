@@ -401,33 +401,36 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
   meta.services = normalizeServices(meta);
   meta.category = normalizeCategory(meta.category, meta);
   const existingLinks = corpus.filter((c) => !c.draft).slice(0, 40).map((c) => `/blog/${c.slug}/ — ${c.title}`);
-  const serviceHref = servicePathFor("fullstackweb", meta);
-  const aeoRules = buildAeoGeoBodyRules({
-    siteName: "FullstackWeb.dev",
-    lang: "en",
-    domain: "fullstackweb.dev",
-    voiceRule: 'first person ("I", never "our team" / "our developers" / "our engineers") — independent senior full-stack and AI engineer, practical, specific, opinionated, honest about uncertainty, no marketing copy',
-    keyword: meta.keyword,
-    serviceHref,
-    contactHref: "/contact/",
-    ctaInstruction: "End Conclusion with a natural CTA linking to [get in touch](/contact/) (note trailing slash).",
-    validPostLinks: existingLinks,
-    extraRules: [
-      "All internal links MUST include a trailing slash (e.g. /services/.../, /blog/.../, /contact/).",
-      "Be concrete: real file paths, real flags, real package names. Generic AI/placeholder advice is not acceptable.",
-      "Never publish unverifiable superlatives (number one, #1, world-class, best-in-class) or hourly/project rates.",
-    ],
-  });
-  const bodyPrompt = `Write the body of one FullstackWeb.dev blog article.
-Topic: ${topic.topic}. Keyword: "${meta.keyword}". Angle: ${topic.angle}. Title: ${meta.title}.
+  // Built from the passed article on every call: a 4a metadata fix can change
+  // keyword/title/category/services, and the retry prompt must not demand the stale values.
+  const makeBodyPrompt = (a) => {
+    const aeoRules = buildAeoGeoBodyRules({
+      siteName: "FullstackWeb.dev",
+      lang: "en",
+      domain: "fullstackweb.dev",
+      voiceRule: 'first person ("I", never "our team" / "our developers" / "our engineers") — independent senior full-stack and AI engineer, practical, specific, opinionated, honest about uncertainty, no marketing copy',
+      keyword: a.keyword,
+      serviceHref: servicePathFor("fullstackweb", a),
+      contactHref: "/contact/",
+      ctaInstruction: "End Conclusion with a natural CTA linking to [get in touch](/contact/) (note trailing slash).",
+      validPostLinks: existingLinks,
+      extraRules: [
+        "All internal links MUST include a trailing slash (e.g. /services/.../, /blog/.../, /contact/).",
+        "Be concrete: real file paths, real flags, real package names. Generic AI/placeholder advice is not acceptable.",
+        "Never publish unverifiable superlatives (number one, #1, world-class, best-in-class) or hourly/project rates.",
+      ],
+    });
+    return `Write the body of one FullstackWeb.dev blog article.
+Topic: ${a.topic}. Keyword: "${a.keyword}". Angle: ${a.angle}. Title: ${a.title}.
 ${aeoRules}
 Return ONLY the article body as markdown: the opening paragraph and "##" sections. No title, no frontmatter, no preamble, no trailing notes.`;
+  };
   const body = AI_STUB ? stubArticle().body : await (async () => {
     let lastWords = 0;
     for (let attempt = 1; attempt <= 3; attempt++) {
       const hint = attempt > 1 ? `\n\nYour previous attempt was too short (${lastWords} words). Write at least ${MIN_BODY_WORDS} words. Return ONLY the markdown body.` : "";
       try {
-        const text = await callModel(bodyPrompt + hint, { maxTokens: 8000, expectJSON: false });
+        const text = await callModel(makeBodyPrompt(meta) + hint, { maxTokens: 8000, expectJSON: false });
         lastWords = countWords(text);
         if (lastWords >= MIN_BODY_WORDS) return text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
         console.error(`body attempt ${attempt}: too short (${lastWords} words, need >= ${MIN_BODY_WORDS})`);
@@ -470,7 +473,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
       let last = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const prompt = bodyPrompt + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues while still meeting EVERY requirement above (length, H2 sections, table, FAQ, code example, verification note blockquote). Return ONLY the body.`;
+          const prompt = makeBodyPrompt(article) + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues while still meeting EVERY requirement above (length, H2 sections, table, FAQ, code example, verification note blockquote). Return ONLY the body.`;
           const text = await callModel(prompt, { maxTokens: 8000, expectJSON: false });
           if (countWords(text) < MIN_BODY_WORDS) { console.error(`retry body attempt ${attempt}: too short`); continue; }
           last = text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();

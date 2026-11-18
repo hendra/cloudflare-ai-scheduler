@@ -434,33 +434,36 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
   const existingLinks = canonicalPosts
     .slice(0, 40)
     .map((c) => `/blog/${c.category}/${c.subcategory}/${c.slug} — ${c.title}`);
-  const serviceHref = servicePathFor("inasoft", meta);
-  const aeoRules = buildAeoGeoBodyRules({
-    siteName: "INASOFT",
-    lang: "id",
-    domain: "inasoft.id",
-    voiceRule: 'first person plural ("kami") or clear consultative voice ("tim developer berpengalaman", NEVER "engineer senior"); practical, specific, honest about uncertainty, no marketing hype',
-    keyword: meta.keyword,
-    serviceHref,
-    contactHref: "/#contact",
-    ctaInstruction: 'Include the exact phrase "Konsultasi Gratis" and link to `/#contact` in `## Kesimpulan`.',
-    validPostLinks: existingLinks,
-    extraRules: [
-      "Use canonical `/blog/<category>/<subcategory>/<slug>` paths ONLY (NEVER flat `/blog/<slug>` and NEVER trailing slashes).",
-      'Never mention "engineer senior", "Series A", "runway", "pendanaan", "sistem informasi", "nomor 1" / "#1", or prices in `Rp ...`.',
-      "Be concrete: real file paths, real flags, real package names. Keep the tone informative for Indonesian business owners and engineering leads.",
-    ],
-  });
-  const bodyPrompt = `Write the body of one INASOFT blog article.
-Topic: ${topic.topic}. Keyword: "${meta.keyword}". Angle: ${topic.angle}. Title: ${meta.title}.
+  // Built from the passed article on every call: a 4a metadata fix can change
+  // keyword/title/service, and the retry prompt must not demand the stale values.
+  const makeBodyPrompt = (a) => {
+    const aeoRules = buildAeoGeoBodyRules({
+      siteName: "INASOFT",
+      lang: "id",
+      domain: "inasoft.id",
+      voiceRule: 'first person plural ("kami") or clear consultative voice ("tim developer berpengalaman", NEVER "engineer senior"); practical, specific, honest about uncertainty, no marketing hype',
+      keyword: a.keyword,
+      serviceHref: servicePathFor("inasoft", a),
+      contactHref: "/#contact",
+      ctaInstruction: 'Include the exact phrase "Konsultasi Gratis" and link to `/#contact` in `## Kesimpulan`.',
+      validPostLinks: existingLinks,
+      extraRules: [
+        "Use canonical `/blog/<category>/<subcategory>/<slug>` paths ONLY (NEVER flat `/blog/<slug>` and NEVER trailing slashes).",
+        'Never mention "engineer senior", "Series A", "runway", "pendanaan", "sistem informasi", "nomor 1" / "#1", or prices in `Rp ...`.',
+        "Be concrete: real file paths, real flags, real package names. Keep the tone informative for Indonesian business owners and engineering leads.",
+      ],
+    });
+    return `Write the body of one INASOFT blog article.
+Topic: ${a.topic}. Keyword: "${a.keyword}". Angle: ${a.angle}. Title: ${a.title}.
 ${aeoRules}
 Return ONLY the article body as markdown: the opening paragraph and "##" sections. No title, no frontmatter, no preamble, no trailing notes.`;
+  };
   const body = AI_STUB ? stubArticle().body : await (async () => {
     let lastWords = 0;
     for (let attempt = 1; attempt <= 3; attempt++) {
       const hint = attempt > 1 ? `\n\nYour previous attempt was too short (${lastWords} words). Write at least ${MIN_BODY_WORDS} words. Return ONLY the markdown body.` : "";
       try {
-        const text = await callModel(bodyPrompt + hint, { maxTokens: 8000, expectJSON: false });
+        const text = await callModel(makeBodyPrompt(meta) + hint, { maxTokens: 8000, expectJSON: false });
         lastWords = countWords(text);
         if (lastWords >= MIN_BODY_WORDS) return text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
         console.error(`body attempt ${attempt}: too short (${lastWords} words, need >= ${MIN_BODY_WORDS})`);
@@ -503,7 +506,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
       let last = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const prompt = bodyPrompt + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues while still meeting EVERY requirement above (length, H2 sections, table, FAQ, code example, verification note blockquote). Return ONLY the body.`;
+          const prompt = makeBodyPrompt(article) + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues while still meeting EVERY requirement above (length, H2 sections, table, FAQ, code example, verification note blockquote). Return ONLY the body.`;
           const text = await callModel(prompt, { maxTokens: 8000, expectJSON: false });
           if (countWords(text) < MIN_BODY_WORDS) { console.error(`retry body attempt ${attempt}: too short`); continue; }
           last = text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
