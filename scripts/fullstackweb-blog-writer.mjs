@@ -34,7 +34,8 @@ import {
 
 import { writeFileSync, existsSync, unlinkSync } from "node:fs";
 import { execFileSync, execSync } from "node:child_process";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const PIPELINE = "blog:fullstackweb";
 
@@ -58,6 +59,25 @@ const SERVICE_VALUES = [
   "ai-agent-development",
   "rag-llm-development",
 ];
+// Mirrors BLOG_CATEGORIES in hendra/fullstackwebdev-site src/content.config.ts.
+export const CATEGORY_VALUES = [
+  "AI Engineering",
+  "Backend",
+  "Frontend",
+  "Dev Tools",
+  "DevOps",
+  "Node.js and TypeScript",
+  "Python and FastAPI",
+  "Rust",
+  "Engineering Leadership",
+];
+const CATEGORY_ALIASES = {
+  "ai/llm": "AI Engineering",
+  "web/frontend": "Frontend",
+  "infra/devops": "DevOps",
+  "data": "Backend",
+  "ruby on rails": "Backend",
+};
 const strip = (s) => String(s || "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
 
 // ---------- tiny helpers ----------
@@ -142,8 +162,27 @@ const META_KEYS = ["title", "description", "keyword", "slug", "category"];
 const META_ERR = /^(title length|description|slug format|slug already exists|keyword)/;
 const isMetaErr = (e) => META_ERR.test(e);
 
+export function normalizeCategory(raw, { title = "", keyword = "", services = [] } = {}) {
+  const clean = String(raw || "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+  const lower = clean.toLowerCase();
+  const exact = CATEGORY_VALUES.find((c) => c.toLowerCase() === lower);
+  if (exact) return exact;
+  if (CATEGORY_ALIASES[lower]) return CATEGORY_ALIASES[lower];
+
+  const guess = `${clean} ${title || ""} ${keyword || ""} ${Array.isArray(services) ? services.join(" ") : ""}`;
+  if (/\brust\b/i.test(guess)) return "Rust";
+  if (/\b(python|fastapi|django|flask|pydantic)\b/i.test(guess)) return "Python and FastAPI";
+  if (/\b(node\.?js|nodejs|typescript|nestjs|fastify|hono)\b/i.test(guess)) return "Node.js and TypeScript";
+  if (/\b(react|next\.?js|nextjs|vite|frontend|tailwind|css|browser)\b/i.test(guess)) return "Frontend";
+  if (/\b(ai|llm|rag|agent|claude|gemini|openai|machine learning)\b/i.test(guess)) return "AI Engineering";
+  if (/\b(devops|kubernetes|k8s|docker|ci\/cd|terraform|cloud|deploy|infra)\b/i.test(guess)) return "DevOps";
+  if (/\b(backend|api|postgres|postgresql|redis|sql|rails|ruby|graphql|microservices)\b/i.test(guess)) return "Backend";
+  if (/\b(leadership|staff engineer|principal|management|hiring|fractional|architecture review)\b/i.test(guess)) return "Engineering Leadership";
+  return "Dev Tools";
+}
+
 // ---------- validation ----------
-function validateArticle(a, corpusSlugs) {
+export function validateArticle(a, corpusSlugs) {
   const errs = [];
   const req = (cond, msg) => { if (!cond) errs.push(msg); };
   req(a.title && a.title.length >= 20 && a.title.length <= 120, "title length");
@@ -180,11 +219,10 @@ function validateArticle(a, corpusSlugs) {
   req(words >= MIN_BODY_WORDS, `only ${words} words (need >= ${MIN_BODY_WORDS})`);
   const bodyNoFences = String(a.body || "").split(/```/).filter((_, i) => i % 2 === 0).join("\n");
   req(!/lorem(?:\s|_)ipsum|\{placeholder\}|\[insert/i.test(bodyNoFences), "placeholder token in body");
-  // fullstackwebdev-site schema: category is z.string() (no enum), but it lands in YAML
-  // frontmatter unquoted below — enforce a non-empty, short, single-line string so a
-  // hostile model reply can't inject extra frontmatter keys. Fallback to a sane default.
-  a.category = String(a.category || "").replace(/[\r\n]+/g, " ").trim().slice(0, 60);
-  if (!a.category) a.category = "Dev Tools";
+  // fullstackwebdev-site schema requires category in BLOG_CATEGORIES (z.enum).
+  const prevCategory = a.category;
+  a.category = normalizeCategory(a.category, a);
+  if (a.category !== prevCategory) console.warn(`category: normalized ${JSON.stringify(prevCategory)} -> ${JSON.stringify(a.category)}`);
   // Keyword check: require at least the first two significant words (was: only the first;
   // full-all-words was deliberately relaxed in d0be839 for model tolerance — see git log).
   const kw = a.keyword || "";
@@ -208,7 +246,7 @@ function frontmatter(a) {
 }
 
 // ---------- main ----------
-(async () => {
+async function main() {
   if (!existsSync(join(SITE_DIR, "package.json"))) await fail(`site checkout not found at ${SITE_DIR} (set SITE_DIR)`);
   const corpus = loadCorpus(SITE_DIR);
   let publishedRows;
@@ -253,7 +291,7 @@ function frontmatter(a) {
   // 2) topic selection
   const avoidPosts = buildBlogAvoidList({ corpus, openPrs, publishedRows, max: 150 });
   const topicPrompt = `You pick ONE blog topic for FullstackWeb.dev (fullstackweb.dev) — independent senior full-stack and AI engineer; readers: senior developers and tech leads; pillars: AI engineering, React and Next.js, Node.js and TypeScript, Ruby on Rails, backend APIs, cloud and DevOps, developer tools, open source. Pick the signal with the strongest, most durable angle for that audience.
-Reply with ONLY this JSON (no prose): {"signalIndex":<1..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","description":"120-160 chars","slug":"kebab-case-slug","category":"one of: Dev Tools|Web/Frontend|AI/LLM|Backend|Infra/DevOps|Data|Ruby on Rails","services":[${JSON.stringify(SERVICE_VALUES)}]}
+Reply with ONLY this JSON (no prose): {"signalIndex":<1..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","description":"120-160 chars","slug":"kebab-case-slug","category":"one of: ${CATEGORY_VALUES.join("|")}","services":[${JSON.stringify(SERVICE_VALUES)}]}
 Avoid all of these existing posts: ${avoidPosts.join(" | ")}
 Signals:
 ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.slice(0, 160)} (${s.signals})`).join("\n")}`;
@@ -353,7 +391,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     console.error("metadata validation failed, requesting metadata fix:", v.errs.join("; "));
     try {
       const metaNow = Object.fromEntries(META_KEYS.map((k) => [k, article[k]]));
-      const fixPrompt = `You previously produced this blog metadata JSON for fullstackweb.dev:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars\n- description: 120-160 chars (hard max 180) and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- category: one of Dev Tools | Web/Frontend | AI/LLM | Backend | Infra/DevOps | Data | Ruby on Rails\nOutput ONLY the JSON object, no prose.`;
+      const fixPrompt = `You previously produced this blog metadata JSON for fullstackweb.dev:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars\n- description: 120-160 chars (hard max 180) and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- category: one of ${CATEGORY_VALUES.join(" | ")}\nOutput ONLY the JSON object, no prose.`;
       const fixed = parseJSONObject(await callModel(fixPrompt, { maxTokens: 2048 }));
       if (fixed && typeof fixed === "object") {
         for (const k of META_KEYS) if (typeof fixed[k] === "string" && fixed[k].trim()) article[k] = fixed[k].trim();
@@ -462,4 +500,9 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     ? `🖌️ _FullstackWeb.dev article published_\n*${article.title}*\n→ ${pr}\n${v.wordCount} words · keyword: ${article.keyword}\n${ix.live ? `🔎 ${ix.url} · Bing: ${ix.bing} · Google sitemap: ${ix.google}` : `🔎 not live after 10 min — search engines not notified. Once it is deployed: \`node scripts/site-index.mjs ${SITE_URL} ${article.slug} ${INDEXNOW_KEY}\``}`
     : `🖌️ _FullstackWeb.dev PR opened — auto-merge failed_\n*${article.title}*\n→ ${pr}\n${m.error}\nMerge it by hand.`]); }
   catch (e) { console.log(`::warning title=Slack summary not posted::${e.message} — PR ${pr} was opened; check the Slack channel secret / bot membership.`); }
-})().catch(async (e) => { await fail(`unexpected error: ${String(e).slice(0, 300)}`); });
+}
+
+const isMain = Boolean(process.argv[1]) && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+if (isMain) {
+  main().catch(async (e) => { await fail(`unexpected error: ${String(e).slice(0, 300)}`); });
+}
