@@ -101,10 +101,22 @@ export function normalizeTitle(text) {
     .trim();
 }
 
-function meaningfulTokens(normalized) {
+function stem(word) {
+  let w = word;
+  if (w.length > 4 && w.endsWith("ies")) w = `${w.slice(0, -3)}y`;
+  else if (w.length > 3 && w.endsWith("s") && !/(ss|us|is)$/.test(w)) w = w.slice(0, -1);
+  if (w.length > 5 && w.endsWith("ing")) w = w.slice(0, -3);
+  else if (w.length > 4 && w.endsWith("ed")) w = w.slice(0, -2);
+  if (w.length > 6 && w.endsWith("ation")) w = `${w.slice(0, -5)}at`;
+  else if (w.length > 5 && w.endsWith("ion")) w = w.slice(0, -3);
+  if (w.length > 3 && w.endsWith("e")) w = w.slice(0, -1);
+  return w;
+}
+
+function stemmedTokens(normalized) {
   const tokens = new Set();
   for (const w of normalized.split(" ")) {
-    if (w.length >= 3 && !STOPWORDS.has(w)) tokens.add(w);
+    if (w.length >= 3 && !STOPWORDS.has(w)) tokens.add(stem(w));
   }
   return tokens;
 }
@@ -115,20 +127,17 @@ export function isSimilarTitle(a, b) {
   if (!na || !nb) return false;
   if (na === nb) return true;
 
-  const ta = meaningfulTokens(na);
-  const tb = meaningfulTokens(nb);
+  const ta = stemmedTokens(na);
+  const tb = stemmedTokens(nb);
   if (ta.size === 0 || tb.size === 0) return false;
 
   let shared = 0;
   for (const tok of ta) {
     if (tb.has(tok)) shared += 1;
   }
-  const union = ta.size + tb.size - shared;
-  const jaccard = shared / union;
-
-  if (shared >= 3 && jaccard >= 0.65) return true;
-  if (shared >= 2 && (ta.size <= 2 || tb.size <= 2) && jaccard >= 0.75) return true;
-  return false;
+  // shortcut: lexical only, so paraphrase with no shared words slips through.
+  // Upgrade to an AI judge over the 5 nearest titles if that still bites.
+  return shared >= 2 && shared / Math.min(ta.size, tb.size) >= 0.7;
 }
 
 export function buildPublishedIndex(rows) {

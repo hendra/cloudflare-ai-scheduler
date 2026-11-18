@@ -439,8 +439,27 @@ def normalize_title(text: str) -> str:
     return " ".join(re.sub(r"(?:[^\w]|_)+", " ", s).split())
 
 
-def _meaningful_tokens(normalized: str) -> set[str]:
-    return {w for w in normalized.split() if len(w) >= 3 and w not in _DEDUPE_STOPWORDS}
+def _stem(word: str) -> str:
+    w = word
+    if len(w) > 4 and w.endswith("ies"):
+        w = w[:-3] + "y"
+    elif len(w) > 3 and w.endswith("s") and not re.search(r"(ss|us|is)$", w):
+        w = w[:-1]
+    if len(w) > 5 and w.endswith("ing"):
+        w = w[:-3]
+    elif len(w) > 4 and w.endswith("ed"):
+        w = w[:-2]
+    if len(w) > 6 and w.endswith("ation"):
+        w = w[:-5] + "at"
+    elif len(w) > 5 and w.endswith("ion"):
+        w = w[:-3]
+    if len(w) > 3 and w.endswith("e"):
+        w = w[:-1]
+    return w
+
+
+def _stemmed_tokens(normalized: str) -> set[str]:
+    return {_stem(w) for w in normalized.split() if len(w) >= 3 and w not in _DEDUPE_STOPWORDS}
 
 
 def is_similar_title(a: str, b: str) -> bool:
@@ -450,17 +469,14 @@ def is_similar_title(a: str, b: str) -> bool:
         return False
     if na == nb:
         return True
-    ta = _meaningful_tokens(na)
-    tb = _meaningful_tokens(nb)
+    ta = _stemmed_tokens(na)
+    tb = _stemmed_tokens(nb)
     if not ta or not tb:
         return False
     shared = len(ta & tb)
-    jaccard = shared / len(ta | tb)
-    if shared >= 3 and jaccard >= 0.65:
-        return True
-    if shared >= 2 and (len(ta) <= 2 or len(tb) <= 2) and jaccard >= 0.75:
-        return True
-    return False
+    # shortcut: lexical only, so paraphrase with no shared words slips through.
+    # Upgrade to an AI judge over the 5 nearest titles if that still bites.
+    return shared >= 2 and shared / min(len(ta), len(tb)) >= 0.7
 
 
 def extract_buffer_seen(captions: list[str]) -> tuple[set[str], list[str]]:

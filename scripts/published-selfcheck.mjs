@@ -1,6 +1,7 @@
 // Assert-based self-check for scripts/published.mjs (no framework, offline).
 // Run: node scripts/published-selfcheck.mjs
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 const {
   canonicalUrl,
@@ -47,6 +48,19 @@ assert.equal(
 );
 assert.equal(isSimilarTitle("Rails 8 Guide", "Guide to Rails"), true);
 assert.equal(isSimilarTitle("", "Anything"), false);
+
+// 2b. shared case fixture: the same table is read by scripts/ig_reel/selfcheck.py
+const similarityCases = JSON.parse(
+  readFileSync(new URL("./fixtures/title-similarity-cases.json", import.meta.url), "utf8"),
+);
+for (const [a, b] of similarityCases.similar) {
+  assert.equal(isSimilarTitle(a, b), true, `expected similar: ${a} || ${b}`);
+  assert.equal(isSimilarTitle(b, a), true, `expected similar (reversed): ${b} || ${a}`);
+}
+for (const [a, b] of similarityCases.distinct) {
+  assert.equal(isSimilarTitle(a, b), false, `expected distinct: ${a} || ${b}`);
+}
+assert.equal(isSimilarTitle("!!!", "   "), false);
 
 // 3. buildPublishedIndex
 const idx = buildPublishedIndex([
