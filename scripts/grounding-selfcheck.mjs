@@ -145,4 +145,39 @@ for (const [body, source] of [
   assert.deepEqual(checkGrounding({ body, sources: src }).unverified, [], body);
 }
 
+// --- an SI unit is not a scale word: "300 m" must never license "300 million" ---
+for (const [body, source, want] of [
+  ["The crater formed 300 million years ago.", "The crater rim is 300 m high.", ["300000000"]],
+  ["The probe sent 20 million images.", "The dish is 20 m wide.", ["20000000"]],
+  ["It is 5 trillion tonnes.", "The rod is 5 t.", ["5000000000000"]],
+]) {
+  const src = [{ url: "https://a.test/x", text: source + " " + "Filler text here. ".repeat(20) }];
+  assert.deepEqual(checkGrounding({ body, sources: src }).unverified, want, body);
+}
+assert.deepEqual([...numbersIn("300 m high", { keepRaw: false })], ["300"], "metres are not millions");
+assert.deepEqual([...numbersIn("$1.5M", { keepRaw: false })], ["1500000"], "currency short form still scales");
+
+// --- a version mention licenses only itself, not a percentage of the same value ---
+for (const [body, source, want] of [
+  ["Node 20 is current. Our build is 20% faster.", "Node.js 20.11.1 is current.", ["20"]],
+  ["Run it on Node 20. Memory use fell 20%.", "Node.js 20.11.1 is current.", ["20"]],
+  ["Python 3 is out. It is 3% faster.", "Python 3.12 released.", ["3"]],
+  ["We use Rails 7. Requests rose 7% this year.", "Rails 7.1.2 released.", ["7"]],
+]) {
+  const src = [{ url: "https://a.test/x", text: source + " " + "Filler text here. ".repeat(20) }];
+  assert.deepEqual(checkGrounding({ body, sources: src }).unverified, want, body);
+}
+assert.deepEqual(checkGrounding({ body: "Run it on Node 20.", sources: [{ url: "x", text: "Node.js 20.11.1 shipped. " + "Filler. ".repeat(40) }] }).unverified, [], "the plain version case still works");
+
+// --- a word ending in go/v is not a version word ---
+for (const body of ["Two years ago 20 teams migrated.", "The cargo 20 tonnes arrived.", "Chicago 20 startups joined."]) {
+  const src = [{ url: "x", text: "Node.js 20.11.1 shipped. " + "Filler. ".repeat(40) }];
+  assert.deepEqual(checkGrounding({ body, sources: src }).unverified, ["20"], body);
+}
+
+// --- nested ordered lists and deeper indents are prose, not code ---
+assert.deepEqual(riskyNumbers(proseOnly("- Raise the pool:\n    1. open 4096 sockets")), ["4096"]);
+assert.deepEqual(riskyNumbers(proseOnly("- Tunables:\n        - 4096 sockets per worker")), ["4096"]);
+assert.deepEqual(riskyNumbers(proseOnly("    const n = 512;")), [], "a real indented code block is still code");
+
 console.log("grounding-selfcheck: ok");

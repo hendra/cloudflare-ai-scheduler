@@ -44,8 +44,6 @@ export async function groundArticle({
   fetchSourceText = defaultFetch,
 }) {
   const { sources, deadSources } = await collectSources(links, fetchSourceText);
-  // Which URL each source came from, so a citation the repair drops can drop its verdict too.
-  const deadSet = new Set(deadSources);
   // The signal page is extra material, not a citation: an unfetchable one is dropped silently.
   if (signalText) {
     sources.push({ url: signalUrl || "signal", text: signalText });
@@ -74,7 +72,11 @@ export async function groundArticle({
 
   // The repair may cite new pages (http or https): fetch them, or a dead link ships past the
   // gate. A citation the repair removed is no longer dead, so it stops blocking.
-  const cited = [...repairedBody.matchAll(/\]\((https?:\/\/[^)\s]+)\)/g)].map((m) => m[1]);
+  // Markdown links and bare URLs both count as citations, so neither can slip past unread.
+  const cited = [
+    ...[...repairedBody.matchAll(/\]\((https?:\/\/[^)\s]+)\)/g)].map((m) => m[1]),
+    ...[...repairedBody.matchAll(/(?<![("\[])(https?:\/\/[^\s)\]]+)/g)].map((m) => m[1]),
+  ];
   const known = new Set(sources.map((s) => s.url));
   const { sources: extra, deadSources: extraDead } = await collectSources(
     cited.filter((u) => !known.has(u)),

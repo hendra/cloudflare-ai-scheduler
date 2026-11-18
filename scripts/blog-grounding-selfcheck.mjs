@@ -113,4 +113,15 @@ const httpLink = await groundArticle({
 assert.equal(httpLink.ok, false);
 assert.deepEqual(httpLink.deadSources, ["http://dead.test/x"]);
 
+// A bare URL the repair introduces is fetched too, so a dead one cannot slip past unread.
+const bareUrl = await groundArticle({
+  article: article("Limit is 999 MB."),
+  links: ["https://a.test/doc"],
+  signalUrl: null,
+  callModel: async () => "Limit is 512 MB. Source: https://dead.test/x",
+  fetchSourceText: async (url) => (url.includes("dead.test") ? { ok: false, status: 404, url, text: "" } : fakeFetch(url)),
+});
+assert.equal(bareUrl.ok, false);
+assert.deepEqual(bareUrl.deadSources, ["https://dead.test/x"]);
+
 console.log("blog-grounding-selfcheck: ok");

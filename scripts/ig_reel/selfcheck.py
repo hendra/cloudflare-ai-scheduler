@@ -114,6 +114,13 @@ assert proper_noun_errors(acr, ARTICLE + " API GPU NASA November") == [], proper
 # An acronym the article never uses is still a mid-sentence unknown, so it is reported.
 assert any("GPU" in e for e in proper_noun_errors(acr, ARTICLE + " API NASA November"))
 
+# A short name is not grounded by a longer word that merely contains it ("Tim" in "estimate").
+short = copy.deepcopy(STORY)
+short["beats"][0]["text"] = "Astronom memperkirakan hal itu. Menurut Tim, ini penting."
+assert any("Tim" in e for e in proper_noun_errors(short, ARTICLE)), proper_noun_errors(short, ARTICLE)
+assert any("Tim" in e for e in proper_noun_errors(short, ARTICLE + " We estimate the odds.")), "substring must not ground a name"
+assert proper_noun_errors(short, ARTICLE + " Tim says so.") == []
+
 # --- proper nouns: fabricated names are reported, real ones pass ---
 pn = copy.deepcopy(STORY)
 pn["beats"][1]["text"] = "Teleskop Zorblax menemukan oksigen di planet itu."

@@ -198,6 +198,8 @@ def _unknown_caps(data, article_text):
         if isinstance(b, dict):
             fields += [str(b.get("text") or ""), str(b.get("highlight") or "")]
     haystack = str(article_text).lower()
+    # Word boundary match: "Tim" must not match "estimate", while "NASA's" still matches NASA.
+    words = set(re.findall(r"[a-z]+", haystack))
     mid, initial = [], []
     for text in fields:
         starts = _sentence_starts(text)
@@ -206,7 +208,8 @@ def _unknown_caps(data, article_text):
                 low = word.lower()
                 if not word[:1].isupper() or any(ch.isdigit() for ch in word):
                     continue
-                if low in _PLATFORM_WORDS or low in haystack:
+                # Also allow a shared word-stem prefix ("Astronom" vs "Astronomers") when >= 5 chars.
+                if low in _PLATFORM_WORDS or low in words or (len(low) >= 5 and any(w.startswith(low) for w in words)):
                     continue
                 bucket = initial if i in starts else mid
                 if word not in bucket:
