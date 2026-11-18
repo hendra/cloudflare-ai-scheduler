@@ -109,7 +109,7 @@ export function proseOnly(markdown) {
 }
 
 const DROP_BLOCKS_RE = /<(script|style|nav|header|footer|aside|noscript|svg)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
-const TEXT_BLOCKS_RE = /<(p|li|pre|td|dd|blockquote|div)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi;
+const TEXT_BLOCKS_RE = /<(p|li|pre|td|dd|blockquote)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi;
 const TAG_RE = /<[^>]+>/g;
 const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 
@@ -127,17 +127,19 @@ function toText(fragment) {
 }
 
 // Readable page text for grounding. Wider than IG Reel's <p>-only rule on purpose: the blog
-// prompt invites RFC/spec citations whose bodies live in <pre>/<li>/<td>.
+// prompt invites RFC/spec citations whose bodies live in <pre>/<li>/<td>. A page with no
+// semantic blocks at all (div-only) falls back to its whole stripped text rather than reading
+// as dead.
 export function extractPageText(html, cap = 200_000) {
   const cleaned = String(html).replace(DROP_BLOCKS_RE, " ");
   const parts = [];
-  for (const re of [TEXT_BLOCKS_RE]) {
-    for (const m of cleaned.matchAll(re)) {
-      const text = toText(m[m.length - 1]);
-      if (text) parts.push(text);
-    }
+  for (const m of cleaned.matchAll(TEXT_BLOCKS_RE)) {
+    const text = toText(m[2]);
+    if (text) parts.push(text);
   }
-  return parts.join("\n").slice(0, cap);
+  const structured = parts.join("\n");
+  const text = structured.length >= MIN_SOURCE_CHARS ? structured : toText(cleaned);
+  return text.slice(0, cap);
 }
 
 // ---------- source fetching ----------

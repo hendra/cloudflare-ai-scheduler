@@ -68,13 +68,13 @@ pipelines agree on what counts as the same number:
   URLs never count as claims.
 - `fetchSourceText(url)` — GET, `text/html` only, 2 MB cap, returns
   `{ ok, status, text }`; `ok` requires 2xx **and** ≥200 chars of extracted text.
-  Extraction takes `p, li, pre, td, dd, blockquote, div` text with `script/style/
-  nav/header/footer/aside/noscript/svg` stripped — deliberately wider than IG
-  Reel's `<p>`-only rule, because the blog prompt invites RFC/spec/doc citations
-  whose bodies live in `<pre>`/`<li>`/`<td>`, and a `<p>`-only extractor would
-  reject exactly the sources the prompt asks for; `div` covers pages with no
-  semantic blocks at all. The full page text is kept for checking (a number deep
-  in a long doc is still grounded); only the text pasted into a prompt is capped.
+  Extraction takes `p, li, pre, td, dd, blockquote` text with `script/style/nav/
+  header/footer/aside/noscript/svg` stripped — deliberately wider than IG Reel's
+  `<p>`-only rule, because the blog prompt invites RFC/spec/doc citations whose
+  bodies live in `<pre>`/`<li>`/`<td>`. A page with no semantic blocks at all
+  (div-only) falls back to its whole stripped text instead of reading as dead. The
+  full page text is kept for checking, so a number deep in a long doc is still
+  grounded; only the text pasted into a prompt is capped.
 - `checkGrounding({ body, sources })` → `{ ok, errs, unverified, deadSources }`.
   `sources` is `[{ url, text }]`. Errors: a cited link that failed to fetch, and
   each risky number in `proseOnly(body)` absent from every source text.
