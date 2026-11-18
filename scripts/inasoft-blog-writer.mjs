@@ -3,6 +3,8 @@ import { callModel } from "./ai-providers.mjs";
 import { generateCover } from "./cover/render.mjs";
 import { mergePr } from "./site-pr.mjs";
 import { indexArticle, sitemapLocs } from "./site-index.mjs";
+import { groundArticle } from "./blog-grounding.mjs";
+import { fetchSourceText } from "./grounding.mjs";
 import {
   buildAeoGeoBodyRules,
   validateAeoGeo,
@@ -91,14 +93,6 @@ async function fetchText(url, { timeout = 25000, headers = {}, ua = "Mozilla/5.0
     if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
     return { text: await res.text(), url: res.url };
   } finally { clearTimeout(t); }
-}
-async function headOk(url) {
-  try {
-    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 12000);
-    const res = await fetch(url, { method: "HEAD", headers: { "User-Agent": "Mozilla/5.0" }, signal: ctrl.signal, redirect: "follow" });
-    clearTimeout(t);
-    return res.status < 400;
-  } catch { return false; }
 }
 async function fail(msg) {
   console.error("FATAL:", msg);
@@ -436,6 +430,12 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
     .map((c) => `/blog/${c.category}/${c.subcategory}/${c.slug} — ${c.title}`);
   // Built from the passed article on every call: a 4a metadata fix can change
   // keyword/title/service, and the retry prompt must not demand the stale values.
+  // Fetched once: the signal's own page is the only material the first draft can cite safely.
+  const signalText = AI_STUB || !chosenSignal?.url ? "" : (await fetchSourceText(chosenSignal.url)).text;
+  if (signalText) console.log(`signal source: ${signalText.length} chars from ${chosenSignal.url}`);
+  const sourceBlock = signalText
+    ? `\n\nSource material (facts you may state — never state a fact that is not here or in an official doc you can cite):\n${signalText}`
+    : "";
   const makeBodyPrompt = (a) => {
     const aeoRules = buildAeoGeoBodyRules({
       siteName: "INASOFT",
@@ -456,7 +456,7 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
     return `Write the body of one INASOFT blog article.
 Topic: ${a.topic}. Keyword: "${a.keyword}". Angle: ${a.angle}. Title: ${a.title}.
 ${aeoRules}
-Return ONLY the article body as markdown: the opening paragraph and "##" sections. No title, no frontmatter, no preamble, no trailing notes.`;
+Return ONLY the article body as markdown: the opening paragraph and "##" sections. No title, no frontmatter, no preamble, no trailing notes.${sourceBlock}`;
   };
   const body = AI_STUB ? stubArticle().body : await (async () => {
     let lastWords = 0;
@@ -527,11 +527,25 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     console.log(`validation ok — ${v.wordCount} words, ${v.links.length} external links to check`);
   }
 
-  // 4b) external link check (drop article if >2 dead)
-  let dead = 0;
-  for (const url of v.links) { if (!(await headOk(url))) { dead++; console.warn("dead link:", url); } }
-  if (dead > 2) await fail(`article has ${dead} dead external links`);
-  if (dead > 0) console.warn(`warning: ${dead} dead link(s) present; PR body will flag them`);
+  // 4b) grounding gate: every risky number must come from a cited page or the signal page.
+  // Not groundable after one repair call → skip the article cleanly, publish nothing.
+  let groundedLinks = v.links.length;
+  if (!AI_STUB) {
+    const g = await groundArticle({ article, links: v.links, signalUrl: chosenSignal?.url || null, callModel: (prompt) => callModel(prompt, { maxTokens: 8000, expectJSON: false }) });
+    if (!g.ok) {
+      const note = `⚠️ _Artikel blog INASOFT dilewati — fakta tidak terverifikasi:_ *${article.title}*\nAngka yang tidak ada di sumber mana pun: ${g.unverified.join(", ") || "(tidak ada)"}\nSitasi yang tidak bisa dibaca: ${g.deadSources.join(", ") || "(tidak ada)"}\nTidak ada yang dipublikasikan.`;
+      try { await postToSlack([note]); } catch (e) { console.error("skip note failed:", e.message); }
+      console.log(`skipping: ${note}`);
+      process.exit(0);
+    }
+    if (g.body !== article.body) {
+      article.body = g.body;
+      v = runValidate(article);
+      if (!v.ok) { await fail(`article validation failed after grounding repair: ${v.errs.join("; ")}`); return; }
+    }
+    groundedLinks = v.links.length;
+    console.log(`grounding ok — ${g.sources.length} source(s) read`);
+  }
 
   // 5) cover
   const coverPath = join(SITE_DIR, "src/assets/blog", `${article.slug}.png`);
@@ -610,7 +624,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   git(["add", "src/content/blog", "src/assets/blog"]);
   git(["-c", "user.name=inasoft-bot", "-c", "user.email=bot@inasoft.id", "commit", "-m", `content: add ${article.slug}`]);
   git(["push", "-u", "origin", branch]);
-  const prBody = `## Summary\n- Article: **${article.title}** (keyword: ${article.keyword}, ~${v.wordCount} words)\n- Service angle: ${article.service || "(none)"}\n- Generated by the inasoft-blog-writer pilot pipeline from signals + corpus review; auto-merged by the pipeline after astro build passed.\n\n## Sources\n- Topic from signals; external links in the article are HEAD-verified.\n\n## Validation\n- [x] astro check && astro build passed\n- [x] description ${article.description.length}c · keyword in title/desc/intro\n- [x] ${v.links.length} external links HEAD-checked (${dead} dead)`;
+  const prBody = `## Summary\n- Article: **${article.title}** (keyword: ${article.keyword}, ~${v.wordCount} words)\n- Service angle: ${article.service || "(none)"}\n- Generated by the inasoft-blog-writer pilot pipeline from signals + corpus review; auto-merged by the pipeline after astro build passed.\n\n## Sources\n- Topic from signals; every cited page was fetched and the body checked against it.\n\n## Validation\n- [x] astro check && astro build passed\n- [x] description ${article.description.length}c · keyword in title/desc/intro\n- [x] ${groundedLinks} external citations fetched and grounding-checked`;
   writeFileSync(prBodyPath, prBody);
   const pr = execFileSync("gh", ["pr", "create", "--base", "main", "--head", branch, "--title", `content: add ${article.slug}`, "--body-file", prBodyPath], { cwd: SITE_DIR, env: gitEnv, stdio: "pipe" }).toString().trim();
   try { unlinkSync(prBodyPath); } catch {}
