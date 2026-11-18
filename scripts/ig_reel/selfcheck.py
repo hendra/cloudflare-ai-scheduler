@@ -4,6 +4,7 @@ Pure checks always run. The render section needs Chrome + ffmpeg + playwright an
 skipped with a notice when they are missing.
 """
 import copy
+import json
 import pathlib
 import re
 import sys
@@ -256,6 +257,17 @@ assert normalize_title("Caf\u00e9 &amp; Webb\u2019s 1st Exo_Planet!") == "cafe w
 assert is_similar_title("Webb finds glass rain on exoplanet", "NASA Webb Finds Glass Rain on Exoplanet!") is True
 assert is_similar_title("Webb finds glass rain on exoplanet", "Deep sea octopus builds hydrothermal nest") is False
 assert is_similar_title("", "Webb finds glass rain") is False
+
+# shared with scripts/published-selfcheck.mjs so the two languages cannot drift
+_CASES = json.loads(
+    (pathlib.Path(__file__).resolve().parent.parent / "fixtures" / "title-similarity-cases.json").read_text()
+)
+for _a, _b in _CASES["similar"]:
+    assert is_similar_title(_a, _b) is True, f"expected similar: {_a} || {_b}"
+    assert is_similar_title(_b, _a) is True, f"expected similar (reversed): {_b} || {_a}"
+for _a, _b in _CASES["distinct"]:
+    assert is_similar_title(_a, _b) is False, f"expected distinct: {_a} || {_b}"
+assert is_similar_title("!!!", "   ") is False
 
 assert extract_buffer_seen([
     "Bayangkan hujan kaca.\n\nIsi.\n\nSumber: NASA (https://nasa.gov/story/?utm_medium=ig)"
