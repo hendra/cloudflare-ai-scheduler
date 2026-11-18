@@ -187,37 +187,48 @@ def _sentence_starts(text):
     return starts
 
 
-def proper_noun_errors(data, article_text):
-    """Capitalised names the article never mentions.
+def _unknown_caps(data, article_text):
+    """(mid_sentence, sentence_initial) capitalised tokens the article never uses.
 
-    Only the hook and the beats are scanned (captions and hashtags are not claims). A token that
-    opens a sentence is never a name: Indonesian capitalises every sentence, and the script is
-    Indonesian while the article is English ("Earth" legitimately becomes "Bumi"). So a name is
-    a capitalised token in the middle of a sentence that the article never uses.
+    Acronyms, tokens with digits and platform words are not names. A token matches when the
+    article contains it anywhere (case-insensitive), so "Astronom" is grounded by "Astronomers".
     """
     fields = [str(data.get("hook") or "")]
     for b in data.get("beats") or []:
         if isinstance(b, dict):
             fields += [str(b.get("text") or ""), str(b.get("highlight") or "")]
     haystack = str(article_text).lower()
-    errs = []
+    mid, initial = [], []
     for text in fields:
-        tokens = text.split()
         starts = _sentence_starts(text)
-        missing = []
-        for i, tok in enumerate(tokens):
-            if i in starts:
-                continue
+        for i, tok in enumerate(text.split()):
             for word in _PROPER_TOKEN.findall(tok):
+                low = word.lower()
                 if not word[:1].isupper() or any(ch.isdigit() for ch in word):
                     continue
-                if word.lower() in _PLATFORM_WORDS:
+                if low in _PLATFORM_WORDS or low in haystack:
                     continue
-                if word.lower() not in haystack and word not in missing:
-                    missing.append(word)
-        if missing:
-            errs.append("proper noun not found in the article text: " + ", ".join(missing))
-    return errs
+                bucket = initial if i in starts else mid
+                if word not in bucket:
+                    bucket.append(word)
+    return mid, initial
+
+
+def proper_noun_errors(data, article_text):
+    """Names in the MIDDLE of a sentence that the article never mentions — a hard finding.
+
+    Sentence-initial tokens are only advisory (proper_noun_advisories): Indonesian capitalises
+    every sentence, so a first-token rule flags ordinary words ("Anginnya", "Teleskop") and no
+    candidate ever passes, which stops the account posting.
+    """
+    mid, _ = _unknown_caps(data, article_text)
+    return ["proper noun not found in the article text: " + ", ".join(mid)] if mid else []
+
+
+def proper_noun_advisories(data, article_text):
+    """Sentence-initial words the article never uses: fed to the repair prompt, never fatal."""
+    _, initial = _unknown_caps(data, article_text)
+    return initial
 
 
 def hook_phrases(data):

@@ -92,4 +92,25 @@ const providerDown = await groundArticle({
 assert.equal(providerDown.ok, false);
 assert.deepEqual(providerDown.unverified, ["999"]);
 
+// A citation the repair removed is not dead any more: the article ships.
+const replacedLink = await groundArticle({
+  article: article("Limit is 999 MB. See [old](https://dead.test/x)."),
+  links: ["https://a.test/doc", "https://dead.test/x"],
+  signalUrl: null,
+  callModel: async () => "Limit is 512 MB. See [docs](https://a.test/doc).",
+  fetchSourceText: async (url) => (url.includes("dead.test") ? { ok: false, status: 404, url, text: "" } : fakeFetch(url)),
+});
+assert.equal(replacedLink.ok, true, "a dead citation the repair dropped must not block");
+
+// A plain-http citation the repair introduces is fetched too.
+const httpLink = await groundArticle({
+  article: article("Limit is 999 MB."),
+  links: ["https://a.test/doc"],
+  signalUrl: null,
+  callModel: async () => "Limit is 512 MB. See [spec](http://dead.test/x).",
+  fetchSourceText: async (url) => (url.includes("dead.test") ? { ok: false, status: 404, url, text: "" } : fakeFetch(url)),
+});
+assert.equal(httpLink.ok, false);
+assert.deepEqual(httpLink.deadSources, ["http://dead.test/x"]);
+
 console.log("blog-grounding-selfcheck: ok");

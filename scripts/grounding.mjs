@@ -8,7 +8,11 @@ const SCALES = {
   triliun: 1e12, trillion: 1e12,
 };
 const SCALE_RE = Object.keys(SCALES).join("|");
-const NUM_RE = new RegExp(`(\\d+(?:[.,]\\d+)*)(?:\\s*(${SCALE_RE})\\b)?`, "gi");
+// Short forms a writer actually types: $1.5M, $250K. `M` is read as million, so an Indonesian
+// "Rp 1,5 M" (miliar) reads as 1.5 million: shortcut — a false skip costs one repair call,
+// upgrade with a locale-aware rule if it ever bites.
+const SHORT_SCALES = { k: 1e3, m: 1e6, b: 1e9, t: 1e12 };
+const NUM_RE = new RegExp(`(\\d+(?:[.,]\\d+)*)(?:\\s*(${SCALE_RE})\\b|\\s*([KMBT])\\b)?`, "gi");
 
 // A separator followed by exactly 3 digits is a thousands separator (8.700 / 8,700),
 // otherwise it is the decimal mark (1,5 / 1.5).
@@ -28,11 +32,12 @@ function formatScaled(value) {
 export function numbersIn(text, { keepRaw = true } = {}) {
   const out = new Set();
   for (const match of String(text).matchAll(NUM_RE)) {
-    const [raw, scale] = [match[1], match[2]];
+    const [raw, scale, short] = [match[1], match[2], match[3]];
     const value = normNumber(raw);
-    if (scale) {
+    const factor = scale ? SCALES[scale.toLowerCase()] : short ? SHORT_SCALES[short.toLowerCase()] : null;
+    if (factor) {
       if (keepRaw) out.add(value);
-      const scaled = formatScaled(Number(value) * SCALES[scale.toLowerCase()]);
+      const scaled = formatScaled(Number(value) * factor);
       if (scaled) out.add(scaled);
     } else {
       out.add(value);
@@ -47,7 +52,7 @@ export function numbersIn(text, { keepRaw = true } = {}) {
 const FLAGGED_RE = [
   // The scale word belongs to the figure: "$1.5 million" must normalise to 1500000, or a
   // source stating it verbatim would still fail the gate.
-  /(?:Rp\.?|USD|EUR|\$)\s?\d[\d.,]*(?:\s*(?:ribu|juta|miliar|milyar|triliun|thousand|million|billion|trillion))?/gi,
+  /(?:Rp\.?|USD|EUR|\$)\s?\d[\d.,]*(?:\s*(?:ribu|juta|miliar|milyar|triliun|thousand|million|billion|trillion)|\s*[KMBT])?\b/gi,
   /\d[\d.,]*\s?%/g,
   /[A-Za-z]+-\d+(?:\.\d+)*/g,
   /\bv\d+(?:\.\d+)*/g,
@@ -79,8 +84,10 @@ export function riskyNumbers(text) {
 
 const FRONTMATTER_RE = /^---\n[\s\S]*?\n---\n/;
 const FENCE_LINE_RE = /^\s{0,3}(`{3,}|~{3,})/;
-const INDENTED_CODE_RE = /^(?: {4}|\t)/;
-const INLINE_CODE_RE = /(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/g;
+// A 4-space indent is an indented code block only when it does not continue a list item;
+// a nested bullet under "- Configure:" is prose and its numbers are claims.
+const INDENTED_CODE_RE = /^(?: {4}|\t)(?![-*+]\s)/;
+const INLINE_CODE_RE = /(`+)([^`\n]|[^`\n][^`\n]*?[^`\n])\1(?!`)/g;
 const LINK_RE = /\[([^\]]*)\]\([^()\s]*\)/g;
 const BARE_URL_RE = /<?https?:\/\/[^\s>)\]]+/gi;
 
@@ -96,7 +103,14 @@ export function proseOnly(markdown) {
       if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null;
       continue;
     }
-    if (marker) { fence = marker[1]; continue; }
+    if (marker) {
+      // A fence opened and closed on one line hides only that line.
+      const ticks = marker[1];
+      const rest = line.slice(line.indexOf(ticks) + ticks.length);
+      const closer = new RegExp(`[${ticks[0] === "`" ? "`" : "~"}]{${ticks.length},}`).exec(rest);
+      if (!closer) fence = ticks;
+      continue;
+    }
     if (INDENTED_CODE_RE.test(line)) continue;
     kept.push(line);
   }
@@ -200,14 +214,27 @@ export function checkGrounding({ body = "", sources = [], minChars = MIN_SOURCE_
     if (text.trim().length < minChars) { deadSources.push(String(src?.url || "")); continue; }
     for (const n of numbersIn(text, { keepRaw: false })) allowed.add(n);
   }
-  // "Node 20" is grounded by a source saying "Node.js 20.11.1": the leading component of a
-  // dotted version the source states is the same version, not an invented number.
-  const versionParts = new Set();
+  // "Node 20" is grounded by a source saying "Node.js 20.11.1", but ONLY as a bare integer
+  // right after a version-ish word: a percentage or measurement is never licensed this way.
+  // A bare version number ("Node 20") is grounded by a source's fuller version ("Node.js
+  // 20.11.1"), but only right after a version-ish word: never for a percentage or measurement.
+  const prefixes = new Set();
   for (const n of allowed) {
+    if (!/^\d+\.\d/.test(n)) continue;
     const parts = n.split(".");
-    for (let i = 1; i < parts.length; i++) versionParts.add(parts.slice(0, i).join("."));
+    for (let i = 1; i < parts.length; i++) prefixes.add(parts.slice(0, i).join("."));
   }
-  const unverified = riskyNumbers(proseOnly(body)).filter((n) => !allowed.has(n) && !versionParts.has(n));
+  const prose = proseOnly(body);
+  const isVersionMention = (n) =>
+    new RegExp(
+      `(?:node|node\\.js|npm|rails|ruby|python|php|go|java|react|next\\.js|vue|postgres(?:ql)?|mysql|redis|chrome|firefox|safari|typescript|v)\\s*${n.replace(/\./g, "\\.")}(?!\\d|\\.\\d|\\s*%)`,
+      "i",
+    ).test(prose);
+  const unverified = riskyNumbers(prose).filter((n) => {
+    if (allowed.has(n)) return false;
+    if (!/^\d+(\.\d+)*$/.test(n) || !prefixes.has(n)) return true;
+    return !isVersionMention(n);
+  });
   const errs = [
     ...deadSources.map((u) => `cited source has no readable text: ${u}`),
     ...unverified.map((n) => `number not found in any source: ${n}`),

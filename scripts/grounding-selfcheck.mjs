@@ -113,4 +113,36 @@ const nested = "<div><div>" + "<p>The default highWaterMark is 16384 bytes.</p>"
 const nestedText = extractPageText(nested);
 assert.ok(nestedText.includes("16384"), "nested divs must not cut structured text");
 
+// --- a version prefix must not license a fabricated percentage or measurement ---
+for (const [body, source, want] of [
+  ["Deploys are 7% faster.", "Rails 7.1.2 released today.", ["7"]],
+  ["3% faster", "Python 3.12 released.", ["3"]],
+  ["Latency fell 45%.", "Latency fell 45.2% last quarter.", ["45"]],
+  ["We hit 99% uptime.", "It measured 99.9% uptime.", ["99"]],
+  ["Saved 20 days.", "Requires Node 20.11.1.", ["20"]],
+  ["It needs 19 GB.", "Plans start at $19.99/mo.", ["19"]],
+]) {
+  const src = [{ url: "https://a.test/x", text: source + " " + "Filler text here. ".repeat(20) }];
+  assert.deepEqual(checkGrounding({ body, sources: src }).unverified, want, body);
+}
+assert.deepEqual(checkGrounding({ body: "Run it on Node 20.", sources: [{ url: "https://a.test/x", text: "Requires Node.js 20.11.1. " + "Filler text here. ".repeat(20) }] }).unverified, [], "the version case still works");
+
+// --- indented list continuations and single stray backticks must not blind the gate ---
+assert.deepEqual(riskyNumbers(proseOnly("- Configure the pool:\n    - 4096 sockets per worker\n    - 45 ms p99 latency")), ["4096", "45", "99"]);
+const strayTicks = "Set `limit` in `config.json` and restart with `node app.\n\nThe pool then opens 4096 sockets.\n\nAnother flag `workers` applies here.";
+assert.deepEqual(riskyNumbers(proseOnly(strayTicks)), ["4096"], "a stray backtick must not delete the rest of the document");
+
+// --- a fence opened and closed on one line hides only that line ---
+assert.deepEqual(riskyNumbers(proseOnly("```js const n = 512; ```\nThen it opens 4096 sockets.")), ["4096"]);
+
+// --- abbreviated currency ($1.5M, Rp 1,5 M) is the same figure as the spelled-out source ---
+for (const [body, source] of [
+  ["It raised $1.5M.", "It raised $1.5 million."],
+  ["Dana Rp 1,5 T terkumpul.", "Dana Rp 1,5 triliun terkumpul."],
+  ["A $250K round.", "A $250 thousand round."],
+]) {
+  const src = [{ url: "https://a.test/f", text: source + " " + "Filler text here. ".repeat(20) }];
+  assert.deepEqual(checkGrounding({ body, sources: src }).unverified, [], body);
+}
+
 console.log("grounding-selfcheck: ok");

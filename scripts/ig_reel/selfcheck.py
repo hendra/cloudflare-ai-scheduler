@@ -14,7 +14,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from ig_reel.story import (  # noqa: E402
     apply_story_limits, build_caption, canonical_url, check_story, extract_article_text, extract_buffer_prompts,
     extract_buffer_seen, feed_body, filter_unseen_news, format_date_id, grounding_text, interleave, is_similar_title,
-    normalize_title, numbers_in, order_by_source, proper_noun_errors, tip_duplicate_error, MOODS, STORY_SCHEMA_HINT,
+    normalize_title, numbers_in, order_by_source, proper_noun_advisories, proper_noun_errors, tip_duplicate_error,
+    MOODS, STORY_SCHEMA_HINT,
     normalize_mood, SAMPLE_PROMPT_MAX,
 )
 
@@ -88,6 +89,30 @@ assert proper_noun_errors(multi, ARTICLE) == [], proper_noun_errors(multi, ARTIC
 mid = copy.deepcopy(STORY)
 mid["beats"][0]["text"] = "Astronom menemukan oksigen. Menurut Zorblax, ini penting."
 assert any("Zorblax" in e for e in proper_noun_errors(mid, ARTICLE))
+
+# --- a name that OPENS a sentence is advisory, not fatal (it cannot be told from "Anginnya") ---
+opener = copy.deepcopy(STORY)
+opener["beats"][0]["text"] = "Zorblax menemukan oksigen di planet itu."
+assert "Zorblax" in proper_noun_advisories(opener, ARTICLE)
+assert proper_noun_errors(opener, ARTICLE) == [], "sentence-initial words must not fail the story"
+
+# The same name mid-sentence IS fatal.
+opener2 = copy.deepcopy(STORY)
+opener2["beats"][0]["text"] = "Astronom menemukan oksigen. Lalu Zorblax setuju."
+assert any("Zorblax" in e for e in proper_noun_errors(opener2, ARTICLE)), proper_noun_errors(opener2, ARTICLE)
+
+# Ordinary Indonesian sentence starters stay exempt.
+for starter in ["Jaraknya", "Namun", "Jadi", "Karena", "Hasilnya", "Ternyata", "Menurut"]:
+    t = copy.deepcopy(STORY)
+    t["beats"][0]["text"] = f"Astronom menemukan oksigen di planet itu. {starter} anginnya 8.700 km/jam."
+    assert proper_noun_errors(t, ARTICLE) == [], (starter, proper_noun_errors(t, ARTICLE))
+
+# Acronyms and Indonesian common nouns are not invented names.
+acr = copy.deepcopy(STORY)
+acr["beats"][0]["text"] = "Data API dan GPU NASA dipakai para astronom bulan November ini."
+assert proper_noun_errors(acr, ARTICLE + " API GPU NASA November") == [], proper_noun_errors(acr, ARTICLE)
+# An acronym the article never uses is still a mid-sentence unknown, so it is reported.
+assert any("GPU" in e for e in proper_noun_errors(acr, ARTICLE + " API NASA November"))
 
 # --- proper nouns: fabricated names are reported, real ones pass ---
 pn = copy.deepcopy(STORY)

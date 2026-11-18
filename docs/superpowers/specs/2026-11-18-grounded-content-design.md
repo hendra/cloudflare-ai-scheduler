@@ -77,7 +77,12 @@ pipelines agree on what counts as the same number:
   grounded; only the text pasted into a prompt is capped.
 - `checkGrounding({ body, sources })` → `{ ok, errs, unverified, deadSources }`.
   `sources` is `[{ url, text }]`. Errors: a cited link that failed to fetch, and
-  each risky number in `proseOnly(body)` absent from every source text.
+  each risky number in `proseOnly(body)` absent from every source text. A bare
+  version number ("Node 20") is accepted when a source states a fuller version
+  ("Node.js 20.11.1") **and** the prose puts it right after a version-ish word —
+  never for a percentage or a measurement, which a dot in a version must not
+  license. Abbreviated currency (`$1.5M`, `$250K`) normalises like the spelled-out
+  form.
 
 ### 2. Blog writers (`railsdev`, `fullstackweb`, `inasoft`)
 
@@ -108,27 +113,25 @@ pipelines agree on what counts as the same number:
 
 ### 3. IG Reel news (`scripts/ig_reel/story.py`)
 
-- Add `proper_noun_errors(data, article_text)`: it scans only the `hook` and each
-  beat's `text`/`highlight` (not captions, CTA or hashtags). A name is a
-  capitalised token **in the middle of a sentence** that the article never uses.
-  Sentence-initial tokens are exempt because Indonesian capitalises every
-  sentence while the script is Indonesian and the article English ("Earth"
-  legitimately becomes "Bumi"). A small platform-word set (`Reel`, `Instagram`, …)
-  is exempt too, since the prompt itself tells the model to write them.
-- The finding is **hard**, so it rides `write_story`'s existing one-repair path:
-  the model renames the object to the article's own term or rephrases the
-  sentence, and only a second failure drops that candidate. Soft was rejected —
-  `apply_story_limits` only truncates soft findings, so an invented name would
-  ship. An earlier first-token-only exemption was rejected too: it flagged the
-  start of every second sentence, so no candidate ever passed and the account
-  stopped posting.
-- No curated translation exemption list: it would need constant maintenance and
-  still leak. `shortcut: translated names mid-sentence cost one repair call;
-  upgrade to a name allowlist if skips ever spike.`
+- Add `proper_noun_errors(data, article_text)`: a capitalised name **in the middle
+  of a sentence** that the article never mentions is a hard finding, riding
+  `write_story`'s existing one-repair path. Scans only the `hook` and each beat's
+  `text`/`highlight`; captions and hashtags are not claims. Acronyms, tokens with
+  digits and platform words (`Reel`, `Instagram`) are not names, and a token
+  matches when the article contains it anywhere ("Astronom" vs "Astronomers").
+- Sentence-initial words are **advisory, never fatal** (`proper_noun_advisories`):
+  they are listed in the repair prompt so the model can rename them, but they
+  cannot fail a story. Indonesian capitalises every sentence, so any first-token
+  rule flags ordinary words ("Anginnya", "Teleskop", "Awan"); a curated
+  Indonesian word list cannot be closed, and a hard rule here stopped every
+  candidate, i.e. stopped the account posting. `shortcut: a fabricated name that
+  opens a sentence is only hinted at, never blocked; tighten the list if that
+  ships wrong.`
 - Existing `copied_from_article` / language logic stays.
 
-- No prompt change beyond one added line: names and product names must come from
-  the article.
+- Prompt change: `write_story`'s repair call now names the sentence-initial words
+  that appear in no article, and tells the model to rename a name to the article's
+  own term or rephrase without it (e.g. "planet kita").
 
 ### 4. Proof
 
