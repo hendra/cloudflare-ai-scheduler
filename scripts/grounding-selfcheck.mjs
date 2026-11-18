@@ -67,4 +67,10 @@ assert.equal(dead.ok, false);
 assert.deepEqual(dead.deadSources, ["https://x.test/a"]);
 assert.equal(checkGrounding({ body: "```js\nconst n = 512;\n```\nStreams buffer up to 16 KB.", sources }).ok, true);
 
+// --- a long page keeps the numbers past the old 6000-char cut (nodejs.org/api/stream.html) ---
+const longPage = "<p>" + "Filler paragraph about streams. ".repeat(400) + "</p><p>The default highWaterMark is 16384 bytes.</p>";
+const longText = extractPageText(longPage);
+assert.ok(longText.includes("16384"), "numbers deep in a long page must survive extraction");
+assert.equal(checkGrounding({ body: "The default highWaterMark is 16384 bytes.", sources: [{ url: "https://nodejs.org/api/stream.html", text: longText }] }).ok, true);
+
 console.log("grounding-selfcheck: ok");

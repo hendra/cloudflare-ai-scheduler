@@ -114,7 +114,7 @@ function toText(fragment) {
 
 // Readable page text for grounding. Wider than IG Reel's <p>-only rule on purpose: the blog
 // prompt invites RFC/spec citations whose bodies live in <pre>/<li>/<td>.
-export function extractPageText(html, cap = 6000) {
+export function extractPageText(html, cap = 200_000) {
   const cleaned = String(html).replace(DROP_BLOCKS_RE, " ");
   const parts = [];
   for (const re of [TEXT_BLOCKS_RE, TD_RE]) {
@@ -151,6 +151,8 @@ export async function fetchSourceText(url, { timeout = 25_000 } = {}) {
     const buf = Buffer.from(await res.arrayBuffer()).subarray(0, MAX_BYTES);
     const text = extractPageText(buf.toString("utf-8"));
     if (text.length < MIN_SOURCE_CHARS) return fail(res.status);
+    // Full page text: the gate must see numbers that sit deep in a long doc. Only the prompt
+    // block is capped (blog-grounding.mjs REPAIR_SOURCE_CAP, writers' signal block).
     return { ok: true, status: res.status, text };
   } catch {
     return fail();

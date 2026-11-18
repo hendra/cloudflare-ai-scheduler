@@ -398,7 +398,7 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
   // Built from the passed article on every call: a 4a metadata fix can change
   // keyword/title/category/services, and the retry prompt must not demand the stale values.
   // Fetched once: the signal's own page is the only material the first draft can cite safely.
-  const signalText = AI_STUB || !chosenSignal?.url ? "" : (await fetchSourceText(chosenSignal.url)).text;
+  const signalText = AI_STUB || !chosenSignal?.url ? "" : (await fetchSourceText(chosenSignal.url)).text.slice(0, 6000);
   if (signalText) console.log(`signal source: ${signalText.length} chars from ${chosenSignal.url}`);
   const sourceBlock = signalText
     ? `\n\nSource material (facts you may state — never state a fact that is not here or in an official doc you can cite):\n${signalText}`
