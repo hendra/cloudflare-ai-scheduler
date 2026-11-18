@@ -74,6 +74,21 @@ STORY = {
 hard, soft = check_story(copy.deepcopy(STORY), ARTICLE)
 assert hard == [], hard
 
+# --- regression: sentence-initial words are not names ---
+# Indonesian capitalises every sentence, so only a token in the MIDDLE of a sentence can be a
+# name. Every one of these was reported as an invented proper noun before the fix.
+multi = copy.deepcopy(STORY)
+multi["beats"][0]["text"] = "Astronom menemukan oksigen di atmosfer planet itu. Jaraknya 520 tahun cahaya."
+multi["beats"][1]["text"] = "Namun anginnya mencapai 8.700 km/jam. Jadi ini cuaca ekstrem."
+multi["beats"][2]["text"] = "Awan silikat ikut terbawa. Karena itu hujan kacanya menyamping."
+multi["beats"][3]["text"] = "Hasilnya planet ini unik. Simpan Reel ini kalau menarik."
+assert proper_noun_errors(multi, ARTICLE) == [], proper_noun_errors(multi, ARTICLE)
+
+# A name in the middle of a sentence is still caught.
+mid = copy.deepcopy(STORY)
+mid["beats"][0]["text"] = "Astronom menemukan oksigen. Menurut Zorblax, ini penting."
+assert any("Zorblax" in e for e in proper_noun_errors(mid, ARTICLE))
+
 # --- proper nouns: fabricated names are reported, real ones pass ---
 pn = copy.deepcopy(STORY)
 pn["beats"][1]["text"] = "Teleskop Zorblax menemukan oksigen di planet itu."
@@ -101,7 +116,7 @@ pn_repair["beats"][1]["text"] = "Teleskop Zorblax menemukan oksigen, anginnya 8.
 hard_pn, _ = check_story(pn_repair, ARTICLE)
 assert any("Zorblax" in h for h in hard_pn), hard_pn
 
-# A translated name is repairable, not fatal: the repair prompt names it and the model rephrases.
+# A translated name is a name in mid-sentence, so the repair path sees it and can rephrase.
 pn_translated = copy.deepcopy(STORY)
 pn_translated["beats"][1]["text"] = "Anginnya 8.700 km/jam, tujuh kali lebih cepat dari suara di Bumi."
 assert any("Bumi" in h for h in check_story(pn_translated, ARTICLE)[0])

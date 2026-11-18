@@ -173,14 +173,27 @@ def copied_from_article(text, article_text, min_words):
 
 
 _PROPER_TOKEN = re.compile(r"[A-Za-z][\w'-]*")
+# Words the prompt itself tells the model to write ("Simpan Reel ini"); not source claims.
+_PLATFORM_WORDS = {"reel", "instagram", "tiktok", "youtube", "shorts"}
+
+
+def _sentence_starts(text):
+    """Indexes of tokens that open a sentence (first token, or right after . ! ? … :)."""
+    starts, at_start = set(), True
+    for i, tok in enumerate(text.split()):
+        if at_start:
+            starts.add(i)
+        at_start = tok.endswith((".", "!", "?", "…", ":", '"'))
+    return starts
 
 
 def proper_noun_errors(data, article_text):
-    """Capitalised names the article never mentions (soft: one repair call fixes or drops them).
+    """Capitalised names the article never mentions.
 
-    Only the hook and the beats are scanned — captions and hashtags are not claims — and the
-    first token of each field is exempt, because it is usually a sentence starter and the
-    script is Indonesian while the article is English ("Earth" legitimately becomes "Bumi").
+    Only the hook and the beats are scanned (captions and hashtags are not claims). A token that
+    opens a sentence is never a name: Indonesian capitalises every sentence, and the script is
+    Indonesian while the article is English ("Earth" legitimately becomes "Bumi"). So a name is
+    a capitalised token in the middle of a sentence that the article never uses.
     """
     fields = [str(data.get("hook") or "")]
     for b in data.get("beats") or []:
@@ -190,10 +203,15 @@ def proper_noun_errors(data, article_text):
     errs = []
     for text in fields:
         tokens = text.split()
+        starts = _sentence_starts(text)
         missing = []
-        for tok in tokens[1:]:
+        for i, tok in enumerate(tokens):
+            if i in starts:
+                continue
             for word in _PROPER_TOKEN.findall(tok):
                 if not word[:1].isupper() or any(ch.isdigit() for ch in word):
+                    continue
+                if word.lower() in _PLATFORM_WORDS:
                     continue
                 if word.lower() not in haystack and word not in missing:
                     missing.append(word)

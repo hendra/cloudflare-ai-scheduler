@@ -46,4 +46,50 @@ const noSignal = await groundArticle({
 });
 assert.equal(noSignal.ok, true);
 
+// A citation the repair introduces must be fetched too, not shipped unread.
+const newLink = await groundArticle({
+  article: article("Limit is 999 MB."),
+  links: ["https://a.test/doc"],
+  signalUrl: null,
+  callModel: async () => "Limit is 512 MB. See [the spec](https://dead.test/x) for details.",
+  fetchSourceText: async (url) => (url.includes("dead.test") ? { ok: false, status: 404, url, text: "" } : fakeFetch(url)),
+});
+assert.equal(newLink.ok, false);
+assert.deepEqual(newLink.deadSources, ["https://dead.test/x"]);
+
+// A provider error during the repair is a clean skip, not a crashed pipeline.
+const boom = await groundArticle({
+  article: article("Limit is 999 MB."),
+  links: ["https://a.test/doc"],
+  signalUrl: null,
+  callModel: async () => { throw new Error("429"); },
+  fetchSourceText: fakeFetch,
+});
+assert.equal(boom.ok, false);
+assert.deepEqual(boom.unverified, ["999"]);
+
+// An already-fetched signal page is reused, not fetched twice.
+const fetched = [];
+const reused = await groundArticle({
+  article: article("Limit is 512 MB."),
+  links: ["https://a.test/doc"],
+  signalUrl: "https://signal.test/page",
+  signalText: "Signal page. " + "Filler text. ".repeat(20),
+  callModel: async () => "",
+  fetchSourceText: async (url) => { fetched.push(url); return fakeFetch(url); },
+});
+assert.equal(reused.ok, true);
+assert.deepEqual(fetched, ["https://a.test/doc"], "signal page not fetched again");
+
+// A provider error during the repair call is a clean skip, never a thrown run.
+const providerDown = await groundArticle({
+  article: article("Limit is 999 MB."),
+  links: ["https://a.test/doc"],
+  signalUrl: null,
+  callModel: async () => { throw new Error("429 hard usage limit"); },
+  fetchSourceText: fakeFetch,
+});
+assert.equal(providerDown.ok, false);
+assert.deepEqual(providerDown.unverified, ["999"]);
+
 console.log("blog-grounding-selfcheck: ok");

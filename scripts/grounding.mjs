@@ -45,7 +45,9 @@ export function numbersIn(text, { keepRaw = true } = {}) {
 // percentage, a currency amount or a version token. Four-digit years and small counts are
 // exempt so ordinary prose ("3 layers", "as of 2026") never trips the gate.
 const FLAGGED_RE = [
-  /(?:Rp\.?|USD|EUR|\$)\s?\d[\d.,]*/gi,
+  // The scale word belongs to the figure: "$1.5 million" must normalise to 1500000, or a
+  // source stating it verbatim would still fail the gate.
+  /(?:Rp\.?|USD|EUR|\$)\s?\d[\d.,]*(?:\s*(?:ribu|juta|miliar|milyar|triliun|thousand|million|billion|trillion))?/gi,
   /\d[\d.,]*\s?%/g,
   /[A-Za-z]+-\d+(?:\.\d+)*/g,
   /\bv\d+(?:\.\d+)*/g,
@@ -75,17 +77,30 @@ export function riskyNumbers(text) {
 
 // ---------- prose extraction ----------
 
-const FENCE_RE = /^```[\s\S]*?^```[ \t]*$/gm;
-const INLINE_CODE_RE = /`[^`\n]*`/g;
-const LINK_RE = /\[([^\]]*)\]\((?:[^()\s]*)\)/g;
-const BARE_URL_RE = /<?https?:\/\/[^\s>)\]]+/gi;
 const FRONTMATTER_RE = /^---\n[\s\S]*?\n---\n/;
+const FENCE_LINE_RE = /^\s{0,3}(`{3,}|~{3,})/;
+const INDENTED_CODE_RE = /^(?: {4}|\t)/;
+const INLINE_CODE_RE = /(`+)([^`]|[^`][\s\S]*?[^`])\1(?!`)/g;
+const LINK_RE = /\[([^\]]*)\]\([^()\s]*\)/g;
+const BARE_URL_RE = /<?https?:\/\/[^\s>)\]]+/gi;
 
-// The parts of a markdown body that can carry a claim: code samples and URLs cannot.
+// The parts of a markdown body that can carry a claim: code samples and URLs cannot. Handles
+// every fence style a model emits (``` and ~~~, any run length, indented, or left unclosed) and
+// indented code blocks, because a number inside a sample must never count as a claim.
 export function proseOnly(markdown) {
-  return String(markdown)
-    .replace(FRONTMATTER_RE, "")
-    .replace(FENCE_RE, " ")
+  const kept = [];
+  let fence = null;
+  for (const line of String(markdown).replace(FRONTMATTER_RE, "").split("\n")) {
+    const marker = line.match(FENCE_LINE_RE);
+    if (fence) {
+      if (marker && marker[1][0] === fence[0] && marker[1].length >= fence.length) fence = null;
+      continue;
+    }
+    if (marker) { fence = marker[1]; continue; }
+    if (INDENTED_CODE_RE.test(line)) continue;
+    kept.push(line);
+  }
+  return kept.join("\n")
     .replace(INLINE_CODE_RE, " ")
     .replace(LINK_RE, "$1")
     .replace(BARE_URL_RE, " ")
@@ -94,8 +109,7 @@ export function proseOnly(markdown) {
 }
 
 const DROP_BLOCKS_RE = /<(script|style|nav|header|footer|aside|noscript|svg)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
-const TEXT_BLOCKS_RE = /<(p|li|pre|dd|blockquote)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi;
-const TD_RE = /<td\b[^>]*>([\s\S]*?)<\/td\s*>/gi;
+const TEXT_BLOCKS_RE = /<(p|li|pre|td|dd|blockquote|div)\b[^>]*>([\s\S]*?)<\/\1\s*>/gi;
 const TAG_RE = /<[^>]+>/g;
 const ENTITIES = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 
@@ -117,7 +131,7 @@ function toText(fragment) {
 export function extractPageText(html, cap = 200_000) {
   const cleaned = String(html).replace(DROP_BLOCKS_RE, " ");
   const parts = [];
-  for (const re of [TEXT_BLOCKS_RE, TD_RE]) {
+  for (const re of [TEXT_BLOCKS_RE]) {
     for (const m of cleaned.matchAll(re)) {
       const text = toText(m[m.length - 1]);
       if (text) parts.push(text);
@@ -148,7 +162,20 @@ export async function fetchSourceText(url, { timeout = 25_000 } = {}) {
     if (res.status < 200 || res.status >= 300) return fail(res.status);
     const ctype = res.headers.get("content-type") || "";
     if (!ctype.toLowerCase().includes("html")) return fail(res.status);
-    const buf = Buffer.from(await res.arrayBuffer()).subarray(0, MAX_BYTES);
+    // Stop reading at the cap instead of downloading a 50 MB page to then slice it.
+    const chunks = [];
+    let total = 0;
+    if (res.body) {
+      const reader = res.body.getReader();
+      while (total < MAX_BYTES) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value);
+        total += value.length;
+      }
+      reader.cancel().catch(() => {});
+    }
+    const buf = Buffer.concat(chunks.map((c) => Buffer.from(c))).subarray(0, MAX_BYTES);
     const text = extractPageText(buf.toString("utf-8"));
     if (text.length < MIN_SOURCE_CHARS) return fail(res.status);
     // Full page text: the gate must see numbers that sit deep in a long doc. Only the prompt
@@ -171,7 +198,14 @@ export function checkGrounding({ body = "", sources = [], minChars = MIN_SOURCE_
     if (text.trim().length < minChars) { deadSources.push(String(src?.url || "")); continue; }
     for (const n of numbersIn(text, { keepRaw: false })) allowed.add(n);
   }
-  const unverified = riskyNumbers(proseOnly(body)).filter((n) => !allowed.has(n));
+  // "Node 20" is grounded by a source saying "Node.js 20.11.1": the leading component of a
+  // dotted version the source states is the same version, not an invented number.
+  const versionParts = new Set();
+  for (const n of allowed) {
+    const parts = n.split(".");
+    for (let i = 1; i < parts.length; i++) versionParts.add(parts.slice(0, i).join("."));
+  }
+  const unverified = riskyNumbers(proseOnly(body)).filter((n) => !allowed.has(n) && !versionParts.has(n));
   const errs = [
     ...deadSources.map((u) => `cited source has no readable text: ${u}`),
     ...unverified.map((n) => `number not found in any source: ${n}`),

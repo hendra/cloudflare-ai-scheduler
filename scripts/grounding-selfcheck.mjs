@@ -73,4 +73,39 @@ const longText = extractPageText(longPage);
 assert.ok(longText.includes("16384"), "numbers deep in a long page must survive extraction");
 assert.equal(checkGrounding({ body: "The default highWaterMark is 16384 bytes.", sources: [{ url: "https://nodejs.org/api/stream.html", text: longText }] }).ok, true);
 
+// --- regression: every common fence style and inline-code form hides its numbers ---
+for (const md of [
+  "~~~js\nconst n = 512;\n~~~",
+  "````md\n```js\nconst n = 512;\n```\n````",
+  "- step\n  ```bash\n  curl -d 512\n  ```",
+  "    const n = 512;",
+  "```js\nconst n = 512;",
+  "Use ``x = 512`` here.",
+]) {
+  assert.deepEqual(riskyNumbers(proseOnly(md)), [], JSON.stringify(md));
+}
+assert.deepEqual(riskyNumbers(proseOnly("It buffers 512 MB.")), ["512"], "plain prose still counts");
+
+// --- regression: a currency figure the source states verbatim is grounded ---
+for (const [body, source] of [
+  ["The company raised $1.5 million.", "The company raised $1.5 million in seed."],
+  ["Dana Rp 1,5 miliar terkumpul.", "Dana Rp 1,5 miliar terkumpul."],
+  ["It raised $2 billion.", "It raised $2 billion."],
+  ["A $1.5M round.", "A $1.5M round."],
+]) {
+  const src = [{ url: "https://a.test/funding", text: source + " " + "Filler text about the round. ".repeat(10) }];
+  assert.deepEqual(checkGrounding({ body, sources: src }).unverified, [], body);
+}
+assert.deepEqual(checkGrounding({ body: "It raised $9 million.", sources: [{ url: "https://a.test/f", text: "It raised $2 million. " + "Filler. ".repeat(40) }] }).unverified, ["9000000"]);
+
+// --- a version prefix the source spells in full is grounded; an unrelated number is not ---
+const verSrc = [{ url: "https://nodejs.org/api/", text: "Requires Node.js 20.11.1 or newer. " + "Filler text here. ".repeat(20) }];
+assert.deepEqual(checkGrounding({ body: "Run it on Node 20.", sources: verSrc }).unverified, []);
+assert.deepEqual(checkGrounding({ body: "Upgrade to Rails 7.1.", sources: [{ url: "https://a.test/r", text: "Rails 7.1.2 released. " + "Filler text here. ".repeat(20) }] }).unverified, []);
+assert.deepEqual(checkGrounding({ body: "Use 33 workers.", sources: verSrc }).unverified, ["33"], "an unrelated number stays unverified");
+
+// --- a page whose text sits in bare <div>s is readable, not dead (medium.com style) ---
+const divPage = "<div><div>" + "An article paragraph with real words in it. ".repeat(10) + "</div></div>";
+assert.ok(extractPageText(divPage).includes("article paragraph"), "div-only pages must yield text");
+
 console.log("grounding-selfcheck: ok");

@@ -111,7 +111,7 @@ git commit -m "feat: add number grounding helpers"
 - Consumes: nothing from Task 1.
 - Produces:
   - `proseOnly(markdown: string) -> string`
-  - `extractPageText(html: string) -> string` (≤6000 chars)
+  - `extractPageText(html: string) -> string` (full page text; only prompt blocks are capped)
   - `fetchSourceText(url: string) -> Promise<{ ok: boolean, status: number, text: string }>` — `ok` requires a 2xx status **and** ≥200 chars of `extractPageText`.
 
 - [ ] **Step 1: Write the failing test**
@@ -148,7 +148,7 @@ Expected: FAIL — `proseOnly` is not a function.
 
 - [ ] **Step 3: Implement both helpers**
 
-`proseOnly`: drop frontmatter, drop fenced blocks, drop inline code, replace `[text](url)` with `text`, drop bare `https?://\S+` and autolinks, unescape nothing else. `extractPageText`: strip `script|style|nav|header|footer|aside|noscript|svg` with their contents, then join text from `p, li, pre, td, dd, blockquote` (deliberately wider than `story.py`'s `<p>`-only rule — RFC/spec bodies live in `<pre>`), collapse whitespace, cap 6000 chars. `fetchSourceText`: `fetch` with a browser UA, 25 s `AbortSignal.timeout`, `redirect: "follow"`, reject non-`text/html` content types, read at most 2 MB, and only accept `http:`/`https:` URLs.
+`proseOnly`: drop frontmatter, drop fenced blocks, drop inline code, replace `[text](url)` with `text`, drop bare `https?://\S+` and autolinks, unescape nothing else. `extractPageText`: strip `script|style|nav|header|footer|aside|noscript|svg` with their contents, then join text from `p, li, pre, td, dd, blockquote, div` (deliberately wider than `story.py`'s `<p>`-only rule — RFC/spec bodies live in `<pre>`), collapse whitespace, cap 6000 chars. `fetchSourceText`: `fetch` with a browser UA, 25 s `AbortSignal.timeout`, `redirect: "follow"`, reject non-`text/html` content types, read at most 2 MB, and only accept `http:`/`https:` URLs.
 
 - [ ] **Step 4: Run the self-check to verify it passes**
 

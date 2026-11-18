@@ -68,11 +68,13 @@ pipelines agree on what counts as the same number:
   URLs never count as claims.
 - `fetchSourceText(url)` — GET, `text/html` only, 2 MB cap, returns
   `{ ok, status, text }`; `ok` requires 2xx **and** ≥200 chars of extracted text.
-  Extraction takes `p, li, pre, td, dd, blockquote` text with `script/style/nav/
-  header/footer/aside/noscript/svg` stripped — deliberately wider than IG Reel's
-  `<p>`-only rule, because the blog prompt invites RFC/spec/doc citations whose
-  bodies live in `<pre>`/`<li>`/`<td>`, and a `<p>`-only extractor would reject
-  exactly the sources the prompt asks for.
+  Extraction takes `p, li, pre, td, dd, blockquote, div` text with `script/style/
+  nav/header/footer/aside/noscript/svg` stripped — deliberately wider than IG
+  Reel's `<p>`-only rule, because the blog prompt invites RFC/spec/doc citations
+  whose bodies live in `<pre>`/`<li>`/`<td>`, and a `<p>`-only extractor would
+  reject exactly the sources the prompt asks for; `div` covers pages with no
+  semantic blocks at all. The full page text is kept for checking (a number deep
+  in a long doc is still grounded); only the text pasted into a prompt is capped.
 - `checkGrounding({ body, sources })` → `{ ok, errs, unverified, deadSources }`.
   `sources` is `[{ url, text }]`. Errors: a cited link that failed to fetch, and
   each risky number in `proseOnly(body)` absent from every source text.
@@ -106,17 +108,23 @@ pipelines agree on what counts as the same number:
 
 ### 3. IG Reel news (`scripts/ig_reel/story.py`)
 
-- Add `proper_noun_errors(data, article_text)`, **soft**: it scans only the
-  `hook` and each beat's `text`/`highlight` (not captions, CTA or hashtags), and
-  exempts the first token of every field. A capitalised non-initial token that
-  does not appear (case-insensitively) in the article text is reported, so the
-  model gets one repair call — it can rephrase "Bumi" as "planet kita" or name
-  the object as the article does — and the story fails only if the repair still
-  trips it. This exists because the article is English while the script must be
-  Indonesian: a hard check on translated names ("Earth" → "Bumi") would silently
-  stop the accounts from posting.- No curated translation exemption list: it would need constant maintenance and
-  still leak. `shortcut: soft check only, so a translated proper noun costs one
-  repair call; upgrade to a name allowlist if skips ever spike.`
+- Add `proper_noun_errors(data, article_text)`: it scans only the `hook` and each
+  beat's `text`/`highlight` (not captions, CTA or hashtags). A name is a
+  capitalised token **in the middle of a sentence** that the article never uses.
+  Sentence-initial tokens are exempt because Indonesian capitalises every
+  sentence while the script is Indonesian and the article English ("Earth"
+  legitimately becomes "Bumi"). A small platform-word set (`Reel`, `Instagram`, …)
+  is exempt too, since the prompt itself tells the model to write them.
+- The finding is **hard**, so it rides `write_story`'s existing one-repair path:
+  the model renames the object to the article's own term or rephrases the
+  sentence, and only a second failure drops that candidate. Soft was rejected —
+  `apply_story_limits` only truncates soft findings, so an invented name would
+  ship. An earlier first-token-only exemption was rejected too: it flagged the
+  start of every second sentence, so no candidate ever passed and the account
+  stopped posting.
+- No curated translation exemption list: it would need constant maintenance and
+  still leak. `shortcut: translated names mid-sentence cost one repair call;
+  upgrade to a name allowlist if skips ever spike.`
 - Existing `copied_from_article` / language logic stays.
 
 - No prompt change beyond one added line: names and product names must come from

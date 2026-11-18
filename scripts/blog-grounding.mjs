@@ -39,12 +39,15 @@ export async function groundArticle({
   article,
   links = [],
   signalUrl = null,
+  signalText = "",   // already fetched for the prompt; reused instead of a second round trip
   callModel,
   fetchSourceText = defaultFetch,
 }) {
   const { sources, deadSources } = await collectSources(links, fetchSourceText);
   // The signal page is extra material, not a citation: an unfetchable one is dropped silently.
-  if (signalUrl) {
+  if (signalText) {
+    sources.push({ url: signalUrl || "signal", text: signalText });
+  } else if (signalUrl) {
     const res = await fetchSourceText(signalUrl);
     if (res && res.ok) sources.push({ url: signalUrl, text: res.text });
   }
@@ -52,14 +55,30 @@ export async function groundArticle({
   const first = checkGrounding({ body: article.body, sources });
   if (first.ok && deadSources.length === 0) return { ok: true, body: article.body, sources };
 
-  const verdict = (v, body) =>
-    v.ok && deadSources.length === 0
-      ? { ok: true, body, sources }
-      : { ok: false, unverified: v.unverified, deadSources: [...new Set([...deadSources, ...v.deadSources])] };
+  const verdict = (v, body, srcs = sources, dead = deadSources) =>
+    v.ok && dead.length === 0
+      ? { ok: true, body, sources: srcs }
+      : { ok: false, unverified: v.unverified, deadSources: [...new Set([...dead, ...v.deadSources])] };
 
-  const repair = await callModel(repairPrompt({ article, unverified: first.unverified, deadSources, sources }));
+  // A provider failure here must not crash the run: the article is simply ungrounded → skip.
+  let repair = "";
+  try {
+    repair = await callModel(repairPrompt({ article, unverified: first.unverified, deadSources, sources }));
+  } catch (e) {
+    console.error("grounding repair call failed:", e.message);
+  }
   const repairedBody = String(repair || "").trim();
   if (!repairedBody) return verdict(first, article.body);
-  const second = checkGrounding({ body: repairedBody, sources });
-  return verdict(second, repairedBody);
+
+  // The repair may cite new pages: fetch them, or a dead link ships past the gate.
+  const cited = [...repairedBody.matchAll(/\]\((https:\/\/[^)\s]+)\)/g)].map((m) => m[1]);
+  const known = new Set(sources.map((s) => s.url));
+  const { sources: extra, deadSources: extraDead } = await collectSources(
+    cited.filter((u) => !known.has(u)),
+    fetchSourceText,
+  );
+  const allSources = [...sources, ...extra];
+  const allDead = [...new Set([...deadSources, ...extraDead])];
+  const second = checkGrounding({ body: repairedBody, sources: allSources });
+  return verdict(second, repairedBody, allSources, allDead);
 }
