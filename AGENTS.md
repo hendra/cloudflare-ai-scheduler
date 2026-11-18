@@ -56,6 +56,8 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 
 Never commit directly to `main`; every change lands via a PR. **Conflict markers are resolved before committing, always:** after resolving any `git` conflict / cherry-pick, run `git grep -n -E '^(<<<<<<< |>>>>>>> )' -- .` once and confirm it is clean before `git commit` — never commit the in-progress resolution text (see docs/status.md gotcha 20). CI enforces this on every PR. PR descriptions follow GitHub best practice: a `## Summary` (what and why, linked spec/plan where one exists), a `## What …`/scope section with concrete bullets, a `## Verification` checklist with real commands/outcomes, `## Out of scope` where relevant, and refs to related PRs. Keep them scannable and honest — don't claim checks that weren't run. **Stacked PRs don't rebase onto `main` automatically** — cherry-pick onto fresh `main` and open a new PR.
 
+**Cleanup after merge is part of the workflow, not a follow-up request.** Once a PR shows `MERGED` (a closed-but-unmerged PR never qualifies), remove its worktree, then its local branch, then its remote branch, then `git worktree prune`. Order matters: a branch cannot be deleted while a worktree has it checked out, so `git worktree remove <path>` comes first, and never `rm -rf` the directory. Refuse and report instead of forcing when the branch is checked out elsewhere, has commits not in `main`, has uncommitted or untracked files, or still backs an open PR. GitHub now deletes the remote branch on merge (`delete_branch_on_merge=true`), so that step is usually already done. Never touch `main` or a branch another task is using.
+
 ## Migrated automations (prompts 1–8)
 
 | Prompt | Status |
