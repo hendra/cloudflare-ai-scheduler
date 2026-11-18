@@ -315,18 +315,29 @@ export function loadBlogCorpus(siteDir) {
   const blogDir = join(siteDir, "src/content/blog");
   if (!existsSync(blogDir)) return [];
   const out = [];
-  for (const f of readdirSync(blogDir)) {
-    if (!f.endsWith(".md")) continue;
-    const raw = readFileSync(join(blogDir, f), "utf8");
-    const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    const fm = fmMatch ? fmMatch[1] : raw;
-    out.push({
-      slug: f.replace(/\.md$/, ""),
-      title: parseFrontmatterField(fm, "title") || f,
-      keyword: parseFrontmatterField(fm, "keyword"),
-      seoTitle: parseFrontmatterField(fm, "seoTitle"),
-    });
-  }
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(fullPath);
+        continue;
+      }
+      if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+      const raw = readFileSync(fullPath, "utf8");
+      const fmMatch = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+      const fm = fmMatch ? fmMatch[1] : raw;
+      out.push({
+        slug: entry.name.replace(/\.md$/, ""),
+        title: parseFrontmatterField(fm, "title") || entry.name,
+        keyword: parseFrontmatterField(fm, "keyword"),
+        seoTitle: parseFrontmatterField(fm, "seoTitle"),
+        category: parseFrontmatterField(fm, "category"),
+        subcategory: parseFrontmatterField(fm, "subcategory"),
+        draft: /^draft:\s*true(?:\s+#.*)?\r?$/im.test(fm),
+      });
+    }
+  };
+  walk(blogDir);
   return out;
 }
 

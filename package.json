@@ -16,6 +16,7 @@
     "db:migrate:remote": "wrangler d1 migrations apply scheduler-db --remote",
     "typecheck": "tsc --noEmit",
     "selfcheck": "node scripts/ai-providers-selfcheck.mjs",
+    "aeo:selfcheck": "node scripts/blog-aeo-selfcheck.mjs",
     "published:selfcheck": "node scripts/published-selfcheck.mjs",
     "index:selfcheck": "node scripts/site-index-selfcheck.mjs",
     "cover:selfcheck": "node scripts/cover/selfcheck.mjs",
