@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 const {
   foldText,
@@ -555,6 +555,18 @@ function makeIdValidBody({
     // Missing check script -> skipped cleanly
     const skipped = runSitePostCheck({ siteDir: tmpSite, relMdPath: "src/content/blog/x.md" });
     assert.equal(skipped.skipped, true);
+
+    // Passing script with relative siteDir (matches GitHub Actions SITE_DIR="../site")
+    mkdirSync(join(tmpSite, "scripts"), { recursive: true });
+    mkdirSync(join(tmpSite, "src/content/blog"), { recursive: true });
+    writeFileSync(join(tmpSite, "src/content/blog/x.md"), "# placeholder\n");
+    writeFileSync(
+      join(tmpSite, "scripts/check-post.mjs"),
+      'import { existsSync } from "node:fs"; if (!existsSync(process.argv[2])) process.exit(2);\n',
+    );
+    const relSiteDir = relative(process.cwd(), tmpSite) || ".";
+    const passedRel = runSitePostCheck({ siteDir: relSiteDir, relMdPath: "src/content/blog/x.md" });
+    assert.equal(passedRel.skipped, false);
 
     // Failing check_post.mjs -> throws descriptive error
     mkdirSync(join(tmpSite, ".claude/skills/write-blog-article/scripts"), { recursive: true });

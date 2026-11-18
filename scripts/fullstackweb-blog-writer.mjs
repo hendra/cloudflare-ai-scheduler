@@ -4,6 +4,13 @@ import { generateCover } from "./cover/render.mjs";
 import { mergePr } from "./site-pr.mjs";
 import { indexArticle, sitemapLocs } from "./site-index.mjs";
 import {
+  buildAeoGeoBodyRules,
+  validateAeoGeo,
+  servicePathFor,
+  runSitePostCheck,
+  isMetaErr,
+} from "./blog-aeo.mjs";
+import {
   fetchPublished,
   recordPublished,
   filterUnseenCandidates,
@@ -141,7 +148,52 @@ const loadCorpus = loadBlogCorpus;
 
 // ---------- AI-stub article (offline testing only) ----------
 function stubArticle() {
-  const body = `## Why this matters\n\nA typescript migration done incrementally avoids entire categories of bugs. ${"Stubbed section on the core tradeoffs. ".repeat(90)}\n\n## How to start\n\n\`\`\`bash\n# install and configure the compiler\nnpm install typescript\nnpx tsc --init\n\`\`\`\n\n${"TypeScript compiler options explained step by step. ".repeat(90)}\n\n## Common mistakes\n\n${"Patterns to avoid when adopting types incrementally, drawn from real projects. ".repeat(90)}\n\n## Verification\n\n> Verification note: stubbed content for pipeline testing only. Not for publication.\n\n## FAQ\n\n${"Frequently asked questions and direct answers. ".repeat(70)}\n\n## Conclusion\n\n${"Wrap-up and next steps for your team. ".repeat(70)}`;
+  const body = `A typescript migration replaces untyped JavaScript files with strict TypeScript modules incrementally so teams keep shipping features without halting product work for a rewrite. ${"Stubbed lead context on staging compiler checks cleanly. ".repeat(4)}
+
+## Why incremental adoption beats a big-bang rewrite
+
+An incremental approach avoids multi-month merge conflicts and keeps CI green. For official compiler flags, consult the [TypeScript migration handbook](https://www.typescriptlang.org/docs/handbook/migrating-from-javascript.html) and my [Node.js and TypeScript service](/services/nodejs-typescript-development/). ${"Stubbed section on the core tradeoffs. ".repeat(90)}
+
+| Phase | Configuration | CI Enforcement |
+| --- | --- | --- |
+| Baseline | allowJs with checkJs off | Existing tests pass |
+| Strict modules | strictNullChecks enabled | Per-directory typecheck |
+
+## How to configure tsconfig for mixed codebases
+
+\`\`\`bash
+# install and configure the compiler
+npm install typescript
+npx tsc --init
+\`\`\`
+
+${"TypeScript compiler options explained step by step. ".repeat(90)}
+
+## Common mistakes when migrating legacy modules
+
+${"Patterns to avoid when adopting types incrementally, drawn from real projects. ".repeat(90)}
+
+## Verification
+
+> Verification note: stubbed content for pipeline testing only. Not for publication.
+
+## Frequently asked questions
+
+### Should we enable strict mode on day one?
+
+No — start with allowJs and incrementally tighten compiler flags per package so existing pull requests keep landing cleanly.
+
+### How do we type third-party libraries without bundled definitions?
+
+Install matching @types packages first and isolate any remaining untyped imports behind a local declaration file.
+
+### Can JavaScript and TypeScript files live in the same package?
+
+Yes, setting allowJs in tsconfig lets both file extensions coexist during the migration window.
+
+## Conclusion
+
+Start with a small shared utility folder, enforce type-checking in CI, and expand coverage module by module. If you need architecture support, [get in touch](/contact/). ${"Wrap-up and next steps for your engineering workflow. ".repeat(65)}`;
   return { title: "Migrating a Large Editor to TypeScript: A Practical Guide", description: "Practical guide to migrating large JavaScript codebases to TypeScript without a big-bang rewrite: tsconfig strategy, incremental adoption, and CI gating that keeps the build green.", keyword: "typescript migration", slug: "typescript-migration-large-codebase-guide", category: "Node.js and TypeScript", services: ["nodejs-typescript-development", "full-stack-development"], coverAlt: "Diagram of a staged TypeScript migration: deprecated options cleaned first, then the native compiler replaces type-checking", body };
 }
 
@@ -159,8 +211,6 @@ function clampAtWord(s, max) {
   return base.trim().replace(/[\s.,;:!?—–-]+$/u, "");
 }
 const META_KEYS = ["title", "description", "keyword", "slug", "category"];
-const META_ERR = /^(title length|description|slug format|slug already exists|keyword)/;
-const isMetaErr = (e) => META_ERR.test(e);
 
 export function normalizeCategory(raw, { title = "", keyword = "", services = [] } = {}) {
   const clean = String(raw || "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
@@ -181,58 +231,52 @@ export function normalizeCategory(raw, { title = "", keyword = "", services = []
   return "Dev Tools";
 }
 
+function normalizeServices(a) {
+  const filtered = Array.isArray(a.services)
+    ? a.services.filter((x) => SERVICE_VALUES.includes(x))
+    : [];
+  if (filtered.length > 0) return filtered;
+  const guess = ((a.keyword || "") + " " + (a.title || "")).toLowerCase();
+  let fallback;
+  if (/\b(agent|llm|gemini|claude|ai)\b/i.test(guess)) fallback = ["ai-engineering", "ai-agent-development"];
+  else if (/\b(react|next\.?js|react\.?js|vite|frontend)\b/i.test(guess)) fallback = ["react-nextjs-development"];
+  else if (/\b(typescript|node\.?js|nodejs)\b/i.test(guess)) fallback = ["nodejs-typescript-development"];
+  else if (/\b(rails|ruby)\b/i.test(guess)) fallback = ["ruby-on-rails-development"];
+  else if (/\b(devops|kubernetes|k8s|cloud|docker|deploy)\b/i.test(guess)) fallback = ["cloud-devops"];
+  else if (/\b(api|backend|rest|graphql)\b/i.test(guess)) fallback = ["backend-api-development"];
+  else fallback = ["full-stack-development"];
+  console.warn("services: fallbacks applied ->", fallback);
+  return fallback;
+}
+
 // ---------- validation ----------
-export function validateArticle(a, corpusSlugs) {
-  const errs = [];
-  const req = (cond, msg) => { if (!cond) errs.push(msg); };
-  req(a.title && a.title.length >= 20 && a.title.length <= 120, "title length");
-  
-  req(a.description && a.description.length >= 100 && a.description.length <= 180, `description ${a?.description?.length} not in 100-180`);
-  req(/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(a.slug || ""), "slug format");
-  // Services are required by the FullstackWeb.dev schema (astro check). Tolerate model mistakes:
-  // drop unknown slugs, and if none remain, pick the closest by simple keyword heuristics.
-  if (!Array.isArray(a.services) || a.services.length === 0) a.services = [];
-  a.services = a.services.filter((x) => SERVICE_VALUES.includes(x));
-  if (a.services.length === 0) {
-    const guess = ((a.keyword || "") + " " + (a.title || "")).toLowerCase();
-    if (/\b(agent|llm|gemini|claude|ai)\b/i.test(guess)) a.services = ["ai-engineering", "ai-agent-development"];
-    else if (/\b(react|next\.?js|react\.?js|vite|frontend)\b/i.test(guess)) a.services = ["react-nextjs-development"];
-    else if (/\b(typescript|node\.?js|nodejs)\b/i.test(guess)) a.services = ["nodejs-typescript-development"];
-    else if (/\b(rails|ruby)\b/i.test(guess)) a.services = ["ruby-on-rails-development"];
-    else if (/\b(devops|kubernetes|k8s|cloud|docker|deploy)\b/i.test(guess)) a.services = ["cloud-devops"];
-    else if (/\b(api|backend|rest|graphql)\b/i.test(guess)) a.services = ["backend-api-development"];
-    else a.services = ["full-stack-development"];
-    console.warn("services: fallbacks applied ->", a.services);
-  }
-  req(!corpusSlugs.includes(a.slug), "slug already exists");
-  req((() => {
-    const lines = String(a.body || "").split("\n");
-    let inFence = false, hasH1 = false;
-    for (const line of lines) { if (line.trimStart().startsWith("```")) inFence = !inFence; else if (!inFence && /^# /.test(line)) hasH1 = true; }
-    return !hasH1;
-  })(), "body contains H1 (#)");
-  const h2 = (a.body.match(/^## /gm) || []).length;
-  req(h2 >= 4, `only ${h2} H2 sections (need >= 4)`);
-  const fences = (a.body.match(/^```/gm) || []).length;
-  req(fences % 2 === 0, "unbalanced code fences");
-  const words = countWords(a.body);
-  req(words >= MIN_BODY_WORDS, `only ${words} words (need >= ${MIN_BODY_WORDS})`);
-  const bodyNoFences = String(a.body || "").split(/```/).filter((_, i) => i % 2 === 0).join("\n");
-  req(!/lorem(?:\s|_)ipsum|\{placeholder\}|\[insert/i.test(bodyNoFences), "placeholder token in body");
+export function validateArticle(a, corpusSlugs, extraCfg = {}) {
+  // Services are required by the FullstackWeb.dev schema (astro check).
+  a.services = normalizeServices(a);
   // fullstackwebdev-site schema requires category in BLOG_CATEGORIES (z.enum).
   const prevCategory = a.category;
   a.category = normalizeCategory(a.category, a);
   if (a.category !== prevCategory) console.warn(`category: normalized ${JSON.stringify(prevCategory)} -> ${JSON.stringify(a.category)}`);
-  // Keyword check: require at least the first two significant words (was: only the first;
-  // full-all-words was deliberately relaxed in d0be839 for model tolerance — see git log).
-  const kw = a.keyword || "";
-  const norm = (t) => String(t || "").toLowerCase().replace(/[\u2010\u2011\u2012\u2013\u2014-]/g, " ").replace(/\s+/g, " ").trim();
-  const kwWords = norm(kw).split(/\s+/).filter((w) => w.length > 2);
-  const hay = norm((a.title || "") + " " + (a.description || "") + " " + bodyNoFences.slice(0, 2000));
-  req(kwWords.slice(0, 2).every((w) => hay.includes(w)), "keyword words missing from title/description/intro");
-  req(/verification note/i.test(a.body), "no verification note");
-  const links = a.body.match(/\]\((https?:\/\/[^)\s]+)\)/g) || [];
-  return { ok: errs.length === 0, errs, wordCount: words, links: [...new Set(links.map((l) => l.slice(2, -1)))].slice(0, 15) };
+  return validateAeoGeo(a, {
+    lang: "en",
+    domain: "fullstackweb.dev",
+    descMin: 100,
+    descMax: DESC_MAX_CHARS,
+    minWords: MIN_BODY_WORDS,
+    trailingSlash: true,
+    servicePrefix: "/services/",
+    contactHref: "/contact/",
+    conclusionHeading: "Conclusion",
+    faqHeading: "Frequently asked questions",
+    existingSlugs: corpusSlugs,
+    indonesianGuard: true,
+    bannedPatterns: [
+      [/number one|no\. ?1\b|#1\b|world-class|best-in-class/i, "unverifiable superlative"],
+      [/\b(our team|our developers|our engineers)\b/i, 'fullstackweb.dev is one developer: write "I"'],
+      [/\$ ?\d[\d,.]*\s*(\/ ?h(ou)?r|per hour|an hour)/i, "rates are never published"],
+    ],
+    ...extraCfg,
+  });
 }
 
 // ---------- frontmatter ----------
@@ -242,7 +286,8 @@ function frontmatter(a) {
   const pub = new Date(d.getTime() + 7 * 3600_000).toISOString().replace(/\.\d+Z$/, "+07:00");
   const svcLine = svcLines.trim() ? svcLines : "";
   const cat = a.category ? `category: ${JSON.stringify(a.category)}\n` : "";
-  return `---\ntitle: ${JSON.stringify(a.title)}\ndescription: ${JSON.stringify(a.description)}\n${cat}pubDate: ${pub}\n${svcLine}cover: "../../assets/blog/${a.slug}.png"\ncoverAlt: ${JSON.stringify(a.coverAlt)}\ndraft: false\n---\n\n${a.body.trim()}\n`;
+  const kwLine = a.keyword ? `keyword: ${JSON.stringify(a.keyword)}\n` : "";
+  return `---\ntitle: ${JSON.stringify(a.title)}\ndescription: ${JSON.stringify(a.description)}\n${kwLine}${cat}pubDate: ${pub}\n${svcLine}cover: "../../assets/blog/${a.slug}.png"\ncoverAlt: ${JSON.stringify(a.coverAlt)}\ndraft: false\n---\n\n${a.body.trim()}\n`;
 }
 
 // ---------- main ----------
@@ -290,9 +335,12 @@ async function main() {
 
   // 2) topic selection
   const avoidPosts = buildBlogAvoidList({ corpus, openPrs, publishedRows, max: 150 });
+  const existingKeywords = [...new Set([...corpus.map((c) => c.keyword).filter(Boolean), ...history.keywords])];
+  const validBlogPaths = new Set(corpus.filter((c) => !c.draft).map((c) => `/blog/${c.slug}/`));
   const topicPrompt = `You pick ONE blog topic for FullstackWeb.dev (fullstackweb.dev) — independent senior full-stack and AI engineer; readers: senior developers and tech leads; pillars: AI engineering, React and Next.js, Node.js and TypeScript, Ruby on Rails, backend APIs, cloud and DevOps, developer tools, open source. Pick the signal with the strongest, most durable angle for that audience.
 Reply with ONLY this JSON (no prose): {"signalIndex":<1..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","description":"120-160 chars","slug":"kebab-case-slug","category":"one of: ${CATEGORY_VALUES.join("|")}","services":[${JSON.stringify(SERVICE_VALUES)}]}
 Avoid all of these existing posts: ${avoidPosts.join(" | ")}
+Avoid these existing target keywords: ${existingKeywords.slice(0, 100).join(", ")}
 Signals:
 ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.slice(0, 160)} (${s.signals})`).join("\n")}`;
   let topic = AI_STUB ? { signalIndex: 1, topic: "Fullstack TypeScript migration strategy", keyword: "typescript migration", angle: "practical guide", rationale: "stub", title: "Migrating a Large Editor to TypeScript: A Practical Guide", description: "Practical guide to migrating large JavaScript codebases to TypeScript without a big-bang rewrite: tsconfig strategy, incremental adoption, and CI gating that keeps the build green.", slug: "typescript-migration-large-codebase-guide", category: "Node.js and TypeScript", services: ["nodejs-typescript-development", "full-stack-development"], coverAlt: "Diagram of a staged TypeScript migration: deprecated options cleaned first, then the native compiler replaces type-checking" } : null;
@@ -350,17 +398,29 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
   console.log(`meta: ${meta.title} | ${meta.slug}`);
 
   // 3) article body (metadata already produced in the topic call)
-  const existingLinks = corpus.slice(0, 40).map((c) => `/blog/${c.slug} — ${c.title}`).join("\n");
-  const bodyPrompt = `Write the body of one FullstackWeb.dev (fullstackweb.dev) blog article in English: first person, senior full-stack and AI engineer voice — practical, specific, opinionated, honest about uncertainty, no marketing copy.
+  meta.services = normalizeServices(meta);
+  meta.category = normalizeCategory(meta.category, meta);
+  const existingLinks = corpus.filter((c) => !c.draft).slice(0, 40).map((c) => `/blog/${c.slug}/ — ${c.title}`);
+  const serviceHref = servicePathFor("fullstackweb", meta);
+  const aeoRules = buildAeoGeoBodyRules({
+    siteName: "FullstackWeb.dev",
+    lang: "en",
+    domain: "fullstackweb.dev",
+    voiceRule: 'first person ("I", never "our team" / "our developers" / "our engineers") — independent senior full-stack and AI engineer, practical, specific, opinionated, honest about uncertainty, no marketing copy',
+    keyword: meta.keyword,
+    serviceHref,
+    contactHref: "/contact/",
+    ctaInstruction: "End Conclusion with a natural CTA linking to [get in touch](/contact/) (note trailing slash).",
+    validPostLinks: existingLinks,
+    extraRules: [
+      "All internal links MUST include a trailing slash (e.g. /services/.../, /blog/.../, /contact/).",
+      "Be concrete: real file paths, real flags, real package names. Generic AI/placeholder advice is not acceptable.",
+      "Never publish unverifiable superlatives (number one, #1, world-class, best-in-class) or hourly/project rates.",
+    ],
+  });
+  const bodyPrompt = `Write the body of one FullstackWeb.dev blog article.
 Topic: ${topic.topic}. Keyword: "${meta.keyword}". Angle: ${topic.angle}. Title: ${meta.title}.
-Requirements:
-- 1800-2400 words. H2/H3 sections only, never a # H1 line.
-- At least one fenced code example (typescript, javascript, ruby, bash, or whatever fits the topic).
-- An explicit blockquote "Verification note" for anything unverified; never invent benchmarks, versions, dates or statistics.
-- At most 2 internal links to these existing posts:
-${existingLinks}
-- Reference ONLY real URLs (official docs and the like). If a fact can't be verified, say so in the verification note rather than asserting it.
-- Be concrete: real file paths, real flags, real package names. Generic AI/placeholder advice is not acceptable.
+${aeoRules}
 Return ONLY the article body as markdown: the opening paragraph and "##" sections. No title, no frontmatter, no preamble, no trailing notes.`;
   const body = AI_STUB ? stubArticle().body : await (async () => {
     let lastWords = 0;
@@ -385,18 +445,19 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   console.log(`article: ${article.title} | ${article.slug}`);
 
   // 4) validation (with one self-correction retry)
-  let v = validateArticle(article, corpusSlugs);
+  const runValidate = (a) => validateArticle(a, corpusSlugs, { existingKeywords, validBlogPaths });
+  let v = runValidate(article);
   // 4a) metadata self-correction — the body-only retry below cannot fix these
   if (!v.ok && v.errs.some(isMetaErr)) {
     console.error("metadata validation failed, requesting metadata fix:", v.errs.join("; "));
     try {
       const metaNow = Object.fromEntries(META_KEYS.map((k) => [k, article[k]]));
-      const fixPrompt = `You previously produced this blog metadata JSON for fullstackweb.dev:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars\n- description: 120-160 chars (hard max 180) and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- category: one of ${CATEGORY_VALUES.join(" | ")}\nOutput ONLY the JSON object, no prose.`;
+      const fixPrompt = `You previously produced this blog metadata JSON for fullstackweb.dev:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars\n- description: 120-160 chars (hard max 180) and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- category: one of ${CATEGORY_VALUES.join(" | ")}\nOutput ONLY the JSON object, no prose.`;
       const fixed = parseJSONObject(await callModel(fixPrompt, { maxTokens: 2048 }));
       if (fixed && typeof fixed === "object") {
         for (const k of META_KEYS) if (typeof fixed[k] === "string" && fixed[k].trim()) article[k] = fixed[k].trim();
         if (article.description && article.description.length > DESC_MAX_CHARS) article.description = clampAtWord(article.description, DESC_MAX_CHARS);
-        v = validateArticle(article, corpusSlugs);
+        v = runValidate(article);
         console.log(v.ok ? "validation ok after metadata fix" : `still failing after metadata fix: ${v.errs.join("; ")}`);
       }
     } catch (e) { console.error("metadata fix call failed:", e.message); }
@@ -409,11 +470,11 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
       let last = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const prompt = bodyPrompt + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues while still meeting EVERY requirement above (length, H2 sections, code example, verification note blockquote). Return ONLY the body.`;
+          const prompt = bodyPrompt + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues while still meeting EVERY requirement above (length, H2 sections, table, FAQ, code example, verification note blockquote). Return ONLY the body.`;
           const text = await callModel(prompt, { maxTokens: 8000, expectJSON: false });
           if (countWords(text) < MIN_BODY_WORDS) { console.error(`retry body attempt ${attempt}: too short`); continue; }
           last = text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
-          v = validateArticle({ ...article, body: last }, corpusSlugs);
+          v = runValidate({ ...article, body: last });
           if (v.ok) return last;
           if (v.errs.every(isMetaErr)) { console.error("retry body: only metadata errors remain; a body rewrite cannot fix them"); break; }
           console.error(`retry body attempt ${attempt} still failing: ${v.errs.join("; ")}`);
@@ -423,7 +484,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     })();
     if (retryBody) {
       article.body = retryBody;
-      v = validateArticle(article, corpusSlugs);
+      v = runValidate(article);
       if (v.ok) { console.log(`validation ok after retry — ${v.wordCount} words, ${v.links.length} links`); } else { await fail(`article validation failed after retry: ${v.errs.join("; ")}`); return; }
     } else { await fail(`article validation failed: ${v.errs.join("; ")}`); return; }
   } else {
@@ -445,10 +506,25 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   writeFileSync(mdPath, frontmatter(article));
   console.log("wrote", mdPath);
 
-  // 7) build must pass
-  console.log("running astro check && astro build …");
-  try { execSync("npm run build", { cwd: SITE_DIR, stdio: "pipe", timeout: 600000, env: { ...process.env, GSC_SERVICE_ACCOUNT_JSON: undefined } }); }
-  catch (e) {
+  // 7) post lint + build + blog verification must pass
+  const relMdPath = join("src/content/blog", `${article.slug}.md`);
+  console.log("running site post check …");
+  try {
+    const chk = runSitePostCheck({ siteDir: SITE_DIR, relMdPath });
+    if (chk.skipped) console.log("site post check skipped (no check script found)");
+    else console.log("site post check passed:", chk.script);
+  } catch (e) {
+    await fail(e.message);
+    return;
+  }
+  console.log("running astro build + check-blog-build …");
+  try {
+    const buildEnv = { ...process.env, GSC_SERVICE_ACCOUNT_JSON: undefined };
+    execSync("npm run build", { cwd: SITE_DIR, stdio: "pipe", timeout: 600000, env: buildEnv });
+    if (existsSync(join(SITE_DIR, "scripts/check-blog-build.mjs"))) {
+      execFileSync("node", ["scripts/check-blog-build.mjs"], { cwd: SITE_DIR, stdio: "pipe", timeout: 120000, env: buildEnv });
+    }
+  } catch (e) {
     const raw = String(e.stdout || "") + String(e.stderr || "");
     const lines = raw.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
     await fail(`site build failed:\n${lines.slice(-30).join("\n") || "(no output captured from build)"}`);

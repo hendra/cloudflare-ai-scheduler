@@ -4,6 +4,13 @@ import { generateCover } from "./cover/render.mjs";
 import { mergePr } from "./site-pr.mjs";
 import { indexArticle, sitemapLocs } from "./site-index.mjs";
 import {
+  buildAeoGeoBodyRules,
+  validateAeoGeo,
+  servicePathFor,
+  runSitePostCheck,
+  isMetaErr,
+} from "./blog-aeo.mjs";
+import {
   fetchPublished,
   recordPublished,
   filterUnseenCandidates,
@@ -136,37 +143,65 @@ const loadCorpus = loadBlogCorpus;
 
 // ---------- AI-stub article (offline testing only) ----------
 function stubArticle() {
-  const body = `## Mengapa topik ini penting untuk bisnis Anda
-INASOFT membantu perusahaan dari berbagai sektor di Indonesia mengadopsi teknologi modern secara bertahap dan aman. ${"Banyak proyek teknologi gagal bukan karena kodenya kurang bagus, melainkan karena arahnya tidak jelas, migrasinya dipaksakan dalam satu malam, dan timnya tidak dipersiapkan untuk perubahan cara kerja. Panduan ini ditulis dari pengalaman konsultan senior kami memimpin migrasi dan pembangunan aplikasi untuk klien INASOFT. ".repeat(40)}
-${"Pendekatan kami selalu dimulai dari pemahaman masalah bisnis, bukan dari solusi teknis. Baru setelah itu kami merancang arsitektur yang sesuai dengan skala, anggaran, dan jadwal klien. ".repeat(30)}
+  const body = `AI untuk bisnis membantu perusahaan mengotomatiskan alur kerja operasional, merangkum dokumen internal, dan mempercepat layanan pelanggan tanpa mengorbankan kontrol kualitas serta keamanan data. ${"Pendekatan bertahap memastikan implementasi berjalan terukur dan sesuai kebutuhan tim operasional. ".repeat(4)}
+
+## Mengapa topik ini penting untuk bisnis Anda
+
+INASOFT membantu perusahaan dari berbagai sektor di Indonesia mengadopsi teknologi modern secara bertahap dan aman. Pelajari juga [layanan pembuatan AI agent kami](/layanan/jasa-pembuatan-ai-agent), eksplorasi topik [AI untuk bisnis](/blog/topik/ai-untuk-bisnis), dan rujuk [dokumentasi resmi Node.js](https://nodejs.org/docs/latest/api/) untuk standar runtime modern. ${"Banyak proyek teknologi gagal bukan karena kodenya kurang bagus, melainkan karena arahnya tidak jelas, migrasinya dipaksakan dalam satu malam, dan timnya tidak dipersiapkan untuk perubahan cara kerja. Panduan ini ditulis dari pengalaman tim developer berpengalaman kami memimpin migrasi dan pembangunan aplikasi untuk klien INASOFT. ".repeat(35)}
+
+| Pendekatan | Fokus Utama | Risiko Implementasi |
+| --- | --- | --- |
+| Otomasi bertahap | Satu alur kerja prioritas | Rendah dan terukur |
+| Migrasi menyeluruh | Seluruh departemen sekaligus | Tinggi tanpa validasi |
+
+${"Pendekatan kami selalu dimulai dari pemahaman masalah bisnis, bukan dari solusi teknis. Baru setelah itu kami merancang arsitektur yang sesuai dengan skala, anggaran, dan jadwal klien. ".repeat(25)}
 
 ## Cara memulai proyek dengan benar
+
 Sebelum menulis baris kode pertama, ada beberapa hal yang harus dipastikan: kebutuhan bisnis utama, kriteria keberhasilan, dan prioritas fitur. Tanpa tiga hal itu, proyek akan terjebak dalam revisi tak berujung.
+
 \`\`\`bash
 # langkah pertama untuk memeriksa kesiapan
 npm install
 npm run dev
 \`\`\`
-${"Setelah kesiapan dasar terpenuhi, tim engineering membangun fondasi yang solid: struktur folder, konfigurasi database, dan integrasi awal. Fondasi ini yang akan menentukan seberapa mudah tim mengembangkan fitur-fitur berikutnya. ".repeat(30)}
+
+${"Setelah kesiapan dasar terpenuhi, tim developer berpengalaman membangun fondasi yang solid: struktur folder, konfigurasi database, dan integrasi awal. Fondasi ini yang akan menentukan seberapa mudah tim mengembangkan fitur-fitur berikutnya. ".repeat(25)}
 
 ## Kesalahan umum saat memulai proyek teknologi
+
 Banyak tim melakukan kesalahan yang sama: memilih teknologi terbaru tanpa memahami batasannya, mengabaikan kebutuhan operasi harian, atau mengerjakan fitur tambahan sebelum fitur inti stabil. Pola ini sering muncul karena tekanan waktu atau ambisi yang tidak seimbang dengan kapasitas tim.
-${"Dua kesalahan yang paling mahal adalah: (1) memilih solusi yang terlalu kompleks untuk skala sesungguhnya, dan (2) mengabaikan keamanan serta audit trail hingga terlambat. Keduanya bisa dihindari dengan perencanaan yang realistis dan review berkala. ".repeat(30)}
+
+${"Dua kesalahan yang paling mahal adalah: (1) memilih solusi yang terlalu kompleks untuk skala sesungguhnya, dan (2) mengabaikan keamanan serta audit trail hingga terlambat. Keduanya bisa dihindari dengan perencanaan yang realistis dan review berkala. ".repeat(25)}
 
 ## Kapan INASOFT bisa membantu
-INASOFT memiliki tim yang berpengalaman menangani berbagai jenis proyek: pembangunan aplikasi web dan mobile, integrasi AI agent, migrasi database, dan modernisasi aplikasi legacy. \`layanan\` Kami bisa menjadi partner teknologi jangka panjang untuk perusahaan Anda.
+
+INASOFT memiliki tim developer berpengalaman menangani berbagai jenis proyek: pembangunan aplikasi web dan mobile, integrasi AI agent, migrasi database, dan modernisasi aplikasi legacy.
+
 ${"Jika Anda sedang mempertimbangkan langkah besar: membangun aplikasi baru, mengadopsi AI untuk otomasi proses, atau merencanakan migrasi sistem, INASOFT siap membantu sejak fase perencanaan hingga implementasi dan pemeliharaan. ".repeat(25)}
 
 ## Catatan verifikasi
+
 > Catatan verifikasi: stub content untuk testing pipeline saja. Tidak untuk publikasi. Beberapa detail pada artikel ini sengaja disederhanakan untuk keperluan pipeline testing dan bukan rekomendasi produksi.
 
-## FAQ
-*Apa yang dimaksud dengan panduan ini?* Ini adalah panduan ringkas untuk pemilik bisnis dan manajer teknologi yang ingin memulai proyek teknologi dengan langkah yang benar.
-*Kapan waktu yang tepat untuk menghubungi INASOFT?* Sejak fase perencanaan, sebelum kebutuhan menjadi terlalu kompleks atau, sebaliknya, ketika masalah sudah mengancam operasional.
-*Apakah INASOFT bisa bekerja sama dengan tim internal saya?* Ya, kami terbiasa berdiskusi dengan tim internal klien dan menyesuaikan pendekatan dengan budaya perusahaan.
+## Pertanyaan yang sering diajukan
+
+### Apa yang dimaksud dengan panduan AI untuk bisnis?
+
+Ini adalah panduan ringkas untuk pemilik bisnis dan manajer teknologi yang ingin memulai proyek otomasi dan perangkat lunak dengan langkah yang terukur.
+
+### Kapan waktu yang tepat untuk menghubungi INASOFT?
+
+Sejak fase perencanaan, sebelum kebutuhan menjadi terlalu kompleks atau ketika kendala operasional mulai menghambat produktivitas tim.
+
+### Apakah INASOFT bisa bekerja sama dengan tim internal kami?
+
+Ya, kami terbiasa berkolaborasi dengan tim teknis internal klien dan menyesuaikan alur pengembangan dengan standar perusahaan.
 
 ## Kesimpulan
-Langkah pertama yang terbaik adalah memahami masalah bisnis yang ingin diselesaikan. Baru setelah itu kami merancang solusi teknologi yang tepat, aman, dan sesuai anggaran. INASOFT siap menjadi partner Anda sejak langkah pertama.
+
+Langkah pertama yang terbaik adalah memahami masalah bisnis yang ingin diselesaikan, lalu jadwalkan [Konsultasi Gratis](/#contact) untuk memetakan solusi yang aman dan sesuai prioritas operasional Anda.
+
 ${"Diskusi awal biasanya dimulai dari pertanyaan paling dasar: apa yang bisa ditingkatkan, apa yang paling penting, dan berapa sumber daya yang tersedia. Dari sana kami merancang rencana yang realistis. ".repeat(20)}`;
   return { topic: "Stub topik AI untuk INASOFT", keyword: "AI untuk bisnis", angle: "playbook praktis", rationale: "stub", title: "Stub Panduan AI untuk Bisnis di Indonesia", seoTitle: "Stub Panduan AI Bisnis", description: "Stub deskripsi untuk testing pipeline INASOFT: memvalidasi syarat SEO, kata kunci, dan kualitas draf sebelum artikel masuk ke proses tinjauan editorial.", slug: "stub-panduan-ai-untuk-bisnis", lang: "id", service: "jasa-pembuatan-ai-agent", category: "ai-engineering", subcategory: "ai-automation", pillar: "ai-untuk-bisnis", coverAlt: "Diagram ilustrasi stub", body };
 }
@@ -186,20 +221,8 @@ function clampAtWord(s, max) {
   return base.trim().replace(/[\s.,;:!?—–-]+$/u, "");
 }
 const META_KEYS = ["title", "seoTitle", "description", "keyword", "slug"];
-const META_ERR = /^(title length|seoTitle|description|slug format|slug already exists|keyword)/;
-const isMetaErr = (e) => META_ERR.test(e);
 
-// ---------- validation ----------
-function validateArticle(a, corpusSlugs) {
-  const errs = [];
-  const req = (cond, msg) => { if (!cond) errs.push(msg); };
-  req(a.title && a.title.length >= 20 && a.title.length <= 120, "title length");
-  
-  req(a.description && a.description.length >= 100 && a.description.length <= 160, `description ${a?.description?.length} not in 100-160 (inasoft-site schema max 160)`);
-  req(/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(a.slug || ""), "slug format");
-  // Services are required by the INASOFT schema (astro check). Tolerate model mistakes:
-  // drop unknown slugs, and if none remain, pick the closest by simple keyword heuristics.
-  // INASOFT schema: all enums are required. Tolerate model mistakes with heuristics.
+function normalizeMetadataEnums(a) {
   if (!SERVICE_VALUES.includes(a.service)) {
     const guess = ((a.keyword || "") + " " + (a.title || "")).toLowerCase();
     if (/\b(ai|agent|llm|rag|chatbot|gemini|claude)\b/i.test(guess)) a.service = "jasa-pembuatan-ai-agent";
@@ -233,37 +256,34 @@ function validateArticle(a, corpusSlugs) {
     a.seoTitle = clamped;
   }
   if (!a.lang) a.lang = "id";
-  req(!corpusSlugs.includes(a.slug), "slug already exists");
-  req((() => {
-    const lines = String(a.body || "").split("\n");
-    let inFence = false, hasH1 = false;
-    for (const line of lines) { if (line.trimStart().startsWith("```")) inFence = !inFence; else if (!inFence && /^# /.test(line)) hasH1 = true; }
-    return !hasH1;
-  })(), "body contains H1 (#)");
-  const h2 = (a.body.match(/^## /gm) || []).length;
-  req(h2 >= 4, `only ${h2} H2 sections (need >= 4)`);
-  const fences = (a.body.match(/^```/gm) || []).length;
-  req(fences % 2 === 0, "unbalanced code fences");
-  const words = countWords(a.body);
-  req(words >= MIN_BODY_WORDS, `only ${words} words (need >= ${MIN_BODY_WORDS})`);
-  const bodyNoFences = String(a.body || "").split(/```/).filter((_, i) => i % 2 === 0).join("\n");
-  req(!/lorem(?:\s|_)ipsum|\{placeholder\}|\[insert/i.test(bodyNoFences), "placeholder token in body");
-  const kw = a.keyword || "";
-  const norm = (t) => String(t || "").toLowerCase().replace(/[\u2010\u2011\u2012\u2013\u2014-]/g, " ").replace(/\s+/g, " ").trim();
-  // Require at least the first two significant words (was: only the first; full-all-words was
-  // deliberately relaxed in d0be839 for model tolerance — see git log).
-  const kwWords = norm(kw).split(/\s+/).filter((w) => w.length > 2);
-  const hay = norm((a.title || "") + " " + (a.description || "") + " " + bodyNoFences.slice(0, 2000));
-  req(kwWords.slice(0, 2).every((w) => hay.includes(w)), "keyword words missing from title/description/intro");
-  req(/catatan verifikasi|verification note/i.test(a.body), "no verification note");
-  req(CATEGORY_VALUES.includes(a.category), `category "${a.category}" not in allowed list`);
-  req(SUBCATEGORY_VALUES.includes(a.subcategory), `subcategory "${a.subcategory}" not in allowed list`);
-  req(categoryOf(a.subcategory) === a.category, `subcategory "${a.subcategory}" does not belong to category "${a.category}"`);
-  req(String(a.seoTitle || "").length <= SEO_TITLE_MAX, `seoTitle ${String(a.seoTitle || "").length}c > ${SEO_TITLE_MAX}`);
-  req(PILLAR_VALUES.includes(a.pillar), `pillar "${a.pillar}" not in allowed list`);
-  req(!a.service || SERVICE_VALUES.includes(a.service), `service "${a.service}" not in allowed list`);
-  const links = a.body.match(/\]\((https?:\/\/[^)\s]+)\)/g) || [];
-  return { ok: errs.length === 0, errs, wordCount: words, links: [...new Set(links.map((l) => l.slice(2, -1)))].slice(0, 15) };
+}
+
+// ---------- validation ----------
+function validateArticle(a, corpusSlugs, extraCfg = {}) {
+  normalizeMetadataEnums(a);
+  return validateAeoGeo(a, {
+    lang: "id",
+    domain: "inasoft.id",
+    seoTitleMax: SEO_TITLE_MAX,
+    descMin: 100,
+    descMax: DESC_MAX_CHARS,
+    minWords: MIN_BODY_WORDS,
+    trailingSlash: false,
+    servicePrefix: "/layanan/",
+    contactHref: "/#contact",
+    requiredText: "Konsultasi Gratis",
+    conclusionHeading: "Kesimpulan",
+    faqHeading: "Pertanyaan yang sering diajukan",
+    existingSlugs: corpusSlugs,
+    bannedPatterns: [
+      [/nomor 1|no\. ?1\b|#1\b/i, "unverifiable superlative"],
+      [/engineer senior/i, 'say "tim developer berpengalaman"'],
+      [/\bSeries A\b|\brunway\b|\bpendanaan\b/i, "startup-only framing"],
+      [/\bRp ?\d/, "prices are never published"],
+      [/sistem informasi/i, "not a confirmed offering"],
+    ],
+    ...extraCfg,
+  });
 }
 
 // ---------- frontmatter ----------
@@ -323,10 +343,19 @@ function frontmatter(a) {
 
   // 2) topic selection
   const avoidPosts = buildBlogAvoidList({ corpus, openPrs, publishedRows, max: 150 });
+  const existingKeywords = [...new Set([...corpus.map((c) => c.keyword).filter(Boolean), ...history.keywords])];
+  const canonicalPosts = corpus.filter((c) => !c.draft && c.category && c.subcategory);
+  const validBlogPaths = new Set([
+    ...CATEGORY_VALUES.map((cat) => `/blog/${cat}`),
+    ...PILLAR_VALUES.map((pil) => `/blog/topik/${pil}`),
+    ...canonicalPosts.map((c) => `/blog/${c.category}/${c.subcategory}`),
+    ...canonicalPosts.map((c) => `/blog/${c.category}/${c.subcategory}/${c.slug}`),
+  ]);
   const topicPrompt = `You pick ONE blog topic for INASOFT (inasoft.id) — Indonesian IT company for software development, AI engineering, and digital transformation; readers: business owners and tech managers in Indonesia; pillars: AI engineering, modern software development, business software, cloud & DevOps. Pick the signal with the strongest, most durable angle for that audience.
 Reply with ONLY this JSON (no prose):
 {"signalIndex":<1..${signals.length}>,"topic":"short topic (Bahasa Indonesia)","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"<= 50 chars","description":"120-160 chars","slug":"kebab-case-slug","lang":"id","service":"one of: ${SERVICE_VALUES.join("|")}","category":"one of: ${CATEGORY_VALUES.join("|")}","subcategory":"must belong to the chosen category — ${Object.entries(SUBCATEGORIES_BY_CATEGORY).map(([c, subs]) => `${c}: ${subs.join("|")}`).join("; ")}","pillar":"one of: ${PILLAR_VALUES.join("|")}"}
 Avoid all of these existing posts: ${avoidPosts.join(" | ")}
+Avoid these existing target keywords: ${existingKeywords.slice(0, 100).join(", ")}
 Signals:
 ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.slice(0, 160)} (${s.signals})`).join("\n")}`;
   let topic = AI_STUB ? {
@@ -401,18 +430,30 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
   console.log(`meta: ${meta.title} | ${meta.slug}`);
 
   // 3) article body (metadata already produced in the topic call)
-  const existingLinks = corpus.slice(0, 40).map((c) => `/blog/${c.slug} — ${c.title}`).join("\n");
-  const bodyPrompt = `Write the body of one INASOFT (inasoft.id) blog article in Bahasa Indonesia. Voice: first person, senior full-stack and AI engineer from INASOFT — practical, specific, honest about uncertainty, no marketing copy, no hype.
+  normalizeMetadataEnums(meta);
+  const existingLinks = canonicalPosts
+    .slice(0, 40)
+    .map((c) => `/blog/${c.category}/${c.subcategory}/${c.slug} — ${c.title}`);
+  const serviceHref = servicePathFor("inasoft", meta);
+  const aeoRules = buildAeoGeoBodyRules({
+    siteName: "INASOFT",
+    lang: "id",
+    domain: "inasoft.id",
+    voiceRule: 'first person plural ("kami") or clear consultative voice ("tim developer berpengalaman", NEVER "engineer senior"); practical, specific, honest about uncertainty, no marketing hype',
+    keyword: meta.keyword,
+    serviceHref,
+    contactHref: "/#contact",
+    ctaInstruction: 'Include the exact phrase "Konsultasi Gratis" and link to `/#contact` in `## Kesimpulan`.',
+    validPostLinks: existingLinks,
+    extraRules: [
+      "Use canonical `/blog/<category>/<subcategory>/<slug>` paths ONLY (NEVER flat `/blog/<slug>` and NEVER trailing slashes).",
+      'Never mention "engineer senior", "Series A", "runway", "pendanaan", "sistem informasi", "nomor 1" / "#1", or prices in `Rp ...`.',
+      "Be concrete: real file paths, real flags, real package names. Keep the tone informative for Indonesian business owners and engineering leads.",
+    ],
+  });
+  const bodyPrompt = `Write the body of one INASOFT blog article.
 Topic: ${topic.topic}. Keyword: "${meta.keyword}". Angle: ${topic.angle}. Title: ${meta.title}.
-Requirements:
-- 1800-2400 words. H2/H3 sections only, never a # H1 line.
-- At least one fenced code example (typescript, javascript, ruby, bash, sql, or whatever fits the topic).
-- An explicit blockquote "Catatan verifikasi" (Verification note) for anything unverified; never invent benchmarks, dates, or statistics.
-- At most 2 internal links to these existing posts:
-${existingLinks}
-- Reference ONLY real URLs (official docs and the like). If a fact can't be verified, say so in the verification note rather than asserting it.
-- Be concrete: real file paths, real flags, real package names. Generic advice is not acceptable.
-- Keep the tone informative for Indonesian business owners and engineering leads.
+${aeoRules}
 Return ONLY the article body as markdown: the opening paragraph and "##" sections. No title, no frontmatter, no preamble, no trailing notes.`;
   const body = AI_STUB ? stubArticle().body : await (async () => {
     let lastWords = 0;
@@ -437,18 +478,19 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   console.log(`article: ${article.title} | ${article.slug}`);
 
   // 4) validation (with one self-correction retry)
-  let v = validateArticle(article, corpusSlugs);
+  const runValidate = (a) => validateArticle(a, corpusSlugs, { existingKeywords, validBlogPaths });
+  let v = runValidate(article);
   // 4a) metadata self-correction — the body-only retry below cannot fix these
   if (!v.ok && v.errs.some(isMetaErr)) {
     console.error("metadata validation failed, requesting metadata fix:", v.errs.join("; "));
     try {
       const metaNow = Object.fromEntries(META_KEYS.map((k) => [k, article[k]]));
-      const fixPrompt = `You previously produced this blog metadata JSON for inasoft.id:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style (Bahasa Indonesia)\n- seoTitle: at most 50 chars\n- description: 120-160 chars (hard max 160, inasoft-site schema) and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\nOutput ONLY the JSON object, no prose.`;
+      const fixPrompt = `You previously produced this blog metadata JSON for inasoft.id:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style (Bahasa Indonesia)\n- seoTitle: at most 50 chars\n- description: 120-160 chars (hard max 160, inasoft-site schema) and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\nOutput ONLY the JSON object, no prose.`;
       const fixed = parseJSONObject(await callModel(fixPrompt, { maxTokens: 2048 }));
       if (fixed && typeof fixed === "object") {
         for (const k of META_KEYS) if (typeof fixed[k] === "string" && fixed[k].trim()) article[k] = fixed[k].trim();
         if (article.description && article.description.length > DESC_MAX_CHARS) article.description = clampAtWord(article.description, DESC_MAX_CHARS);
-        v = validateArticle(article, corpusSlugs);
+        v = runValidate(article);
         console.log(v.ok ? "validation ok after metadata fix" : `still failing after metadata fix: ${v.errs.join("; ")}`);
       }
     } catch (e) { console.error("metadata fix call failed:", e.message); }
@@ -461,11 +503,11 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
       let last = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const prompt = bodyPrompt + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues while still meeting EVERY requirement above (length, H2 sections, code example, verification note blockquote). Return ONLY the body.`;
+          const prompt = bodyPrompt + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues while still meeting EVERY requirement above (length, H2 sections, table, FAQ, code example, verification note blockquote). Return ONLY the body.`;
           const text = await callModel(prompt, { maxTokens: 8000, expectJSON: false });
           if (countWords(text) < MIN_BODY_WORDS) { console.error(`retry body attempt ${attempt}: too short`); continue; }
           last = text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
-          v = validateArticle({ ...article, body: last }, corpusSlugs);
+          v = runValidate({ ...article, body: last });
           if (v.ok) return last;
           if (v.errs.every(isMetaErr)) { console.error("retry body: only metadata errors remain; a body rewrite cannot fix them"); break; }
           console.error(`retry body attempt ${attempt} still failing: ${v.errs.join("; ")}`);
@@ -475,7 +517,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     })();
     if (retryBody) {
       article.body = retryBody;
-      v = validateArticle(article, corpusSlugs);
+      v = runValidate(article);
       if (v.ok) { console.log(`validation ok after retry — ${v.wordCount} words, ${v.links.length} links`); } else { await fail(`article validation failed after retry: ${v.errs.join("; ")}`); return; }
     } else { await fail(`article validation failed: ${v.errs.join("; ")}`); return; }
   } else {
@@ -497,16 +539,57 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   writeFileSync(mdPath, frontmatter(article));
   console.log("wrote", mdPath);
 
-  // 7) build must pass
+  // 7) format + post lint + check/build/audit must pass
+  const relMdPath = join("src/content/blog", `${article.slug}.md`);
+  console.log("formatting markdown with prettier …");
+  try {
+    execFileSync("npx", ["prettier", "--write", relMdPath], { cwd: SITE_DIR, stdio: "pipe" });
+    execFileSync("npx", ["prettier", "--check", relMdPath], { cwd: SITE_DIR, stdio: "pipe" });
+  } catch (e) {
+    const out = (String(e.stdout || "") + "\n" + String(e.stderr || "")).trim();
+    await fail(`prettier check failed for ${relMdPath}:\n${out.slice(-800) || e.message}`);
+    return;
+  }
+
+  console.log("running site post check …");
+  try {
+    const chk = runSitePostCheck({ siteDir: SITE_DIR, relMdPath });
+    if (chk.skipped) console.log("site post check skipped (no check script found)");
+    else console.log("site post check passed:", chk.script);
+  } catch (e) {
+    await fail(e.message);
+    return;
+  }
+
   console.log("running astro check && astro build …");
-  try { execSync("npm run build", { cwd: SITE_DIR, stdio: "pipe", timeout: 600000, env: { ...process.env, GSC_SERVICE_ACCOUNT_JSON: undefined } }); }
-  catch (e) {
+  const buildEnv = { ...process.env, GSC_SERVICE_ACCOUNT_JSON: undefined };
+  try {
+    execSync("npm run check", { cwd: SITE_DIR, stdio: "pipe", timeout: 600000, env: buildEnv });
+    execSync("npm run build", { cwd: SITE_DIR, stdio: "pipe", timeout: 600000, env: buildEnv });
+  } catch (e) {
     const raw = String(e.stdout || "") + String(e.stderr || "");
     const lines = raw.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
     await fail(`site build failed:\n${lines.slice(-30).join("\n") || "(no output captured from build)"}`);
     return;
   }
   console.log("build passed");
+
+  console.log("running audit:seo …");
+  const postPath = `/blog/${article.category}/${article.subcategory}/${article.slug}`;
+  try {
+    execSync("npm run audit:seo", { cwd: SITE_DIR, stdio: "pipe", timeout: 300000, env: buildEnv });
+    console.log("audit:seo passed");
+  } catch (e) {
+    const raw = String(e.stdout || "") + "\n" + String(e.stderr || "");
+    const lines = raw.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split(/[\r\n]+/).map((l) => l.trim()).filter(Boolean);
+    const auditErrLines = lines.filter((l) => l.startsWith("- "));
+    const postErrors = lines.filter((l) => l.includes(`${postPath}:`));
+    if (postErrors.length > 0 || auditErrLines.length === 0) {
+      await fail(`audit:seo failed for ${postPath}:\n${(postErrors.length > 0 ? postErrors : lines.slice(-30)).join("\n")}`);
+      return;
+    }
+    console.log(`::warning title=audit:seo pre-existing issues::${auditErrLines.slice(0, 10).join(" | ")}`);
+  }
 
   // 8) commit + PR (skipped in DRY_RUN)
   if (DRY_RUN) { console.log("=== DRY RUN — would open PR ==="); console.log(`title: content: add ${article.slug}`); console.log(`branch: blog/${article.slug}`); console.log(`description: ${article.description}`); return; }

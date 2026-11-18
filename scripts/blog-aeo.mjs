@@ -3,7 +3,7 @@
 
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 export const RAILSDEV_SERVICE_LINKS = {
   "MVP Build": "/services/saas-mvp-development",
@@ -421,7 +421,7 @@ export function runSitePostCheck({ siteDir, relMdPath }) {
   if (!checkScript) return { skipped: true, script: null };
 
   try {
-    execFileSync("node", [checkScript, relMdPath], {
+    execFileSync("node", [resolve(checkScript), relMdPath], {
       cwd: siteDir,
       stdio: "pipe",
     });
