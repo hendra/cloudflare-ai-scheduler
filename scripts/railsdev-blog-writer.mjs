@@ -4,6 +4,13 @@ import { generateCover } from "./cover/render.mjs";
 import { mergePr } from "./site-pr.mjs";
 import { indexArticle, sitemapLocs } from "./site-index.mjs";
 import {
+  buildAeoGeoBodyRules,
+  validateAeoGeo,
+  servicePathFor,
+  runSitePostCheck,
+  isMetaErr,
+} from "./blog-aeo.mjs";
+import {
   fetchPublished,
   recordPublished,
   filterUnseenCandidates,
@@ -47,14 +54,6 @@ const RAILSDEV_PAT = process.env.RAILSDEV_PAT || "";
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || "";
 const SLACK_CHANNEL = process.env.SLACK_RAILSDEV_CHANNEL_ID || "";
 const SERVICE_VALUES = ["MVP Build", "Rails Upgrade", "Custom Module", "AI Integration", "Code Audit"];
-// Canonical service page each contactServices enum maps to (relative URLs only).
-const SERVICE_LINKS = {
-  "MVP Build": "/services/saas-mvp-development",
-  "Rails Upgrade": "/services/legacy-rails-modernization",
-  "Custom Module": "/services/custom-web-application-development",
-  "Code Audit": "/services/ruby-on-rails-consulting",
-  "AI Integration": "/services/ai-software-development",
-};
 const strip = (s) => String(s || "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
 
 // ---------- tiny helpers ----------
@@ -118,7 +117,55 @@ const loadCorpus = loadBlogCorpus;
 
 // ---------- AI-stub article (offline testing only) ----------
 function stubArticle() {
-  const body = `Rails migration testing is the practice of exercising schema changes against a real database state before deploying so production locks and data corruption are caught in CI. ${"Stubbed lead context on why migration testing matters. ".repeat(4)}\n\n## The problem\n\nRails teams keep re-litigating the same decision. For background, see the [official Rails Migrations guide](https://guides.rubyonrails.org/active_record_migrations.html) and our [Rails Upgrade service](/services/legacy-rails-modernization). ${"Stubbed section on the core tradeoffs. ".repeat(90)}\n\n## How this works\n\n\`\`\`ruby\n# frozen_string_literal: true\nclass Migrator\n  def call\n    ActiveRecord::Migration.maintain_test_schema!\n  end\nend\n\`\`\`\n\n${"Rails internals explained step by step. ".repeat(90)}\n\n## Common mistakes\n\n${"Patterns to avoid when adopting this at scale, drawn from team experience. ".repeat(90)}\n\n## Verification\n\n> Verification note: stubbed content for pipeline testing only. Not for publication.\n\n## Frequently asked questions\n\n### How do you test a Rails migration safely?\n\nRun it up, down, and up again in CI against seeded data before merging.\n\n### Should migrations use model classes directly?\n\nNo — declare a local stub class inside the migration or use raw SQL so future model changes do not break old migrations.\n\n## Conclusion\n\nTest every migration locally and in CI before it touches production. If you need help planning a zero-downtime upgrade, [book a discovery call](/#contact). ${"Wrap-up and next steps for your team. ".repeat(65)}`;
+  const body = `Rails migration testing is the practice of exercising schema changes against a real database state before deploying so production locks and data corruption are caught in CI. ${"Stubbed lead context on why migration testing matters. ".repeat(4)}
+
+## The problem
+
+Rails teams keep re-litigating the same decision. For background, see the [official Rails Migrations guide](https://guides.rubyonrails.org/active_record_migrations.html) and my [Rails Upgrade service](/services/legacy-rails-modernization). ${"Stubbed section on the core tradeoffs. ".repeat(90)}
+
+| Strategy | Feedback speed | Schema fidelity |
+| --- | --- | --- |
+| Local test DB | Fast | High |
+| Staging dry-run | Medium | Production-like |
+
+## How this works
+
+\`\`\`ruby
+# frozen_string_literal: true
+class Migrator
+  def call
+    ActiveRecord::Migration.maintain_test_schema!
+  end
+end
+\`\`\`
+
+${"Rails internals explained step by step. ".repeat(90)}
+
+## Common mistakes
+
+${"Patterns to avoid when adopting this at scale, drawn from production experience. ".repeat(90)}
+
+## Verification
+
+> Verification note: stubbed content for pipeline testing only. Not for publication.
+
+## Frequently asked questions
+
+### How do you test a Rails migration safely?
+
+Run it up, down, and up again in CI against seeded data before merging.
+
+### Should migrations use model classes directly?
+
+No — declare a local stub class inside the migration or use raw SQL so future model changes do not break old migrations.
+
+### When should a data backfill run outside the schema migration?
+
+Run large backfills in an idempotent background job after the schema deploy so table locks stay brief.
+
+## Conclusion
+
+Test every migration locally and in CI before it touches production. If you need help planning a zero-downtime upgrade, [book a discovery call](/#contact). ${"Wrap-up and next steps for your engineering workflow. ".repeat(65)}`;
   return { title: "Rails Migration Testing: A Practical Guide", seoTitle: "Rails Migration Testing: A Practical Guide", description: "Practical guide to writing and verifying Rails migrations in large apps: PostgreSQL pitfalls, Active Record internals and zero-downtime deploy testing.", keyword: "rails migration testing", slug: "rails-migration-testing-guide", service: "Rails Upgrade", coverAlt: "Diagram of a Rails migration being tested against a PostgreSQL database, with rollback steps", body };
 }
 
@@ -136,50 +183,30 @@ function clampAtWord(s, max) {
   return base.trim().replace(/[\s.,;:!?—–-]+$/u, "");
 }
 const META_KEYS = ["title", "seoTitle", "description", "keyword", "slug", "service"];
-const META_ERR = /^(title length|seoTitle|description|slug format|slug already exists|keyword)/;
-const isMetaErr = (e) => META_ERR.test(e);
 
 // ---------- validation ----------
-function validateArticle(a, corpusSlugs) {
-  const errs = [];
-  const req = (cond, msg) => { if (!cond) errs.push(msg); };
-  req(a.title && a.title.length >= 20 && a.title.length <= 120, "title length");
-  req(a.seoTitle && a.seoTitle.length <= 49, `seoTitle ${a?.seoTitle?.length} > 49`);
-  req(a.description && a.description.length >= 120 && a.description.length <= 160, `description ${a?.description?.length} not in 120-160`);
-  req(/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(a.slug || ""), "slug format");
-  req(!corpusSlugs.includes(a.slug), "slug already exists");
-  req((() => {
-    const lines = String(a.body || "").split("\n");
-    let inFence = false, hasH1 = false;
-    for (const line of lines) { if (line.trimStart().startsWith("```")) inFence = !inFence; else if (!inFence && /^# /.test(line)) hasH1 = true; }
-    return !hasH1;
-  })(), "body contains H1 (#)");
-  const h2 = (a.body.match(/^## /gm) || []).length;
-  req(h2 >= 4, `only ${h2} H2 sections (need >= 4)`);
-  const fences = (a.body.match(/^```/gm) || []).length;
-  req(fences % 2 === 0, "unbalanced code fences");
-  const words = countWords(a.body);
-  req(words >= MIN_BODY_WORDS, `only ${words} words (need >= ${MIN_BODY_WORDS})`);
-  const bodyNoFences = String(a.body || "").split(/```/).filter((_, i) => i % 2 === 0).join("\n");
-  req(!/lorem(?:\s|_)ipsum|\{placeholder\}|\[insert/i.test(bodyNoFences), "placeholder token in body");
-  const kw = a.keyword || "";
-  const norm = (t) => String(t || "").toLowerCase().replace(/[\u2010\u2011\u2012\u2013\u2014-]/g, " ").replace(/[^\p{L}\p{N}\s]+/gu, " ").replace(/\s+/g, " ").trim();
-  const kwWords = norm(kw).split(/\s+/).filter((w) => w.length > 2);
-  const firstParagraph = bodyNoFences.trim().split(/\n\s*\n/)[0] || "";
-  req(norm(firstParagraph).includes(norm(kw)), "keyword missing from first paragraph");
-  const hay = norm((a.title || "") + " " + (a.description || "") + " " + bodyNoFences.slice(0, 2000));
-  req(kwWords.every((w) => hay.includes(w)), "keyword words missing from title/description/intro");
-  req(/verification note/i.test(a.body), "no verification note");
-  req(/^## Frequently asked questions\b/im.test(bodyNoFences), 'missing "## Frequently asked questions" section');
-  req(/^## Conclusion\b/im.test(bodyNoFences), 'missing "## Conclusion" section');
-  const internal = (bodyNoFences.match(/\]\((\/[^)\s]*)\)/g) || []).map((m) => m.slice(2, -1));
-  req(internal.some((h) => h.startsWith("/services/")), "missing /services/<slug> link");
-  req(internal.some((h) => h === "/#contact"), "missing /#contact CTA link");
-  req(new Set(internal).size >= 2, `only ${new Set(internal).size} distinct internal links (need >= 2)`);
-  const links = bodyNoFences.match(/\]\((https?:\/\/[^)\s]+)\)/g) || [];
-  const externalLinks = [...new Set(links.map((l) => l.slice(2, -1)))].filter((u) => !/^https?:\/\/(www\.)?railsdev\.io\b/.test(u));
-  req(externalLinks.length >= 1, "missing external primary-source citation (need >= 1)");
-  return { ok: errs.length === 0, errs, wordCount: words, links: externalLinks.slice(0, 15) };
+function validateArticle(a, corpusSlugs, extraCfg = {}) {
+  return validateAeoGeo(a, {
+    lang: "en",
+    domain: "railsdev.io",
+    seoTitleMax: 49,
+    descMin: 120,
+    descMax: DESC_MAX_CHARS,
+    minWords: MIN_BODY_WORDS,
+    trailingSlash: false,
+    servicePrefix: "/services/",
+    contactHref: "/#contact",
+    conclusionHeading: "Conclusion",
+    faqHeading: "Frequently asked questions",
+    existingSlugs: corpusSlugs,
+    indonesianGuard: true,
+    bannedPatterns: [
+      [/number one|no\. ?1\b|#1\b|world-class|best-in-class/i, "unverifiable superlative"],
+      [/\b(our team|our developers|our engineers)\b/i, 'RailsDev is one developer: write "I"'],
+      [/\$ ?\d[\d,.]*\s*(\/ ?h(ou)?r|per hour|an hour)/i, "rates are never published"],
+    ],
+    ...extraCfg,
+  });
 }
 
 // ---------- frontmatter ----------
@@ -235,9 +262,12 @@ function frontmatter(a) {
 
   // 2) topic selection
   const avoidPosts = buildBlogAvoidList({ corpus, openPrs, publishedRows, max: 150 });
+  const existingKeywords = [...new Set([...corpus.map((c) => c.keyword).filter(Boolean), ...history.keywords])];
+  const validBlogPaths = new Set(corpus.filter((c) => !c.draft).map((c) => `/blog/${c.slug}`));
   const topicPrompt = `You pick ONE blog topic for RailsDev.io (railsdev.io) — senior Rails consultancy in Indonesia/English; readers: business owners and senior developers; pillars: rails, ai-engineering, modern full-stack, devtools, open source. Pick the signal with the strongest, most durable angle for that audience.
 Reply with ONLY this JSON (no prose): {"signalIndex":<1..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"<= 49 chars","description":"120-160 chars","slug":"kebab-case-slug","service":"${SERVICE_VALUES.join("|")}"}
 Avoid all of these existing posts: ${avoidPosts.join(" | ")}
+Avoid these existing target keywords: ${existingKeywords.slice(0, 100).join(", ")}
 Signals:
 ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.slice(0, 160)} (${s.signals})`).join("\n")}`;
   let topic = AI_STUB ? { signalIndex: 1, topic: "Rails migration testing strategy", keyword: "rails migration testing", angle: "practical guide", rationale: "stub", title: "Rails Migration Testing: A Practical Guide", seoTitle: "Rails Migration Testing: A Practical Guide", description: "Practical guide to writing and verifying Rails migrations in large apps: PostgreSQL pitfalls, Active Record internals and zero-downtime deploy testing.", slug: "rails-migration-testing-guide", service: "Rails Upgrade", coverAlt: "Diagram of a Rails migration being tested against a PostgreSQL database" } : null;
@@ -295,31 +325,36 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
   console.log(`meta: ${meta.title} | ${meta.slug}`);
 
   // 3) article body (metadata already produced in the topic call)
-  const existingLinks = corpus.slice(0, 40).map((c) => `/blog/${c.slug} — ${c.title}`).join("\n");
-  const serviceHref = SERVICE_LINKS[meta.service] || "/services/ruby-on-rails-development";
-  const bodyPrompt = `Write the body of one RailsDev.io (railsdev.io) blog article in English: first person ("I", never "we" for RailsDev), senior-Rails-consultant voice — practical, specific, opinionated, honest about uncertainty.
-Topic: ${topic.topic}. Keyword: "${meta.keyword}". Angle: ${topic.angle}. Title: ${meta.title}.
-Requirements:
-- 1800-2400 words. H2/H3 sections only, never a # H1 line.
-- First paragraph (before the first ## heading): include the exact keyword "${meta.keyword}" naturally and directly answer the core question ("X is ...").
-- At least one fenced ruby or bash code example.
-- An explicit blockquote "Verification note" for anything unverified; never invent benchmarks, versions, dates or statistics.
-- Required sections near the end:
-  - \`## Frequently asked questions\` with 4-6 \`###\` question headings and concise direct answers.
-  - \`## Conclusion\` ending with a natural CTA linking to \`/#contact\` (e.g. [book a discovery call](/#contact)).
-- Internal links (2-4 total, all relative paths):
-  - Link to the matching service page: \`${serviceHref}\`
-  - Link to \`/#contact\` in the Conclusion
-  - Optionally 1-2 links to these existing posts:
-${existingLinks}
-- Cite at least 1 real external primary source (official docs, GitHub repo, release notes — full \`https://...\` URL). If a fact can't be verified, say so in the verification note rather than asserting it.
+  const existingLinks = corpus.filter((c) => !c.draft).slice(0, 40).map((c) => `/blog/${c.slug} — ${c.title}`);
+  // Built from the passed article on every call: a 4a metadata fix can change
+  // keyword/title/service, and the retry prompt must not demand the stale values.
+  const makeBodyPrompt = (a) => {
+    const aeoRules = buildAeoGeoBodyRules({
+      siteName: "RailsDev.io",
+      lang: "en",
+      domain: "railsdev.io",
+      voiceRule: 'first person ("I", never "our team" / "our developers" / "our engineers") — senior Rails consultant, practical, specific, opinionated, honest about uncertainty',
+      keyword: a.keyword,
+      serviceHref: servicePathFor("railsdev", a),
+      contactHref: "/#contact",
+      ctaInstruction: "End Conclusion with a natural CTA linking to [book a discovery call](/#contact).",
+      validPostLinks: existingLinks,
+      extraRules: [
+        "Never publish unverifiable superlatives (number one, #1, world-class, best-in-class) or hourly/project rates.",
+        "Prefer ruby or bash for fenced code blocks where appropriate.",
+      ],
+    });
+    return `Write the body of one RailsDev.io blog article.
+Topic: ${a.topic}. Keyword: "${a.keyword}". Angle: ${a.angle}. Title: ${a.title}.
+${aeoRules}
 Return ONLY the article body as markdown: the opening paragraph and "##" sections. No title, no frontmatter, no preamble, no trailing notes.`;
+  };
   const body = AI_STUB ? stubArticle().body : await (async () => {
     let lastWords = 0;
     for (let attempt = 1; attempt <= 3; attempt++) {
       const hint = attempt > 1 ? `\n\nYour previous attempt was too short (${lastWords} words). Write at least ${MIN_BODY_WORDS} words. Return ONLY the markdown body.` : "";
       try {
-        const text = await callModel(bodyPrompt + hint, { maxTokens: 8000, expectJSON: false });
+        const text = await callModel(makeBodyPrompt(meta) + hint, { maxTokens: 8000, expectJSON: false });
         lastWords = countWords(text);
         if (lastWords >= MIN_BODY_WORDS) return text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
         console.error(`body attempt ${attempt}: too short (${lastWords} words, need >= ${MIN_BODY_WORDS})`);
@@ -337,18 +372,19 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   console.log(`article: ${article.title} | ${article.slug} | seoTitle ${String(article.seoTitle || "").length}c`);
 
   // 4) validation (with one self-correction retry)
-  let v = validateArticle(article, corpusSlugs);
+  const runValidate = (a) => validateArticle(a, corpusSlugs, { existingKeywords, validBlogPaths });
+  let v = runValidate(article);
   // 4a) metadata self-correction — the body-only retry below cannot fix these
   if (!v.ok && v.errs.some(isMetaErr)) {
     console.error("metadata validation failed, requesting metadata fix:", v.errs.join("; "));
     try {
       const metaNow = Object.fromEntries(META_KEYS.map((k) => [k, article[k]]));
-      const fixPrompt = `You previously produced this blog metadata JSON for railsdev.io:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style\n- seoTitle: at most 49 chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- service: one of ${SERVICE_VALUES.join(" | ")}\nOutput ONLY the JSON object, no prose.`;
+      const fixPrompt = `You previously produced this blog metadata JSON for railsdev.io:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style\n- seoTitle: at most 49 chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- service: one of ${SERVICE_VALUES.join(" | ")}\nOutput ONLY the JSON object, no prose.`;
       const fixed = parseJSONObject(await callModel(fixPrompt, { maxTokens: 2048 }));
       if (fixed && typeof fixed === "object") {
         for (const k of META_KEYS) if (typeof fixed[k] === "string" && fixed[k].trim()) article[k] = fixed[k].trim();
         if (article.description && article.description.length > DESC_MAX_CHARS) article.description = clampAtWord(article.description, DESC_MAX_CHARS);
-        v = validateArticle(article, corpusSlugs);
+        v = runValidate(article);
         console.log(v.ok ? "validation ok after metadata fix" : `still failing after metadata fix: ${v.errs.join("; ")}`);
       }
     } catch (e) { console.error("metadata fix call failed:", e.message); }
@@ -361,11 +397,11 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
       let last = null;
       for (let attempt = 1; attempt <= 3; attempt++) {
         try {
-          const prompt = bodyPrompt + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues while still meeting EVERY requirement above (length, H2 sections, code example, verification note blockquote). Return ONLY the body.`;
+          const prompt = makeBodyPrompt(article) + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues while still meeting EVERY requirement above (length, H2 sections, table, FAQ, code example, verification note blockquote). Return ONLY the body.`;
           const text = await callModel(prompt, { maxTokens: 8000, expectJSON: false });
           if (countWords(text) < MIN_BODY_WORDS) { console.error(`retry body attempt ${attempt}: too short`); continue; }
           last = text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
-          v = validateArticle({ ...article, body: last }, corpusSlugs);
+          v = runValidate({ ...article, body: last });
           if (v.ok) return last;
           if (v.errs.every(isMetaErr)) { console.error("retry body: only metadata errors remain; a body rewrite cannot fix them"); break; }
           console.error(`retry body attempt ${attempt} still failing: ${v.errs.join("; ")}`);
@@ -375,7 +411,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     })();
     if (retryBody) {
       article.body = retryBody;
-      v = validateArticle(article, corpusSlugs);
+      v = runValidate(article);
       if (v.ok) { console.log(`validation ok after retry — ${v.wordCount} words, ${v.links.length} links`); } else { await fail(`article validation failed after retry: ${v.errs.join("; ")}`); return; }
     } else { await fail(`article validation failed: ${v.errs.join("; ")}`); return; }
   } else {
@@ -398,15 +434,15 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   console.log("wrote", mdPath);
 
   // 7) post lint + build must pass
-  const checkScript = join(SITE_DIR, ".claude/skills/write-blog-article/scripts/check_post.mjs");
-  if (existsSync(checkScript)) {
-    console.log("running check_post.mjs …");
-    try { execFileSync("node", [checkScript, join("src/content/blog", `${article.slug}.md`)], { cwd: SITE_DIR, stdio: "pipe" }); }
-    catch (e) {
-      const out = (String(e.stdout || "") + "\n" + String(e.stderr || "")).trim();
-      await fail(`post AEO/GEO check failed:\n${out.slice(-800)}`);
-      return;
-    }
+  const relMdPath = join("src/content/blog", `${article.slug}.md`);
+  console.log("running site post check …");
+  try {
+    const chk = runSitePostCheck({ siteDir: SITE_DIR, relMdPath });
+    if (chk.skipped) console.log("site post check skipped (no check script found)");
+    else console.log("site post check passed:", chk.script);
+  } catch (e) {
+    await fail(e.message);
+    return;
   }
   console.log("running astro check && astro build …");
   try { execSync("npm run build", { cwd: SITE_DIR, stdio: "pipe", timeout: 600000, env: { ...process.env, GSC_SERVICE_ACCOUNT_JSON: undefined } }); }
