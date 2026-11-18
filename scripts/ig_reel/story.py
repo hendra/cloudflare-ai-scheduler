@@ -398,7 +398,15 @@ def build_caption(data, source, link):
 
 
 _TRACKING_PARAMS = {"ref", "source", "fbclid", "gclid", "igshid", "mc_cid", "mc_eid"}
-_DEDUPE_STOPWORDS = {"the", "and", "dan", "yang"}
+_DEDUPE_STOPWORDS = {
+    # function words (EN + ID)
+    "the", "and", "dan", "yang", "with", "for", "from", "into", "using", "how", "what",
+    "when", "why", "your", "you", "that", "this", "are", "was", "were", "its", "not",
+    "but", "can", "all", "any", "our", "cara", "bikin", "buat", "trik", "untuk", "dari",
+    "jadi", "dengan", "di", "ke", "ini", "itu", "agar", "supaya", "pada", "saat",
+    # filler that appears in most titles and carries no topic signal
+    "practical", "guide",
+}
 
 
 def canonical_url(raw_url: str) -> str:
@@ -474,9 +482,14 @@ def is_similar_title(a: str, b: str) -> bool:
     if not ta or not tb:
         return False
     shared = len(ta & tb)
+    mn = min(len(ta), len(tb))
+    # Two-token titles are only similar when they are the same two tokens:
+    # "Rails 8 Guide" vs "Guide to Rails" yes, "Rails Deployment" vs "Rails Caching" no.
+    if mn <= 2:
+        return shared == mn and len(ta) == len(tb)
     # shortcut: lexical only, so paraphrase with no shared words slips through.
     # Upgrade to an AI judge over the 5 nearest titles if that still bites.
-    return shared >= 2 and shared / min(len(ta), len(tb)) >= 0.7
+    return shared >= 2 and shared / mn >= 0.8
 
 
 def extract_buffer_seen(captions: list[str]) -> tuple[set[str], list[str]]:

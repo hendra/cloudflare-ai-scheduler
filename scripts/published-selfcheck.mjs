@@ -49,7 +49,9 @@ assert.equal(
 assert.equal(isSimilarTitle("Rails 8 Guide", "Guide to Rails"), true);
 assert.equal(isSimilarTitle("", "Anything"), false);
 
-// 2b. shared case fixture: the same table is read by scripts/ig_reel/selfcheck.py
+// 2b. shared case fixture: the same table is read by scripts/ig_reel/selfcheck.py.
+// The table is the contract between the two language copies — the false-positive
+// pairs are pinned here so the threshold cannot be loosened without failing.
 const similarityCases = JSON.parse(
   readFileSync(new URL("./fixtures/title-similarity-cases.json", import.meta.url), "utf8"),
 );
