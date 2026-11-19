@@ -108,24 +108,31 @@ const stripMdWrap = (t) => String(t || "").trim().replace(/^```(?:markdown|md)?\
 /**
  * Body generation that expands a short draft instead of discarding it: free models stop at
  * ~1000-1400 words, and a from-scratch retry lands short again. Keeps the longest draft.
- * Returns { body: null } when no attempt reaches minWords (caller skips the article).
+ * Returns { body: null } when no attempt reaches minWords (caller skips the article);
+ * throws the last error when every call failed.
  */
 export async function generateBody({ callModel, prompt, minWords, attempts = 3 }) {
   let best = "";
+  let lastErr = null;
+  let answered = false;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     const p = best
       ? `${prompt}\n\nYour draft below has only ${countWords(best)} words; it needs at least ${minWords}. Expand it to ${minWords + 300}+ words: deepen every section with concrete steps, examples and trade-offs, and keep every heading, link, table, code block, FAQ and the verification note. Return ONLY the full expanded markdown body.\n\nDraft:\n${best}`
       : prompt;
     try {
       const text = stripMdWrap(await callModel(p));
+      answered = true;
       const n = countWords(text);
       if (n >= minWords) return { body: text, words: n };
       console.error(`body attempt ${attempt}: too short (${n} words, need >= ${minWords})`);
       if (n > countWords(best)) best = text;
     } catch (e) {
+      lastErr = e;
       console.error(`body attempt ${attempt}:`, e.message);
     }
   }
+  // No model answered at all: an outage, not a short article — let the caller fail red.
+  if (!answered && lastErr) throw lastErr;
   return { body: null, words: countWords(best) };
 }
 

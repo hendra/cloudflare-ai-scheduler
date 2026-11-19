@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { callModel } from "./ai-providers.mjs";
+import { callModel, LONGFORM_MODELS } from "./ai-providers.mjs";
 import { generateCover } from "./cover/render.mjs";
 import { mergePr } from "./site-pr.mjs";
 import { indexArticle, sitemapLocs } from "./site-index.mjs";
@@ -8,6 +8,8 @@ import { fetchSourceText } from "./grounding.mjs";
 import {
   buildAeoGeoBodyRules,
   validateAeoGeo,
+  ensureRequiredLinks,
+  generateBody,
   servicePathFor,
   runSitePostCheck,
   isMetaErr,
@@ -194,7 +196,6 @@ Start with a small shared utility folder, enforce type-checking in CI, and expan
 // ---------- metadata helpers ----------
 const DESC_MAX_CHARS = 180; // validation limit for description (prompt targets 120-160)
 const MIN_BODY_WORDS = 1500; // hard body-length gate, shared by generation and validation
-const countWords = (t) => String(t || "").trim().split(/\s+/).filter(Boolean).length;
 // Clamp to max chars at a word boundary; hard cut if there is no decent boundary.
 function clampAtWord(s, max) {
   const t = String(s || "").trim();
@@ -426,20 +427,23 @@ Topic: ${a.topic}. Keyword: "${a.keyword}". Angle: ${a.angle}. Title: ${a.title}
 ${aeoRules}
 Return ONLY the article body as markdown: the opening paragraph and "##" sections. No title, no frontmatter, no preamble, no trailing notes.${sourceBlock}`;
   };
-  const body = AI_STUB ? stubArticle().body : await (async () => {
-    let lastWords = 0;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      const hint = attempt > 1 ? `\n\nYour previous attempt was too short (${lastWords} words). Write at least ${MIN_BODY_WORDS} words. Return ONLY the markdown body.` : "";
-      try {
-        const text = await callModel(makeBodyPrompt(meta) + hint, { maxTokens: 8000, expectJSON: false });
-        lastWords = countWords(text);
-        if (lastWords >= MIN_BODY_WORDS) return text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
-        console.error(`body attempt ${attempt}: too short (${lastWords} words, need >= ${MIN_BODY_WORDS})`);
-      } catch (e) { console.error(`body attempt ${attempt}:`, e.message); }
-    }
-    return null;
-  })();
-  if (!body) await fail("article body generation failed after 3 attempts");
+  const bodyModel = (p) => callModel(p, { maxTokens: 8000, expectJSON: false, prefer: LONGFORM_MODELS });
+  // Links the code already knows are inserted, not left to the model (sourceUrl only when fetched,
+  // so the grounding gate can read it). Applied to every body before it is validated.
+  const withLinks = (a, text) => ensureRequiredLinks(text, { domain: "fullstackweb.dev", lang: "en", serviceHref: servicePathFor("fullstackweb", a), contactHref: "/contact/", contactLabel: undefined, sourceUrl: signalSource ? chosenSignal.url : null, conclusionHeading: "Conclusion" });
+  // Owner decision: a body that stays short after expansion is skipped (Slack note, exit 0), not a red run.
+  const skipShort = async (words) => {
+    const note = `⚠️ _FullstackWeb.dev article skipped — too short:_ *${meta.title}*\nThe body stayed at ${words} words after expansion (need ${MIN_BODY_WORDS}). Nothing was published.`;
+    try { await postToSlack([note]); } catch (e) { console.error("skip note failed:", e.message); }
+    console.log(`skipping: ${note}`);
+    process.exit(0);
+  };
+  let draft;
+  try {
+    draft = AI_STUB ? { body: stubArticle().body } : await generateBody({ callModel: bodyModel, prompt: makeBodyPrompt(meta), minWords: MIN_BODY_WORDS });
+  } catch (e) { await fail(`article body generation failed: ${String(e?.message || e).slice(0, 300)}`); return; }
+  if (!draft.body) await skipShort(draft.words);
+  const body = withLinks(meta, draft.body);
   const article = { ...meta, body };
   if (article.description && article.description.length > DESC_MAX_CHARS) {
     const clamped = clampAtWord(article.description, DESC_MAX_CHARS);
@@ -470,19 +474,20 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     console.error("validation failed, retrying body with feedback:", v.errs.join("; "));
     // Validate every retry: a regenerated body can fix one error and introduce another
     // (e.g. reach 1500 words but drop the verification note), so feed fresh errors forward.
+    // Each attempt expands a short draft instead of restarting.
+    let retryShortWords = null;
     const retryBody = await (async () => {
       let last = null;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const prompt = makeBodyPrompt(article) + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues while still meeting EVERY requirement above (length, H2 sections, table, FAQ, code example, verification note blockquote). Return ONLY the body.`;
-          const text = await callModel(prompt, { maxTokens: 8000, expectJSON: false });
-          if (countWords(text) < MIN_BODY_WORDS) { console.error(`retry body attempt ${attempt}: too short`); continue; }
-          last = text.replace(/^```(?:markdown)?\n/, "").replace(/\n```$/, "").trim();
-          v = runValidate({ ...article, body: last });
-          if (v.ok) return last;
-          if (v.errs.every(isMetaErr)) { console.error("retry body: only metadata errors remain; a body rewrite cannot fix them"); break; }
-          console.error(`retry body attempt ${attempt} still failing: ${v.errs.join("; ")}`);
-        } catch (e) { console.error(`retry body attempt ${attempt}:`, e.message); }
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        const prompt = makeBodyPrompt(article) + `\n\nYour previous draft failed validation: ${v.errs.join("; ")}. Return a corrected markdown body that fixes these issues while still meeting EVERY requirement above (length, H2 sections, table, FAQ, code example, verification note blockquote). Return ONLY the body.`;
+        let r;
+        try { r = await generateBody({ callModel: bodyModel, prompt, minWords: MIN_BODY_WORDS, attempts: 2 }); } catch (e) { console.error(`retry body attempt ${attempt}:`, e.message); continue; }
+        if (!r.body) { console.error(`retry body attempt ${attempt}: too short (${r.words} words)`); retryShortWords = r.words; continue; }
+        last = withLinks(article, r.body);
+        v = runValidate({ ...article, body: last });
+        if (v.ok) return last;
+        if (v.errs.every(isMetaErr)) { console.error("retry body: only metadata errors remain; a body rewrite cannot fix them"); break; }
+        console.error(`retry body attempt ${attempt} still failing: ${v.errs.join("; ")}`);
       }
       return last;
     })();
@@ -490,7 +495,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
       article.body = retryBody;
       v = runValidate(article);
       if (v.ok) { console.log(`validation ok after retry — ${v.wordCount} words, ${v.links.length} links`); } else { await fail(`article validation failed after retry: ${v.errs.join("; ")}`); return; }
-    } else { await fail(`article validation failed: ${v.errs.join("; ")}`); return; }
+    } else if (retryShortWords !== null) { await skipShort(retryShortWords); } else { await fail(`article validation failed: ${v.errs.join("; ")}`); return; }
   } else {
     console.log(`validation ok — ${v.wordCount} words, ${v.links.length} external links to check`);
   }
@@ -507,7 +512,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
       process.exit(0);
     }
     if (g.body !== article.body) {
-      article.body = g.body;
+      article.body = withLinks(article, g.body);
       v = runValidate(article);
       if (!v.ok) { await fail(`article validation failed after grounding repair: ${v.errs.join("; ")}`); return; }
       groundedLinks = v.links.length;

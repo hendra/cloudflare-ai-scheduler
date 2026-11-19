@@ -658,8 +658,12 @@ function makeIdValidBody({
   // A throwing call counts as an attempt.
   const s3 = stub([new Error("429"), words(1600)]);
   assert.equal((await generateBody({ callModel: s3.call, prompt: "P", minWords: 1500 })).words, 1600);
+  // Every call failed (provider outage) → throws, so the run fails red instead of a quiet "too short" skip.
   const s4 = stub([new Error("x"), new Error("y"), new Error("z")]);
-  assert.deepEqual(await generateBody({ callModel: s4.call, prompt: "P", minWords: 1500 }), { body: null, words: 0 });
+  await assert.rejects(generateBody({ callModel: s4.call, prompt: "P", minWords: 1500 }), /z/);
+  // A draft arrived, later calls threw → still a short result, not an outage.
+  const s5 = stub([words(700), new Error("y"), new Error("z")]);
+  assert.deepEqual(await generateBody({ callModel: s5.call, prompt: "P", minWords: 1500 }), { body: null, words: 700 });
 }
 
 console.log("blog-aeo self-check: ok");
