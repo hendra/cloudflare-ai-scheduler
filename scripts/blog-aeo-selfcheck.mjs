@@ -633,4 +633,33 @@ function makeIdValidBody({
   assert.ok(!nestedV.errs.some((e) => /fence/.test(e)), nestedV.errs.join("; "));
 }
 
+// ---------- generateBody ----------
+{
+  const { generateBody } = await import("./blog-aeo.mjs");
+  const words = (n, w = "word") => Array.from({ length: n }, () => w).join(" ");
+  const stub = (replies) => {
+    const prompts = [];
+    return { prompts, call: async (p) => { prompts.push(p); const r = replies.shift(); if (r instanceof Error) throw r; return r; } };
+  };
+
+  // Short draft is expanded, not discarded: the 2nd prompt carries the 1st draft.
+  const s1 = stub([words(800, "alpha"), "```markdown\n" + words(1600) + "\n```"]);
+  const r1 = await generateBody({ callModel: s1.call, prompt: "PROMPT", minWords: 1500 });
+  assert.equal(r1.body, words(1600));
+  assert.equal(r1.words, 1600);
+  assert.ok(s1.prompts[1].startsWith("PROMPT") && s1.prompts[1].includes(words(800, "alpha")) && /1500/.test(s1.prompts[1]));
+
+  // Always short → null body, longest word count reported; a shorter expansion never replaces a longer draft.
+  const s2 = stub([words(800, "a"), words(700, "b"), words(900, "c")]);
+  const r2 = await generateBody({ callModel: s2.call, prompt: "P", minWords: 1500 });
+  assert.deepEqual(r2, { body: null, words: 900 });
+  assert.ok(s2.prompts[2].includes(words(800, "a")), "expands the longest draft so far");
+
+  // A throwing call counts as an attempt.
+  const s3 = stub([new Error("429"), words(1600)]);
+  assert.equal((await generateBody({ callModel: s3.call, prompt: "P", minWords: 1500 })).words, 1600);
+  const s4 = stub([new Error("x"), new Error("y"), new Error("z")]);
+  assert.deepEqual(await generateBody({ callModel: s4.call, prompt: "P", minWords: 1500 }), { body: null, words: 0 });
+}
+
 console.log("blog-aeo self-check: ok");
