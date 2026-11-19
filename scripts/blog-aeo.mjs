@@ -31,6 +31,77 @@ export function foldText(s) {
     .trim();
 }
 
+// Same fence rule as validateAeoGeo (the gate): a closer is a bare run of the opener's char.
+const FENCE_RE = /^\s*(```+|~~~+)(\S*)/;
+function closesFence(line, open) {
+  const m = line.match(/^\s*(`+|~+)\s*$/);
+  return !!m && m[1][0] === open[0];
+}
+
+/** Calls fn(line, index, inFence, openMatch) for every line, tracking fences like the validator. */
+function scanLines(lines, fn) {
+  let open = "";
+  lines.forEach((line, i) => {
+    if (open) {
+      if (closesFence(line, open)) open = "";
+      fn(line, i, true, null);
+      return;
+    }
+    const m = line.match(FENCE_RE);
+    if (m) open = m[1];
+    fn(line, i, !!m, m);
+  });
+}
+
+/**
+ * Adds the links the site requires but the model forgot, deterministically: service page,
+ * contact CTA (with its label), the fetched signal page as primary source, a `text` tag on
+ * untagged opening fences, and relative paths for absolute self-domain links. Never removes.
+ */
+export function ensureRequiredLinks(body, cfg = {}) {
+  const isId = cfg.lang === "id";
+  const lines = String(body || "").replace(/\r\n/g, "\n").split("\n");
+  const selfRe = cfg.domain
+    ? new RegExp(`\\]\\(https?://(?:www\\.)?${escapeRe(cfg.domain)}(?=[/)#?])/?`, "gi")
+    : null;
+  let conclusionAt = -1;
+  let insertAt = -1;
+  const proseIdx = [];
+  scanLines(lines, (line, i, inFence, m) => {
+    if (m && !m[2]) lines[i] = line.replace(m[1], `${m[1]}text`);
+    if (inFence) return;
+    proseIdx.push(i);
+    if (selfRe) lines[i] = lines[i].replace(selfRe, "](/");
+    if (/^##\s/.test(line)) {
+      if (conclusionAt !== -1 && insertAt === -1) insertAt = i;
+      if (new RegExp(`^## ${escapeRe(cfg.conclusionHeading || "")}\\b`, "i").test(line)) conclusionAt = i;
+    }
+  });
+  const prose = proseIdx.map((i) => lines[i]).join("\n");
+  const internal = [...prose.matchAll(/\]\((\/[^)\s]*)\)/g)].map((m) => m[1]);
+  const ownRe = cfg.domain ? new RegExp(`^https?://(?:www\\.)?${escapeRe(cfg.domain)}`, "i") : null;
+  const external = [...prose.matchAll(/\]\((https?:\/\/[^)\s]+)\)/g)].filter((m) => !ownRe || !ownRe.test(m[1]));
+  const servicePrefix = String(cfg.serviceHref || "").match(/^\/[^/]+\//)?.[0];
+
+  const parts = [];
+  if (cfg.serviceHref && servicePrefix && !internal.some((h) => h.startsWith(servicePrefix))) {
+    parts.push(isId ? `Lihat [layanan terkait](${cfg.serviceHref}) untuk implementasinya.` : `See [the related service](${cfg.serviceHref}) for hands-on help.`);
+  }
+  const label = cfg.contactLabel || (isId ? "Konsultasi Gratis" : "get in touch");
+  if (cfg.contactHref && (!internal.includes(cfg.contactHref) || (cfg.contactLabel && !prose.includes(cfg.contactLabel)))) {
+    parts.push(isId ? `Butuh bantuan? [${label}](${cfg.contactHref}).` : `Questions about your setup? [${label}](${cfg.contactHref}).`);
+  }
+  if (cfg.sourceUrl && external.length === 0) {
+    parts.push(isId ? `Sumber utama: [halaman resmi proyek](${cfg.sourceUrl}).` : `Primary source: [the official project page](${cfg.sourceUrl}).`);
+  }
+  const out = parts.length === 0 ? lines : (() => {
+    const para = ["", parts.join(" "), ""];
+    if (insertAt !== -1) return [...lines.slice(0, insertAt), ...para.slice(1), ...lines.slice(insertAt)];
+    return [...lines.join("\n").trimEnd().split("\n"), ...para.slice(0, 2)];
+  })();
+  return out.join("\n");
+}
+
 export function isMetaErr(err) {
   return META_ERR_RE.test(String(err || ""));
 }

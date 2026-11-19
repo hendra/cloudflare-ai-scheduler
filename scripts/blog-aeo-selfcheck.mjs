@@ -583,4 +583,54 @@ function makeIdValidBody({
   }
 }
 
+// ---------- ensureRequiredLinks ----------
+{
+  const { ensureRequiredLinks } = await import("./blog-aeo.mjs");
+  const enCfg = {
+    lang: "en", domain: "railsdev.io", trailingSlash: false, servicePrefix: "/services/",
+    contactHref: "/#contact", conclusionHeading: "Conclusion", faqHeading: "Frequently asked questions",
+  };
+  const linkCfg = { domain: "railsdev.io", lang: "en", serviceHref: "/services/ai-software-development", contactHref: "/#contact", sourceUrl: "https://github.com/acme/tool", conclusionHeading: "Conclusion" };
+  const meta = { title: "A valid article title here", description: "d".repeat(130), slug: "fresh-slug", keyword: "Node.js streams" };
+
+  // Missing all links + untagged fence + absolute self link → fixed in place, closing fence stays bare.
+  const bare = makeEnValidBody({ links: "See [an old post](https://railsdev.io/blog/x).", external: "", cta: "Ready to ship?" })
+    .replace("```ts", "```");
+  const before = validateAeoGeo({ ...meta, body: bare }, enCfg);
+  assert.ok(before.errs.some((e) => e.includes("service link")), before.errs.join("; "));
+  const fixed = ensureRequiredLinks(bare, linkCfg);
+  const after = validateAeoGeo({ ...meta, body: fixed }, enCfg);
+  assert.deepEqual(after.errs, [], after.errs.join("; "));
+  assert.match(fixed, /^```text$/m);
+  assert.match(fixed, /\]\(\/blog\/x\)/);
+  assert.doesNotMatch(fixed, /https:\/\/railsdev\.io/);
+  const concl = fixed.slice(fixed.indexOf("## Conclusion"));
+  for (const href of ["/services/ai-software-development", "/#contact", "https://github.com/acme/tool"]) {
+    assert.ok(concl.includes(`](${href})`), `${href} not in Conclusion`);
+  }
+
+  // Already complete → byte-identical.
+  const full = makeEnValidBody();
+  assert.equal(ensureRequiredLinks(full, linkCfg), full);
+
+  // No source page fetched → no external link invented.
+  assert.doesNotMatch(ensureRequiredLinks(bare, { ...linkCfg, sourceUrl: null }), /github\.com\/acme/);
+
+  // Indonesian: label + language; links go before a section that follows Kesimpulan.
+  const idBody = "Pembuka.\n\n## Kesimpulan\n\nRingkasan.\n\n## Lampiran\n\nIsi.";
+  const idOut = ensureRequiredLinks(idBody, { domain: "inasoft.id", lang: "id", serviceHref: "/layanan/x", contactHref: "/#contact", contactLabel: "Konsultasi Gratis", sourceUrl: null, conclusionHeading: "Kesimpulan" });
+  assert.match(idOut, /\[Konsultasi Gratis\]\(\/#contact\)/);
+  assert.ok(idOut.indexOf("/layanan/x") < idOut.indexOf("## Lampiran"));
+
+  // No conclusion heading → appended at the end; closing fences never get a tag;
+  // fence handling matches the validator, so its output has no untagged fence left.
+  const tilde = "Intro.\n\n~~~\ncode\n~~~\n\n```\nmore\n```\n\nEnd.";
+  const tildeOut = ensureRequiredLinks(tilde, { ...linkCfg, sourceUrl: null });
+  assert.ok(tildeOut.startsWith("Intro.\n\n~~~text\ncode\n~~~\n\n```text\nmore\n```\n\nEnd."), tildeOut);
+  assert.ok(tildeOut.trimEnd().endsWith(")."));
+  const nested = makeEnValidBody({ extraBody: "````md\n```\ninner\n```\n````" });
+  const nestedV = validateAeoGeo({ ...meta, body: ensureRequiredLinks(nested, linkCfg) }, enCfg);
+  assert.ok(!nestedV.errs.some((e) => /fence/.test(e)), nestedV.errs.join("; "));
+}
+
 console.log("blog-aeo self-check: ok");
