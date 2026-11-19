@@ -80,7 +80,7 @@ jobs:
           SLACK_INASOFT_CHANNEL_ID: ${{ secrets.SLACK_INASOFT_CHANNEL_ID }}
 
       - name: Notify failure to Slack
-        if: failure() && env.DRY_RUN != 'true' && !hashFiles('scheduler/failure-posted')
+        if: (failure() || cancelled()) && env.DRY_RUN != 'true' && !hashFiles('scheduler/failure-posted')
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_INASOFT_CHANNEL_ID: ${{ secrets.SLACK_INASOFT_CHANNEL_ID }}

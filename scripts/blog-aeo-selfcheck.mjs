@@ -628,6 +628,12 @@ function makeIdValidBody({
   const tildeOut = ensureRequiredLinks(tilde, { ...linkCfg, sourceUrl: null });
   assert.ok(tildeOut.startsWith("Intro.\n\n~~~text\ncode\n~~~\n\n```text\nmore\n```\n\nEnd."), tildeOut);
   assert.ok(tildeOut.trimEnd().endsWith(")."));
+  // A lone backtick inside code (template literal end) is not a fence closer, same as the validator.
+  const tpl = makeEnValidBody({ extraBody: "```ts\nconst q = gql`\n  query { a }\n`\n```" });
+  assert.equal(ensureRequiredLinks(tpl, linkCfg), tpl);
+  // Inserted links never glue onto a table/list that ends the Conclusion.
+  const tableEnd = "Intro.\n\n## Conclusion\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n## Next\n\nx";
+  assert.match(ensureRequiredLinks(tableEnd, { ...linkCfg, sourceUrl: null }), /\| 1 \| 2 \|\n\nSee \[/);
   const nested = makeEnValidBody({ extraBody: "````md\n```\ninner\n```\n````" });
   const nestedV = validateAeoGeo({ ...meta, body: ensureRequiredLinks(nested, linkCfg) }, enCfg);
   assert.ok(!nestedV.errs.some((e) => /fence/.test(e)), nestedV.errs.join("; "));

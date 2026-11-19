@@ -222,7 +222,9 @@ export async function callModel(promptOrOpts, opts = {}) {
         });
       let res = await doFetch(payload);
       let waits = 0;
-      while (!res.ok && res.status === 429 && waits < MAX_RATE_WAITS) {
+      // Preferred models are an optimisation: on 429 fall through now instead of waiting
+      // (qwen's tiny free OTPM would otherwise cost ~140 s per body call).
+      while (!res.ok && res.status === 429 && !preferredModel && waits < MAX_RATE_WAITS) {
         const wait = rateLimitWaitMs(res);
         if (!wait) break; // no retry hint (e.g. a daily quota) — fall through now
         // A hard usage limit ("Free usage limit reached", "Insufficient balance")

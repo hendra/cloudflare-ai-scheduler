@@ -62,6 +62,17 @@ assert.deepEqual(chain2(), ["opencode", "groq"]);
     assert.equal(await mod.callModel("p", { expectJSON: false, prefer: mod.LONGFORM_MODELS }), "from @cf/openai/gpt-oss-120b");
     assert.deepEqual(calls, ["qwen/qwen3.8-27b", "@cf/openai/gpt-oss-120b"]);
 
+    // Preferred model 429 with a retry hint → no wait, falls through at once (body runs must fit the job timeout).
+    calls.length = 0;
+    globalThis.fetch = async (url, init) => {
+      const b = JSON.parse(init.body); calls.push(b.model);
+      return b.model === "qwen/qwen3.8-27b" ? new Response("{}", { status: 429, headers: { "retry-after": "60" } }) : reply(200, `from ${b.model}`);
+    };
+    const t0 = Date.now();
+    assert.equal(await mod.callModel("p", { expectJSON: false, prefer: mod.LONGFORM_MODELS }), "from @cf/openai/gpt-oss-120b");
+    assert.deepEqual(calls, ["qwen/qwen3.8-27b", "@cf/openai/gpt-oss-120b"]);
+    assert.ok(Date.now() - t0 < 5000, "did not wait on the preferred 429");
+
     // No prefer → chain only, unchanged behaviour.
     calls.length = 0;
     await mod.callModel("p", { expectJSON: false });

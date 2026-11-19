@@ -34,7 +34,7 @@ export function foldText(s) {
 // Same fence rule as validateAeoGeo (the gate): a closer is a bare run of the opener's char.
 const FENCE_RE = /^\s*(```+|~~~+)(\S*)/;
 function closesFence(line, open) {
-  const m = line.match(/^\s*(`+|~+)\s*$/);
+  const m = line.match(/^\s*(`{3,}|~{3,})\s*$/);
   return !!m && m[1][0] === open[0];
 }
 
@@ -96,7 +96,7 @@ export function ensureRequiredLinks(body, cfg = {}) {
   }
   const out = parts.length === 0 ? lines : (() => {
     const para = ["", parts.join(" "), ""];
-    if (insertAt !== -1) return [...lines.slice(0, insertAt), ...para.slice(1), ...lines.slice(insertAt)];
+    if (insertAt !== -1) return [...lines.slice(0, insertAt), ...(lines[insertAt - 1]?.trim() ? para : para.slice(1)), ...lines.slice(insertAt)];
     return [...lines.join("\n").trimEnd().split("\n"), ...para.slice(0, 2)];
   })();
   return out.join("\n");

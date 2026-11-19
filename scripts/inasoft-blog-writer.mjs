@@ -528,7 +528,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
       article.body = retryBody;
       v = runValidate(article);
       if (v.ok) { console.log(`validation ok after retry — ${v.wordCount} words, ${v.links.length} links`); } else { await fail(`article validation failed after retry: ${v.errs.join("; ")}`); return; }
-    } else if (retryShortWords !== null) { await skipShort(retryShortWords); } else { await fail(`article validation failed: ${v.errs.join("; ")}`); return; }
+    } else { await fail(`article validation failed: ${v.errs.join("; ")}${retryShortWords !== null ? ` (retry drafts too short: ${retryShortWords} words)` : ""}`); return; }
   } else {
     console.log(`validation ok — ${v.wordCount} words, ${v.links.length} external links to check`);
   }
