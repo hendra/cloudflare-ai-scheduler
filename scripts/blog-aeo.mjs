@@ -94,8 +94,15 @@ export function ensureRequiredLinks(body, cfg = {}) {
   if (cfg.sourceUrl && external.length === 0) {
     parts.push(isId ? `Sumber utama: [halaman resmi proyek](${cfg.sourceUrl}).` : `Primary source: [the official project page](${cfg.sourceUrl}).`);
   }
+  // Number-free boilerplate, so it can never fail grounding; only added when the model left it out.
+  const verifRe = isId ? /^>\s*(?:\*\*|__)?(?:catatan verifikasi|verification note)\b/im : /^>\s*(?:\*\*|__)?verification note\b/im;
+  if (!verifRe.test(prose)) {
+    parts.push(isId
+      ? "\n\n> Catatan verifikasi: hasil dan performa bergantung pada versi, konfigurasi, dan lingkungan masing-masing; uji di lingkungan Anda sendiri sebelum dipakai di produksi."
+      : "\n\n> Verification note: results depend on your versions, configuration and environment; test in your own setup before relying on them in production.");
+  }
   const out = parts.length === 0 ? lines : (() => {
-    const para = ["", parts.join(" "), ""];
+    const para = ["", parts.join(" ").replace(/ \n\n/g, "\n\n").trimStart(), ""];
     if (insertAt !== -1) return [...lines.slice(0, insertAt), ...(lines[insertAt - 1]?.trim() ? para : para.slice(1)), ...lines.slice(insertAt)];
     return [...lines.join("\n").trimEnd().split("\n"), ...para.slice(0, 2)];
   })();

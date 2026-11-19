@@ -320,7 +320,8 @@ function frontmatter(a) {
   try { rawSignals.push(...parseTrending((await fetchText("https://github.com/trending?since=daily")).text)); console.log(`trending: ${rawSignals.length}`); } catch (e) { console.error("trending fetch failed:", e.message); }
   try {
     const hn = JSON.parse((await fetchText("https://hn.algolia.com/api/v1/search_by_date?tags=front_page&hitsPerPage=30")).text);
-    const hnStories = (hn.hits || []).filter((h) => (h.points || 0) >= 30).map((h) => ({ source: "hacker-news", title: h.title, url: h.url || `https://news.ycombinator.com/item?id=${h.objectID}`, description: h.title, signals: `${h.points} points, ${h.num_comments} comments` }));
+    // Self-posts (no url) are dropped: their HN page refuses bots (419), so nothing citable or groundable remains.
+    const hnStories = (hn.hits || []).filter((h) => (h.points || 0) >= 30 && h.url).map((h) => ({ source: "hacker-news", title: h.title, url: h.url, description: h.title, signals: `${h.points} points, ${h.num_comments} comments` }));
     rawSignals.push(...hnStories);
     console.log(`hn front page: ${hnStories.length}`);
   } catch (e) { console.error("hn fetch failed:", e.message); }

@@ -609,6 +609,15 @@ function makeIdValidBody({
     assert.ok(concl.includes(`](${href})`), `${href} not in Conclusion`);
   }
 
+  // Missing verification note → a fixed, number-free blockquote is added (site language).
+  const noNote = makeEnValidBody({ verification: "" });
+  assert.ok(validateAeoGeo({ ...meta, body: noNote }, enCfg).errs.includes("missing verification note blockquote"));
+  const noteOut = ensureRequiredLinks(noNote, linkCfg);
+  assert.deepEqual(validateAeoGeo({ ...meta, body: noteOut }, enCfg).errs, []);
+  assert.doesNotMatch(noteOut.match(/^> Verification note:.*$/m)[0], /\d/);
+  const idNote = ensureRequiredLinks("Pembuka.\n\n## Kesimpulan\n\nRingkasan.", { lang: "id", conclusionHeading: "Kesimpulan" });
+  assert.match(idNote, /^> Catatan verifikasi: /m);
+
   // Already complete → byte-identical.
   const full = makeEnValidBody();
   assert.equal(ensureRequiredLinks(full, linkCfg), full);
@@ -627,7 +636,7 @@ function makeIdValidBody({
   const tilde = "Intro.\n\n~~~\ncode\n~~~\n\n```\nmore\n```\n\nEnd.";
   const tildeOut = ensureRequiredLinks(tilde, { ...linkCfg, sourceUrl: null });
   assert.ok(tildeOut.startsWith("Intro.\n\n~~~text\ncode\n~~~\n\n```text\nmore\n```\n\nEnd."), tildeOut);
-  assert.ok(tildeOut.trimEnd().endsWith(")."));
+  assert.match(tildeOut, /\]\(\/#contact\)\.\n\n> Verification note: /);
   // A lone backtick inside code (template literal end) is not a fence closer, same as the validator.
   const tpl = makeEnValidBody({ extraBody: "```ts\nconst q = gql`\n  query { a }\n`\n```" });
   assert.equal(ensureRequiredLinks(tpl, linkCfg), tpl);
