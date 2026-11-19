@@ -100,6 +100,12 @@ export const AI_FALLBACKS = (
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
+// Article bodies: models measured (2026-11-19) to write 2000+ words on the blog prompt.
+// qwen is fast but its free OTPM is tiny (429s); gemma is slow (130-200 s), hence its timeout.
+export const LONGFORM_MODELS = [
+  { provider: "groq", model: "qwen/qwen3.8-27b" },
+  { provider: "gemini", model: "gemma-4-31b-it", timeoutMs: 240000 },
+];
 export const AI_TIMEOUT_MS = Math.max(
   1,
   parseInt(process.env.AI_TIMEOUT_MS, 10) || 90_000,
@@ -161,9 +167,13 @@ export async function callModel(promptOrOpts, opts = {}) {
     } = promptOrOpts);
   }
 
-  const chain = providerChain();
+  // Preferred models (e.g. LONGFORM_MODELS for article bodies) go first, then the normal chain.
+  const attempts = [
+    ...(opts.prefer || promptOrOpts?.prefer || []).map((x) => ({ name: x.provider, model: x.model, timeoutMs: x.timeoutMs })),
+    ...providerChain().map((name) => ({ name, model: null, timeoutMs: null })),
+  ];
   const errors = [];
-  for (const name of chain) {
+  for (const { name, model: preferredModel, timeoutMs } of attempts) {
     const p = PROVIDERS[name];
     if (!p) {
       errors.push(`${name}: unknown provider`);
@@ -174,7 +184,7 @@ export async function callModel(promptOrOpts, opts = {}) {
       console.log(`ai: skip ${name} (no credentials)`);
       continue;
     }
-    const model = name === AI_PROVIDER && AI_MODEL ? AI_MODEL : p.model();
+    const model = preferredModel || (name === AI_PROVIDER && AI_MODEL ? AI_MODEL : p.model());
     try {
       // OpenRouter: the preset rejects `reasoning: { effort: "none" }` with HTTP 400
       // ("Model call failed: invalid request"), so reasoning is excluded instead —
@@ -208,7 +218,7 @@ export async function callModel(promptOrOpts, opts = {}) {
             ...(sessionId ? { "x-opencode-session": sessionId } : {}),
           },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(AI_TIMEOUT_MS),
+          signal: AbortSignal.timeout(timeoutMs || AI_TIMEOUT_MS),
         });
       let res = await doFetch(payload);
       let waits = 0;
@@ -268,7 +278,7 @@ export async function callModel(promptOrOpts, opts = {}) {
         errors.push(`${name}: empty completion`);
         continue;
       }
-      console.log(`ai: ${name} ok`);
+      console.log(`ai: ${name} ok${preferredModel ? ` (${model})` : ""}`);
       return content;
     } catch (e) {
       errors.push(`${name}: ${String(e).slice(0, 300)}`);
