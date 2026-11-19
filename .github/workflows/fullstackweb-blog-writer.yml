@@ -5,7 +5,7 @@ name: fullstackweb-blog-writer
 # Generates one article per run, opens and auto-merges a PR on hendra/fullstackwebdev-site,
 # notifies #fullstackwebdev. Merge failure leaves the PR open. Triggered by the Cloudflare Worker
 # scheduler (D1 row) via workflow_dispatch; AI via scripts/ai-providers.mjs
-# (OpenCode Console → OpenRouter).
+# (groq → openrouter → gemini → kilo → cloudflare; article bodies try LONGFORM_MODELS first).
 
 on:
   workflow_dispatch:
@@ -26,11 +26,11 @@ concurrency:
 jobs:
   write:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       PUBLIC_FORMSPREE_FORM_ID: ${{ vars.PUBLIC_FORMSPREE_FORM_ID }}
-      AI_PROVIDER: opencode
-      AI_FALLBACKS: opencode,openrouter,groq,gemini,kilo,cloudflare
+      AI_PROVIDER: groq
+      AI_FALLBACKS: groq,openrouter,gemini,kilo,cloudflare
       AI_MODEL: ${{ vars.AI_MODEL }}
       OPENCODE_MODEL: ${{ vars.OPENCODE_MODEL }}
       OPENCODE_BASE_URL: ${{ vars.OPENCODE_BASE_URL }}
@@ -85,7 +85,7 @@ jobs:
           SLACK_FULLSTACKWEBDEV_CHANNEL_ID: ${{ secrets.SLACK_FULLSTACKWEBDEV_CHANNEL_ID }}
 
       - name: Notify failure to Slack
-        if: failure() && env.DRY_RUN != 'true' && !hashFiles('scheduler/failure-posted')
+        if: (failure() || cancelled()) && env.DRY_RUN != 'true' && !hashFiles('scheduler/failure-posted')
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           SLACK_FULLSTACKWEBDEV_CHANNEL_ID: ${{ secrets.SLACK_FULLSTACKWEBDEV_CHANNEL_ID }}

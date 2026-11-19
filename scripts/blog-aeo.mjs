@@ -31,6 +31,118 @@ export function foldText(s) {
     .trim();
 }
 
+// Same fence rule as validateAeoGeo (the gate): a closer is a bare run of the opener's char.
+const FENCE_RE = /^\s*(```+|~~~+)(\S*)/;
+function closesFence(line, open) {
+  const m = line.match(/^\s*(`{3,}|~{3,})\s*$/);
+  return !!m && m[1][0] === open[0];
+}
+
+/** Calls fn(line, index, inFence, openMatch) for every line, tracking fences like the validator. */
+function scanLines(lines, fn) {
+  let open = "";
+  lines.forEach((line, i) => {
+    if (open) {
+      if (closesFence(line, open)) open = "";
+      fn(line, i, true, null);
+      return;
+    }
+    const m = line.match(FENCE_RE);
+    if (m) open = m[1];
+    fn(line, i, !!m, m);
+  });
+}
+
+/**
+ * Adds the links the site requires but the model forgot, deterministically: service page,
+ * contact CTA (with its label), the fetched signal page as primary source, a `text` tag on
+ * untagged opening fences, and relative paths for absolute self-domain links. Never removes.
+ */
+export function ensureRequiredLinks(body, cfg = {}) {
+  const isId = cfg.lang === "id";
+  const lines = String(body || "").replace(/\r\n/g, "\n").split("\n");
+  const selfRe = cfg.domain
+    ? new RegExp(`\\]\\(https?://(?:www\\.)?${escapeRe(cfg.domain)}(?=[/)#?])/?`, "gi")
+    : null;
+  let conclusionAt = -1;
+  let insertAt = -1;
+  const proseIdx = [];
+  scanLines(lines, (line, i, inFence, m) => {
+    if (m && !m[2]) lines[i] = line.replace(m[1], `${m[1]}text`);
+    if (inFence) return;
+    proseIdx.push(i);
+    if (selfRe) lines[i] = lines[i].replace(selfRe, "](/");
+    if (/^##\s/.test(line)) {
+      if (conclusionAt !== -1 && insertAt === -1) insertAt = i;
+      if (new RegExp(`^## ${escapeRe(cfg.conclusionHeading || "")}\\b`, "i").test(line)) conclusionAt = i;
+    }
+  });
+  const prose = proseIdx.map((i) => lines[i]).join("\n");
+  const internal = [...prose.matchAll(/\]\((\/[^)\s]*)\)/g)].map((m) => m[1]);
+  const ownRe = cfg.domain ? new RegExp(`^https?://(?:www\\.)?${escapeRe(cfg.domain)}`, "i") : null;
+  const external = [...prose.matchAll(/\]\((https?:\/\/[^)\s]+)\)/g)].filter((m) => !ownRe || !ownRe.test(m[1]));
+  const servicePrefix = String(cfg.serviceHref || "").match(/^\/[^/]+\//)?.[0];
+
+  const parts = [];
+  if (cfg.serviceHref && servicePrefix && !internal.some((h) => h.startsWith(servicePrefix))) {
+    parts.push(isId ? `Lihat [layanan terkait](${cfg.serviceHref}) untuk implementasinya.` : `See [the related service](${cfg.serviceHref}) for hands-on help.`);
+  }
+  const label = cfg.contactLabel || (isId ? "Konsultasi Gratis" : "get in touch");
+  if (cfg.contactHref && (!internal.includes(cfg.contactHref) || (cfg.contactLabel && !prose.includes(cfg.contactLabel)))) {
+    parts.push(isId ? `Butuh bantuan? [${label}](${cfg.contactHref}).` : `Questions about your setup? [${label}](${cfg.contactHref}).`);
+  }
+  if (cfg.sourceUrl && external.length === 0) {
+    parts.push(isId ? `Sumber utama: [halaman resmi proyek](${cfg.sourceUrl}).` : `Primary source: [the official project page](${cfg.sourceUrl}).`);
+  }
+  // Number-free boilerplate, so it can never fail grounding; only added when the model left it out.
+  const verifRe = isId ? /^>\s*(?:\*\*|__)?(?:catatan verifikasi|verification note)\b/im : /^>\s*(?:\*\*|__)?verification note\b/im;
+  if (!verifRe.test(prose)) {
+    parts.push(isId
+      ? "\n\n> Catatan verifikasi: hasil dan performa bergantung pada versi, konfigurasi, dan lingkungan masing-masing; uji di lingkungan Anda sendiri sebelum dipakai di produksi."
+      : "\n\n> Verification note: results depend on your versions, configuration and environment; test in your own setup before relying on them in production.");
+  }
+  const out = parts.length === 0 ? lines : (() => {
+    const para = ["", parts.join(" ").replace(/ \n\n/g, "\n\n").trimStart(), ""];
+    if (insertAt !== -1) return [...lines.slice(0, insertAt), ...(lines[insertAt - 1]?.trim() ? para : para.slice(1)), ...lines.slice(insertAt)];
+    return [...lines.join("\n").trimEnd().split("\n"), ...para.slice(0, 2)];
+  })();
+  return out.join("\n");
+}
+
+const countWords = (t) => String(t || "").trim().split(/\s+/).filter(Boolean).length;
+const stripMdWrap = (t) => String(t || "").trim().replace(/^```(?:markdown|md)?\n/, "").replace(/\n```$/, "").trim();
+
+/**
+ * Body generation that expands a short draft instead of discarding it: free models stop at
+ * ~1000-1400 words, and a from-scratch retry lands short again. Keeps the longest draft.
+ * Returns { body: null } when no attempt reaches minWords (caller skips the article);
+ * throws the last error when every call failed.
+ */
+export async function generateBody({ callModel, prompt, minWords, attempts = 3 }) {
+  let best = "";
+  let lastErr = null;
+  let answered = false;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const p = best
+      ? `${prompt}\n\nYour draft below has only ${countWords(best)} words; it needs at least ${minWords}. Expand it to ${minWords + 300}+ words: deepen every section with concrete steps, examples and trade-offs, and keep every heading, link, table, code block, FAQ and the verification note. Return ONLY the full expanded markdown body.\n\nDraft:\n${best}`
+      : prompt;
+    try {
+      const text = stripMdWrap(await callModel(p));
+      answered = true;
+      const n = countWords(text);
+      if (n >= minWords) return { body: text, words: n };
+      console.error(`body attempt ${attempt}: too short (${n} words, need >= ${minWords})`);
+      if (n > countWords(best)) best = text;
+    } catch (e) {
+      lastErr = e;
+      console.error(`body attempt ${attempt}:`, e.message);
+    }
+  }
+  // No model answered at all: an outage, not a short article — let the caller fail red.
+  if (!answered && lastErr) throw lastErr;
+  return { body: null, words: countWords(best) };
+}
+
 export function isMetaErr(err) {
   return META_ERR_RE.test(String(err || ""));
 }

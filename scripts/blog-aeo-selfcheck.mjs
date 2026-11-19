@@ -583,4 +583,102 @@ function makeIdValidBody({
   }
 }
 
+// ---------- ensureRequiredLinks ----------
+{
+  const { ensureRequiredLinks } = await import("./blog-aeo.mjs");
+  const enCfg = {
+    lang: "en", domain: "railsdev.io", trailingSlash: false, servicePrefix: "/services/",
+    contactHref: "/#contact", conclusionHeading: "Conclusion", faqHeading: "Frequently asked questions",
+  };
+  const linkCfg = { domain: "railsdev.io", lang: "en", serviceHref: "/services/ai-software-development", contactHref: "/#contact", sourceUrl: "https://github.com/acme/tool", conclusionHeading: "Conclusion" };
+  const meta = { title: "A valid article title here", description: "d".repeat(130), slug: "fresh-slug", keyword: "Node.js streams" };
+
+  // Missing all links + untagged fence + absolute self link → fixed in place, closing fence stays bare.
+  const bare = makeEnValidBody({ links: "See [an old post](https://railsdev.io/blog/x).", external: "", cta: "Ready to ship?" })
+    .replace("```ts", "```");
+  const before = validateAeoGeo({ ...meta, body: bare }, enCfg);
+  assert.ok(before.errs.some((e) => e.includes("service link")), before.errs.join("; "));
+  const fixed = ensureRequiredLinks(bare, linkCfg);
+  const after = validateAeoGeo({ ...meta, body: fixed }, enCfg);
+  assert.deepEqual(after.errs, [], after.errs.join("; "));
+  assert.match(fixed, /^```text$/m);
+  assert.match(fixed, /\]\(\/blog\/x\)/);
+  assert.doesNotMatch(fixed, /https:\/\/railsdev\.io/);
+  const concl = fixed.slice(fixed.indexOf("## Conclusion"));
+  for (const href of ["/services/ai-software-development", "/#contact", "https://github.com/acme/tool"]) {
+    assert.ok(concl.includes(`](${href})`), `${href} not in Conclusion`);
+  }
+
+  // Missing verification note → a fixed, number-free blockquote is added (site language).
+  const noNote = makeEnValidBody({ verification: "" });
+  assert.ok(validateAeoGeo({ ...meta, body: noNote }, enCfg).errs.includes("missing verification note blockquote"));
+  const noteOut = ensureRequiredLinks(noNote, linkCfg);
+  assert.deepEqual(validateAeoGeo({ ...meta, body: noteOut }, enCfg).errs, []);
+  assert.doesNotMatch(noteOut.match(/^> Verification note:.*$/m)[0], /\d/);
+  const idNote = ensureRequiredLinks("Pembuka.\n\n## Kesimpulan\n\nRingkasan.", { lang: "id", conclusionHeading: "Kesimpulan" });
+  assert.match(idNote, /^> Catatan verifikasi: /m);
+
+  // Already complete → byte-identical.
+  const full = makeEnValidBody();
+  assert.equal(ensureRequiredLinks(full, linkCfg), full);
+
+  // No source page fetched → no external link invented.
+  assert.doesNotMatch(ensureRequiredLinks(bare, { ...linkCfg, sourceUrl: null }), /github\.com\/acme/);
+
+  // Indonesian: label + language; links go before a section that follows Kesimpulan.
+  const idBody = "Pembuka.\n\n## Kesimpulan\n\nRingkasan.\n\n## Lampiran\n\nIsi.";
+  const idOut = ensureRequiredLinks(idBody, { domain: "inasoft.id", lang: "id", serviceHref: "/layanan/x", contactHref: "/#contact", contactLabel: "Konsultasi Gratis", sourceUrl: null, conclusionHeading: "Kesimpulan" });
+  assert.match(idOut, /\[Konsultasi Gratis\]\(\/#contact\)/);
+  assert.ok(idOut.indexOf("/layanan/x") < idOut.indexOf("## Lampiran"));
+
+  // No conclusion heading → appended at the end; closing fences never get a tag;
+  // fence handling matches the validator, so its output has no untagged fence left.
+  const tilde = "Intro.\n\n~~~\ncode\n~~~\n\n```\nmore\n```\n\nEnd.";
+  const tildeOut = ensureRequiredLinks(tilde, { ...linkCfg, sourceUrl: null });
+  assert.ok(tildeOut.startsWith("Intro.\n\n~~~text\ncode\n~~~\n\n```text\nmore\n```\n\nEnd."), tildeOut);
+  assert.match(tildeOut, /\]\(\/#contact\)\.\n\n> Verification note: /);
+  // A lone backtick inside code (template literal end) is not a fence closer, same as the validator.
+  const tpl = makeEnValidBody({ extraBody: "```ts\nconst q = gql`\n  query { a }\n`\n```" });
+  assert.equal(ensureRequiredLinks(tpl, linkCfg), tpl);
+  // Inserted links never glue onto a table/list that ends the Conclusion.
+  const tableEnd = "Intro.\n\n## Conclusion\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n## Next\n\nx";
+  assert.match(ensureRequiredLinks(tableEnd, { ...linkCfg, sourceUrl: null }), /\| 1 \| 2 \|\n\nSee \[/);
+  const nested = makeEnValidBody({ extraBody: "````md\n```\ninner\n```\n````" });
+  const nestedV = validateAeoGeo({ ...meta, body: ensureRequiredLinks(nested, linkCfg) }, enCfg);
+  assert.ok(!nestedV.errs.some((e) => /fence/.test(e)), nestedV.errs.join("; "));
+}
+
+// ---------- generateBody ----------
+{
+  const { generateBody } = await import("./blog-aeo.mjs");
+  const words = (n, w = "word") => Array.from({ length: n }, () => w).join(" ");
+  const stub = (replies) => {
+    const prompts = [];
+    return { prompts, call: async (p) => { prompts.push(p); const r = replies.shift(); if (r instanceof Error) throw r; return r; } };
+  };
+
+  // Short draft is expanded, not discarded: the 2nd prompt carries the 1st draft.
+  const s1 = stub([words(800, "alpha"), "```markdown\n" + words(1600) + "\n```"]);
+  const r1 = await generateBody({ callModel: s1.call, prompt: "PROMPT", minWords: 1500 });
+  assert.equal(r1.body, words(1600));
+  assert.equal(r1.words, 1600);
+  assert.ok(s1.prompts[1].startsWith("PROMPT") && s1.prompts[1].includes(words(800, "alpha")) && /1500/.test(s1.prompts[1]));
+
+  // Always short → null body, longest word count reported; a shorter expansion never replaces a longer draft.
+  const s2 = stub([words(800, "a"), words(700, "b"), words(900, "c")]);
+  const r2 = await generateBody({ callModel: s2.call, prompt: "P", minWords: 1500 });
+  assert.deepEqual(r2, { body: null, words: 900 });
+  assert.ok(s2.prompts[2].includes(words(800, "a")), "expands the longest draft so far");
+
+  // A throwing call counts as an attempt.
+  const s3 = stub([new Error("429"), words(1600)]);
+  assert.equal((await generateBody({ callModel: s3.call, prompt: "P", minWords: 1500 })).words, 1600);
+  // Every call failed (provider outage) → throws, so the run fails red instead of a quiet "too short" skip.
+  const s4 = stub([new Error("x"), new Error("y"), new Error("z")]);
+  await assert.rejects(generateBody({ callModel: s4.call, prompt: "P", minWords: 1500 }), /z/);
+  // A draft arrived, later calls threw → still a short result, not an outage.
+  const s5 = stub([words(700), new Error("y"), new Error("z")]);
+  assert.deepEqual(await generateBody({ callModel: s5.call, prompt: "P", minWords: 1500 }), { body: null, words: 700 });
+}
+
 console.log("blog-aeo self-check: ok");
