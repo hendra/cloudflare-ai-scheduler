@@ -6,6 +6,12 @@ import { indexArticle, sitemapLocs } from "./site-index.mjs";
 import { groundArticle } from "./blog-grounding.mjs";
 import { fetchSourceText } from "./grounding.mjs";
 import {
+  pickCategory,
+  FULLSTACKWEB_SHARES,
+  classifyFullstackwebTopic,
+  countFullstackwebTopics,
+} from "./blog-topic-mix.mjs";
+import {
   buildAeoGeoBodyRules,
   validateAeoGeo,
   ensureRequiredLinks,
@@ -75,19 +81,19 @@ export const CATEGORY_VALUES = [
   "AI Engineering",
   "Backend",
   "Frontend",
-  "Dev Tools",
   "DevOps",
-  "Node.js and TypeScript",
-  "Python and FastAPI",
-  "Rust",
-  "Engineering Leadership",
 ];
 const CATEGORY_ALIASES = {
   "ai/llm": "AI Engineering",
+  "dev tools": "AI Engineering",
   "web/frontend": "Frontend",
   "infra/devops": "DevOps",
   "data": "Backend",
   "ruby on rails": "Backend",
+  "python and fastapi": "Backend",
+  "node.js and typescript": "Backend",
+  "rust": "Backend",
+  "engineering leadership": "Backend",
 };
 const strip = (s) => String(s || "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
 
@@ -143,31 +149,119 @@ function parseTrending(html) {
 const loadCorpus = loadBlogCorpus;
 
 // ---------- AI-stub article (offline testing only) ----------
-function stubArticle() {
-  const body = `A typescript migration replaces untyped JavaScript files with strict TypeScript modules incrementally so teams keep shipping features without halting product work for a rewrite. ${"Stubbed lead context on staging compiler checks cleanly. ".repeat(4)}
+const STUB_SPECS = {
+  Node: {
+    title: "Migrating a Large Editor to TypeScript: A Practical Guide",
+    description: "Practical guide to migrating large JavaScript codebases to TypeScript without a big-bang rewrite: tsconfig strategy, incremental adoption, and CI gating that keeps the build green.",
+    keyword: "typescript migration",
+    slug: "typescript-migration-large-codebase-guide",
+    services: ["nodejs-typescript-development", "full-stack-development"],
+    coverAlt: "Diagram of a staged TypeScript migration: deprecated options cleaned first, then the native compiler replaces type-checking",
+    lead: "A typescript migration replaces untyped JavaScript files with strict TypeScript modules incrementally so teams keep shipping features without halting product work for a rewrite.",
+    docLabel: "TypeScript migration handbook",
+    docUrl: "https://www.typescriptlang.org/docs/handbook/migrating-from-javascript.html",
+    codeLang: "bash",
+    codeBlock: "# install and configure the compiler\nnpm install typescript\nnpx tsc --init",
+    detailNoun: "TypeScript compiler options",
+  },
+  Python: {
+    title: "Structuring FastAPI Dependencies and Pydantic v2 Schemas",
+    description: "Practical guide to structuring FastAPI dependencies and Pydantic v2 validation in Python APIs with clean request-scoped lifecycle boundaries.",
+    keyword: "fastapi dependency injection",
+    slug: "fastapi-pydantic-v2-dependency-guide",
+    services: ["python-fastapi-development", "backend-api-development"],
+    coverAlt: "Diagram of a FastAPI request pipeline passing through dependency injection and Pydantic v2 validation",
+    lead: "Using fastapi dependency injection composes database sessions, auth guards, and typed request configuration through explicit callables without global state.",
+    docLabel: "FastAPI dependency docs",
+    docUrl: "https://fastapi.tiangolo.com/tutorial/dependencies/",
+    codeLang: "python",
+    codeBlock: "from fastapi import Depends, FastAPI\n\napp = FastAPI()\n\ndef get_limit(limit: int = 20) -> int:\n    return min(limit, 100)\n\n@app.get(\"/items\")\ndef list_items(limit: int = Depends(get_limit)):\n    return {\"limit\": limit}",
+    detailNoun: "FastAPI dependency boundaries",
+  },
+  Rust: {
+    title: "Graceful Shutdown Patterns for Rust Tokio Services",
+    description: "Practical guide to implementing graceful shutdown in Rust Tokio HTTP services: cancellation tokens, connection draining, and bounded task timeouts.",
+    keyword: "rust tokio shutdown",
+    slug: "rust-tokio-graceful-shutdown-guide",
+    services: ["backend-api-development"],
+    coverAlt: "Diagram of a Rust Tokio server draining in-flight tasks via cancellation tokens before process exit",
+    lead: "A clean rust tokio shutdown flow listens for termination signals, stops accepting new sockets, and drains in-flight async tasks within a bounded timeout.",
+    docLabel: "Tokio graceful shutdown guide",
+    docUrl: "https://tokio.rs/tokio/topics/shutdown",
+    codeLang: "rust",
+    codeBlock: "use tokio::signal;\n\nasync fn shutdown_signal() {\n    let _ = signal::ctrl_c().await;\n}",
+    detailNoun: "Tokio task cancellation",
+  },
+  Go: {
+    title: "Bounded Goroutine Worker Pools in Production Go",
+    description: "Practical guide to building bounded goroutine worker pools in Go using context cancellation, buffered channels, and structured error propagation.",
+    keyword: "go worker pool",
+    slug: "go-bounded-goroutine-worker-pools",
+    services: ["backend-api-development"],
+    coverAlt: "Diagram of a Go worker pool with bounded goroutines, buffered job channel, and context cancellation",
+    lead: "A bounded go worker pool caps concurrent goroutines, propagates context cancellation cleanly, and prevents memory spikes under sudden request bursts.",
+    docLabel: "Go concurrency blog",
+    docUrl: "https://go.dev/blog/pipelines",
+    codeLang: "go",
+    codeBlock: "func runWorkers(ctx context.Context, jobs <-chan Job, workers int) {\n\tvar wg sync.WaitGroup\n\tfor range workers {\n\t\twg.Go(func() { processJobs(ctx, jobs) })\n\t}\n\twg.Wait()\n}",
+    detailNoun: "Go goroutine scheduling",
+  },
+  Rails: {
+    title: "Configuring Solid Queue Background Jobs in Ruby on Rails",
+    description: "Practical guide to configuring Solid Queue background jobs in Ruby on Rails: queue isolation, recurring schedules, and safe worker shutdown.",
+    keyword: "rails solid queue",
+    slug: "rails-solid-queue-background-jobs-guide",
+    services: ["ruby-on-rails-development", "backend-api-development"],
+    coverAlt: "Diagram of Ruby on Rails Active Job routing queues into Solid Queue database-backed workers",
+    lead: "Configuring rails solid queue lets Ruby on Rails applications process background jobs reliably on PostgreSQL or SQLite without operating a separate Redis broker.",
+    docLabel: "Rails Active Job guide",
+    docUrl: "https://guides.rubyonrails.org/active_job_basics.html",
+    codeLang: "ruby",
+    codeBlock: "class DigestJob < ApplicationJob\n  queue_as :default\n\n  def perform(account_id)\n    Account.find(account_id).refresh_digest!\n  end\nend",
+    detailNoun: "Rails Solid Queue workers",
+  },
+  "AI Engineering and Integration": {
+    title: "Deterministic Tool Calling for Production AI Agents",
+    description: "Practical guide to building deterministic tool calling in production AI engineering pipelines with schema validation, bounded retries, and audit logs.",
+    keyword: "ai agent tool calling",
+    slug: "deterministic-tool-calling-ai-agents-guide",
+    services: ["ai-engineering", "rag-llm-development"],
+    coverAlt: "Diagram of an AI engineering tool-calling loop with JSON schema validation and bounded retry guards",
+    lead: "Reliable ai agent tool calling enforces strict JSON schemas, explicit timeout budgets, and idempotent side-effect boundaries before executing backend actions.",
+    docLabel: "OpenAI function calling docs",
+    docUrl: "https://platform.openai.com/docs/guides/function-calling",
+    codeLang: "ts",
+    codeBlock: "export function validateToolArgs(raw: unknown): { id: string } {\n  if (!raw || typeof raw !== \"object\" || typeof (raw as { id?: unknown }).id !== \"string\") {\n    throw new Error(\"invalid tool payload\");\n  }\n  return { id: (raw as { id: string }).id };\n}",
+    detailNoun: "AI tool-calling boundaries",
+  },
+};
+
+export function stubArticle(targetTopic = "Node") {
+  const spec = STUB_SPECS[targetTopic] || STUB_SPECS.Node;
+  const category = targetCategoryForTopic(targetTopic);
+  const serviceHref = `/services/${spec.services[0]}/`;
+  const body = `${spec.lead} ${`Stubbed lead context covering ${spec.detailNoun} cleanly. `.repeat(4)}
 
 ## Why incremental adoption beats a big-bang rewrite
 
-An incremental approach avoids multi-month merge conflicts and keeps CI green. For official compiler flags, consult the [TypeScript migration handbook](https://www.typescriptlang.org/docs/handbook/migrating-from-javascript.html) and my [Node.js and TypeScript service](/services/nodejs-typescript-development/). ${"Stubbed section on the core tradeoffs. ".repeat(90)}
+An incremental approach avoids multi-month merge conflicts and keeps CI green. For official specifications, consult the [${spec.docLabel}](${spec.docUrl}) and my [related engineering service](${serviceHref}). ${"Stubbed section on the core architectural tradeoffs. ".repeat(90)}
 
 | Phase | Configuration | CI Enforcement |
 | --- | --- | --- |
-| Baseline | allowJs with checkJs off | Existing tests pass |
-| Strict modules | strictNullChecks enabled | Per-directory typecheck |
+| Baseline | Strict boundary checks enabled | Existing tests pass |
+| Hardened | Timeouts and retries bounded | Per-module verification |
 
-## How to configure tsconfig for mixed codebases
+## How to configure ${spec.detailNoun} for production
 
-\`\`\`bash
-# install and configure the compiler
-npm install typescript
-npx tsc --init
+\`\`\`${spec.codeLang}
+${spec.codeBlock}
 \`\`\`
 
-${"TypeScript compiler options explained step by step. ".repeat(90)}
+${`${spec.detailNoun} explained step by step with deterministic checks. `.repeat(90)}
 
-## Common mistakes when migrating legacy modules
+## Common mistakes when shipping ${spec.detailNoun}
 
-${"Patterns to avoid when adopting types incrementally, drawn from real projects. ".repeat(90)}
+${`Patterns to avoid when structuring ${spec.detailNoun} in real projects. `.repeat(90)}
 
 ## Verification
 
@@ -175,22 +269,31 @@ ${"Patterns to avoid when adopting types incrementally, drawn from real projects
 
 ## Frequently asked questions
 
-### Should we enable strict mode on day one?
+### Should we enforce strict validation on day one?
 
-No — start with allowJs and incrementally tighten compiler flags per package so existing pull requests keep landing cleanly.
+Start with explicit boundary checks at module edges and tighten rules incrementally so existing pull requests keep landing cleanly.
 
-### How do we type third-party libraries without bundled definitions?
+### How do we isolate external failures during retries?
 
-Install matching @types packages first and isolate any remaining untyped imports behind a local declaration file.
+Apply bounded retry budgets and structured error handling before side effects run.
 
-### Can JavaScript and TypeScript files live in the same package?
+### Can new modules coexist with legacy code?
 
-Yes, setting allowJs in tsconfig lets both file extensions coexist during the migration window.
+Yes, keeping strict interfaces at boundaries lets migrated and legacy modules interoperate safely.
 
 ## Conclusion
 
-Start with a small shared utility folder, enforce type-checking in CI, and expand coverage module by module. If you need architecture support, [get in touch](/contact/). ${"Wrap-up and next steps for your engineering workflow. ".repeat(65)}`;
-  return { title: "Migrating a Large Editor to TypeScript: A Practical Guide", description: "Practical guide to migrating large JavaScript codebases to TypeScript without a big-bang rewrite: tsconfig strategy, incremental adoption, and CI gating that keeps the build green.", keyword: "typescript migration", slug: "typescript-migration-large-codebase-guide", category: "Node.js and TypeScript", services: ["nodejs-typescript-development", "full-stack-development"], coverAlt: "Diagram of a staged TypeScript migration: deprecated options cleaned first, then the native compiler replaces type-checking", body };
+Start with one bounded service boundary, enforce automated checks in CI, and expand coverage module by module. If you need architecture support, [get in touch](/contact/). ${"Wrap-up and next steps for your engineering workflow. ".repeat(65)}`;
+  return {
+    title: spec.title,
+    description: spec.description,
+    keyword: spec.keyword,
+    slug: spec.slug,
+    category,
+    services: spec.services,
+    coverAlt: spec.coverAlt,
+    body,
+  };
 }
 
 // ---------- metadata helpers ----------
@@ -207,6 +310,10 @@ function clampAtWord(s, max) {
 }
 const META_KEYS = ["title", "description", "keyword", "slug", "category"];
 
+export function targetCategoryForTopic(topic) {
+  return topic === "AI Engineering and Integration" ? "AI Engineering" : "Backend";
+}
+
 export function normalizeCategory(raw, { title = "", keyword = "", services = [] } = {}) {
   const clean = String(raw || "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
   const lower = clean.toLowerCase();
@@ -215,15 +322,42 @@ export function normalizeCategory(raw, { title = "", keyword = "", services = []
   if (CATEGORY_ALIASES[lower]) return CATEGORY_ALIASES[lower];
 
   const guess = `${clean} ${title || ""} ${keyword || ""} ${Array.isArray(services) ? services.join(" ") : ""}`;
-  if (/\brust\b/i.test(guess)) return "Rust";
-  if (/\b(python|fastapi|django|flask|pydantic)\b/i.test(guess)) return "Python and FastAPI";
-  if (/\b(node\.?js|nodejs|typescript|nestjs|fastify|hono)\b/i.test(guess)) return "Node.js and TypeScript";
   if (/\b(react|next\.?js|nextjs|vite|frontend|tailwind|css|browser)\b/i.test(guess)) return "Frontend";
   if (/\b(ai|llm|rag|agent|claude|gemini|openai|machine learning)\b/i.test(guess)) return "AI Engineering";
   if (/\b(devops|kubernetes|k8s|docker|ci\/cd|terraform|cloud|deploy|infra)\b/i.test(guess)) return "DevOps";
-  if (/\b(backend|api|postgres|postgresql|redis|sql|rails|ruby|graphql|microservices)\b/i.test(guess)) return "Backend";
-  if (/\b(leadership|staff engineer|principal|management|hiring|fractional|architecture review)\b/i.test(guess)) return "Engineering Leadership";
-  return "Dev Tools";
+  return "Backend";
+}
+
+export function validateTopicCandidate(candidate, { targetTopic, targetCategory, signalCount }) {
+  if (!candidate || typeof candidate !== "object") {
+    return { ok: false, reason: "candidate must be an object", signalIndex: null };
+  }
+  const rawIdx = candidate.signalIndex;
+  const sigIdx = rawIdx === "" || rawIdx === null || typeof rawIdx === "boolean" ? NaN : Number(rawIdx);
+  if (!Number.isInteger(sigIdx) || sigIdx < 0 || sigIdx > signalCount) {
+    return {
+      ok: false,
+      reason: `invalid signalIndex ${candidate.signalIndex}; use 0 for evergreen or 1..${signalCount}`,
+      signalIndex: null,
+    };
+  }
+  const category = normalizeCategory(candidate.category, candidate);
+  if (category !== targetCategory) {
+    return {
+      ok: false,
+      reason: `wrong category ${JSON.stringify(candidate.category)} (need ${JSON.stringify(targetCategory)})`,
+      signalIndex: sigIdx,
+    };
+  }
+  const classified = classifyFullstackwebTopic({ ...candidate, category: targetCategory });
+  if (classified !== targetTopic) {
+    return {
+      ok: false,
+      reason: `topic classified as ${classified ? JSON.stringify(classified) : "unclassified"}, need ${JSON.stringify(targetTopic)}`,
+      signalIndex: sigIdx,
+    };
+  }
+  return { ok: true, reason: "", signalIndex: sigIdx };
 }
 
 function normalizeServices(a) {
@@ -307,7 +441,7 @@ async function main() {
   const corpusSlugs = [...history.slugs];
   console.log(`corpus: ${corpus.length} posts | open PRs: ${openPrs.slugs.size} | D1 ledger: ${publishedRows.length} | total known slugs: ${corpusSlugs.length}`);
 
-  // 1) signals
+  // 1) signals (optional: zero unseen signals continues with an evergreen topic)
   const rawSignals = [];
   try { rawSignals.push(...parseTrending((await fetchText("https://github.com/trending?since=daily")).text)); console.log(`trending: ${rawSignals.length}`); } catch (e) { console.error("trending fetch failed:", e.message); }
   try {
@@ -317,30 +451,49 @@ async function main() {
     rawSignals.push(...hnStories);
     console.log(`hn front page: ${hnStories.length}`);
   } catch (e) { console.error("hn fetch failed:", e.message); }
-  if (rawSignals.length === 0) await fail("all signal sources failed");
+  if (rawSignals.length === 0) console.warn("warning: all signal sources failed or returned 0 items; continuing with evergreen fallback");
 
   const signals = filterUnseenCandidates(rawSignals, { urls: history.urls, titles: history.titles }, {
     getUrl: (s) => s.url,
     getTitle: (s) => s.title,
   });
   console.log(`unseen signals: ${signals.length}/${rawSignals.length} (filtered ${rawSignals.length - signals.length})`);
-  if (signals.length === 0) {
-    console.log("skipping: no unseen signals remain after deduplication");
-    process.exit(0);
-  }
 
-  // 2) topic selection
+  // 2) topic selection (steered by FULLSTACKWEB_SHARES)
+  const targetTopic = pickCategory(FULLSTACKWEB_SHARES, countFullstackwebTopics(corpus.filter((c) => !c.draft)));
+  const targetCategory = targetCategoryForTopic(targetTopic);
+  console.log(`target topic: ${targetTopic} | target category: ${targetCategory}`);
+
   const avoidPosts = buildBlogAvoidList({ corpus, openPrs, publishedRows, max: 150 });
   const existingKeywords = [...new Set([...corpus.map((c) => c.keyword).filter(Boolean), ...history.keywords])];
   const validBlogPaths = new Set(corpus.filter((c) => !c.draft).map((c) => `/blog/${c.slug}/`));
-  const topicPrompt = `You pick ONE blog topic for FullstackWeb.dev (fullstackweb.dev) — independent senior full-stack and AI engineer; readers: senior developers and tech leads; pillars: AI engineering, React and Next.js, Node.js and TypeScript, Ruby on Rails, backend APIs, cloud and DevOps, developer tools, open source. Pick the signal with the strongest, most durable angle for that audience.
-Reply with ONLY this JSON (no prose): {"signalIndex":<1..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","description":"120-160 chars","slug":"kebab-case-slug","category":"one of: ${CATEGORY_VALUES.join("|")}","services":[${JSON.stringify(SERVICE_VALUES)}]}
+  const signalListText = signals.length > 0
+    ? signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.slice(0, 160)} (${s.signals})`).join("\n")
+    : "(none — pick an evergreen topic in the target stack and set signalIndex to 0)";
+  const topicPrompt = `You pick ONE blog topic for FullstackWeb.dev (fullstackweb.dev) — independent senior full-stack and AI engineer; readers: senior developers and tech leads.
+Target stack: "${targetTopic}". Category MUST be ${JSON.stringify(targetCategory)}.
+Explicitly name the stack/framework (${targetTopic}) in "title", "slug", and "keyword", and include 1-3 matching service slug(s) in "services" from ${JSON.stringify(SERVICE_VALUES)}.${targetTopic === "AI Engineering and Integration" ? ' ("AI Engineering" articles should sit inside a concrete backend/fullstack stack like Python, Rust, Node.js, Go, or Rails.)' : ""}
+Signals are optional: pick a signal from Signals below ONLY if it directly fits "${targetTopic}", OR set "signalIndex": 0 for an evergreen topic in "${targetTopic}" (no signal source URL).
+Reply with ONLY this JSON (no prose): {"signalIndex":<0..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","description":"120-160 chars","slug":"kebab-case-slug","category":${JSON.stringify(targetCategory)},"services":${JSON.stringify(SERVICE_VALUES)}}
 Avoid all of these existing posts: ${avoidPosts.join(" | ")}
 Avoid these existing target keywords: ${existingKeywords.slice(0, 100).join(", ")}
 Signals:
-${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.slice(0, 160)} (${s.signals})`).join("\n")}`;
-  let topic = AI_STUB ? { signalIndex: 1, topic: "Fullstack TypeScript migration strategy", keyword: "typescript migration", angle: "practical guide", rationale: "stub", title: "Migrating a Large Editor to TypeScript: A Practical Guide", description: "Practical guide to migrating large JavaScript codebases to TypeScript without a big-bang rewrite: tsconfig strategy, incremental adoption, and CI gating that keeps the build green.", slug: "typescript-migration-large-codebase-guide", category: "Node.js and TypeScript", services: ["nodejs-typescript-development", "full-stack-development"], coverAlt: "Diagram of a staged TypeScript migration: deprecated options cleaned first, then the native compiler replaces type-checking" } : null;
-  let chosenSignal = topic ? (signals[(topic.signalIndex || 1) - 1] || null) : null;
+${signalListText}`;
+  const stub = AI_STUB ? stubArticle(targetTopic) : null;
+  let topic = stub ? {
+    signalIndex: 0,
+    topic: `${targetTopic} production guide`,
+    keyword: stub.keyword,
+    angle: "practical guide",
+    rationale: "stub",
+    title: stub.title,
+    description: stub.description,
+    slug: stub.slug,
+    category: stub.category,
+    services: stub.services,
+    coverAlt: stub.coverAlt,
+  } : null;
+  let chosenSignal = null;
   if (!topic) {
     let feedback = "";
     let collisions = 0;
@@ -356,8 +509,21 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
           feedback = `\n\nPrevious reply invalid; reply with ONLY the JSON object.${prior}`;
           continue;
         }
-        const sigIdx = Number.parseInt(candidate.signalIndex, 10);
-        const sig = Number.isInteger(sigIdx) && sigIdx >= 1 && sigIdx <= signals.length ? signals[sigIdx - 1] : null;
+        const check = validateTopicCandidate(candidate, {
+          targetTopic,
+          targetCategory,
+          signalCount: signals.length,
+        });
+        if (!check.ok) {
+          lastWasCollision = false;
+          console.error(`topic attempt ${attempt}: ${check.reason}`);
+          const prior = collisionReasons.length ? ` Previously rejected: ${collisionReasons.join("; ")}.` : "";
+          feedback = `\n\nPrevious reply rejected (${check.reason}). Keep category ${JSON.stringify(targetCategory)}, target stack "${targetTopic}", and signalIndex 0..${signals.length}.${prior}`;
+          continue;
+        }
+        candidate.category = targetCategory;
+        const sigIdx = check.signalIndex;
+        const sig = sigIdx === 0 ? null : signals[sigIdx - 1];
         const collision = checkTopicCollision(
           { slug: candidate.slug, title: candidate.title, topic: candidate.topic, keyword: candidate.keyword, signalUrl: sig?.url || "" },
           history,
@@ -368,7 +534,7 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
           const label = candidate.slug || candidate.title || candidate.topic || `signal #${candidate.signalIndex ?? "?"}`;
           collisionReasons.push(`${label} (${collision})`);
           console.log(`topic attempt ${attempt} rejected (${collision})`);
-          feedback = `\n\nPrevious topic(s) rejected (${collisionReasons.join("; ")}); pick a DIFFERENT signal from Signals.`;
+          feedback = `\n\nPrevious topic(s) rejected (${collisionReasons.join("; ")}); pick a DIFFERENT topic or evergreen angle.`;
           continue;
         }
         lastWasCollision = false;
@@ -390,7 +556,7 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
     }
   }
   const meta = topic; // meta is emitted in the same JSON object as the topic
-  console.log(`topic: ${topic.topic} | keyword: ${topic.keyword} | angle: ${topic.angle}`);
+  console.log(`topic: ${topic.topic} | keyword: ${topic.keyword} | angle: ${topic.angle} | category: ${meta.category}`);
   console.log(`meta: ${meta.title} | ${meta.slug}`);
 
   // 3) article body (metadata already produced in the topic call)
@@ -441,7 +607,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   };
   let draft;
   try {
-    draft = AI_STUB ? { body: stubArticle().body } : await generateBody({ callModel: bodyModel, prompt: makeBodyPrompt(meta), minWords: MIN_BODY_WORDS });
+    draft = stub ? { body: stub.body } : await generateBody({ callModel: bodyModel, prompt: makeBodyPrompt(meta), minWords: MIN_BODY_WORDS });
   } catch (e) { await fail(`article body generation failed: ${String(e?.message || e).slice(0, 300)}`); return; }
   if (!draft.body) await skipShort(draft.words);
   const body = withLinks(meta, draft.body);
@@ -461,10 +627,10 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     console.error("metadata validation failed, requesting metadata fix:", v.errs.join("; "));
     try {
       const metaNow = Object.fromEntries(META_KEYS.map((k) => [k, article[k]]));
-      const fixPrompt = `You previously produced this blog metadata JSON for fullstackweb.dev:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars\n- description: 120-160 chars (hard max 180) and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- category: one of ${CATEGORY_VALUES.join(" | ")}\nOutput ONLY the JSON object, no prose.`;
+      const fixPrompt = `You previously produced this blog metadata JSON for fullstackweb.dev:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars\n- description: 120-160 chars (hard max 180) and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- category: must stay ${JSON.stringify(targetCategory)}\nOutput ONLY the JSON object, no prose.`;
       const fixed = parseJSONObject(await callModel(fixPrompt, { maxTokens: 2048 }));
       if (fixed && typeof fixed === "object") {
-        for (const k of META_KEYS) if (typeof fixed[k] === "string" && fixed[k].trim()) article[k] = fixed[k].trim();
+        for (const k of META_KEYS) if (k !== "category" && typeof fixed[k] === "string" && fixed[k].trim()) article[k] = fixed[k].trim();
         if (article.description && article.description.length > DESC_MAX_CHARS) article.description = clampAtWord(article.description, DESC_MAX_CHARS);
         v = runValidate(article);
         console.log(v.ok ? "validation ok after metadata fix" : `still failing after metadata fix: ${v.errs.join("; ")}`);
@@ -588,7 +754,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
       item_key: article.slug,
       title: article.title,
       url: chosenSignal?.url || "",
-      meta: { keyword: article.keyword, topic: topic.topic, pr },
+      meta: { keyword: article.keyword, topic: topic.topic, topicBucket: targetTopic, pr },
     }],
   });
   console.log(`published ledger: recorded ${rec.inserted} item(s)`);
