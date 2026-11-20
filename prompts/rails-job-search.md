@@ -241,7 +241,7 @@ Senior Full-Stack Developer | Ruby on Rails & React | 12+ Years of Experience
 
 **Professional Experience:**
 
-- 12+ years of professional software development experience.
+- 10+ years of professional software development experience.
 - Extensive experience building, maintaining, improving, and scaling production web applications.
 - Strong Ruby on Rails backend development experience.
 - Experienced in frontend development using React.js and modern JavaScript/TypeScript technologies.
