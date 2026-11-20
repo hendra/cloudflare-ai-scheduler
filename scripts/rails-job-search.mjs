@@ -123,7 +123,7 @@ const SOURCES = [
 const statuses = [];
 
 // ---------- AI ----------
-const PROFILE = `Senior Full-Stack Developer — Ruby on Rails & React, 12+ years, based in Indonesia. Prefers fully-remote worldwide/international roles open to Indonesian applicants; EU/APAC/NA welcome; country-restricted roles downranked.
+const PROFILE = `Senior Full-Stack Developer — Ruby on Rails & React, 10+ years, based in Indonesia. Prefers fully-remote worldwide/international roles open to Indonesian applicants; EU/APAC/NA welcome; country-restricted roles downranked.
 Scoring weights: Rails 25, seniority 20, remote-from-Indonesia 20, full-stack/React 10, backend architecture 10, stack 5, salary 5, company credibility 5.`;
 
 async function score(candidates) {
