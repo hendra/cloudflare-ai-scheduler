@@ -333,7 +333,12 @@ export function validateTopicCandidate(candidate, { targetTopic, targetCategory,
     return { ok: false, reason: "candidate must be an object", signalIndex: null };
   }
   const rawIdx = candidate.signalIndex;
-  const sigIdx = rawIdx === "" || rawIdx === null || typeof rawIdx === "boolean" ? NaN : Number(rawIdx);
+  const sigIdx =
+    typeof rawIdx === "number"
+      ? rawIdx
+      : typeof rawIdx === "string" && /^\d+$/.test(rawIdx.trim())
+        ? Number(rawIdx.trim())
+        : NaN;
   if (!Number.isInteger(sigIdx) || sigIdx < 0 || sigIdx > signalCount) {
     return {
       ok: false,

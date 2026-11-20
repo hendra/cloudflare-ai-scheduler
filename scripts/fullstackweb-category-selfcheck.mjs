@@ -85,6 +85,21 @@ const overIdx = validateTopicCandidate(
 );
 assert.equal(overIdx.ok, false);
 
+for (const badIdx of ["   ", [], "", null]) {
+  const resBad = validateTopicCandidate(
+    { ...nodeCandidate, signalIndex: badIdx },
+    { targetTopic: "Node", targetCategory: "Backend", signalCount: 3 },
+  );
+  assert.equal(resBad.ok, false, `expected signalIndex ${JSON.stringify(badIdx)} rejected`);
+}
+
+const strZeroOk = validateTopicCandidate(
+  { ...nodeCandidate, signalIndex: "0" },
+  { targetTopic: "Node", targetCategory: "Backend", signalCount: 3 },
+);
+assert.equal(strZeroOk.ok, true, `expected string "0" valid, got: ${strZeroOk.reason}`);
+assert.equal(strZeroOk.signalIndex, 0);
+
 const goOk = validateTopicCandidate(
   {
     signalIndex: 0,
