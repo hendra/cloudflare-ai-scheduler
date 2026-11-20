@@ -530,6 +530,8 @@ function makeIdValidBody({
   assert.equal(servicePathFor("railsdev", { service: "Custom Module" }), "/services/custom-web-application-development");
   assert.equal(servicePathFor("railsdev", { service: "AI Integration" }), "/services/ai-software-development");
   assert.equal(servicePathFor("fullstackweb", { services: ["ai-engineering", "rag-llm-development"] }), "/services/ai-engineering/");
+  assert.equal(servicePathFor("hendranicholas", { services: ["python-development"] }), "/services/python-development/");
+  assert.equal(servicePathFor("hendranicholas", {}), "/services/nodejs-nextjs-development/");
   assert.equal(servicePathFor("inasoft", { service: "jasa-pembuatan-ai-agent" }), "/layanan/jasa-pembuatan-ai-agent");
 
   const promptBlock = buildAeoGeoBodyRules({

@@ -33,6 +33,9 @@ jobs:
       - name: Topic-mix self-check
         run: npm run topicmix:selfcheck
 
+      - name: Hendranicholas blog self-check
+        run: npm run hendranicholas:selfcheck
+
       - name: IG Reel self-check
         run: python3 scripts/ig_reel/selfcheck.py
 

@@ -174,24 +174,83 @@ function rng(seed) {
 const bars = (x0, y0, w, fill, n = 3) =>
   Array.from({ length: n }, (_, i) => `<rect x="${x0}" y="${y0 + 18 * i}" width="${Math.round(w * [1, 0.86, 0.94][i % 3])}" height="7" rx="3.5" fill="${fill}"/>`).join("");
 
-// fullstackweb stages: a tile drawing per node kind, centred on (cx, 290), at most w wide.
-function stage(n, cx, w, last) {
+const FSW_PALETTE = {
+  bg: "#090d16",
+  grid: "#1e293b",
+  gridOpacity: ".45",
+  glowA: "#38bdf8",
+  glowAOpacity: ".30",
+  glowB: "#a855f7",
+  glowBOpacity: ".26",
+  brand: ["#38bdf8", "#818cf8", "#c084fc"],
+  label: "#cbd5e1",
+  tileFill: "#0f172a",
+  tileStroke: "#334155",
+  link: "#475569",
+  hubRing: "#1e293b",
+  hubDot: "#475569",
+  hubSpoke: "#c084fc",
+  hubHalo: "#a855f7",
+  hubHaloOpacity: ".18",
+  hubCore: "#f8fafc",
+  lastFill: "#0f172a",
+  lastDot: "#c084fc",
+  lastHeadBar: "#64748b",
+  bars: "#334155",
+  accentFill: "#0c4a6e",
+  accentStroke: "#38bdf8",
+  accentBar: "#7dd3fc",
+  cardInset: "#1e293b",
+};
+
+// Monochrome zinc palette matching hendranicholas-site/src/styles/global.css dark tokens.
+const HN_PALETTE = {
+  bg: "#09090b",
+  grid: "#27272a",
+  gridOpacity: ".55",
+  glowA: "#fafafa",
+  glowAOpacity: ".06",
+  glowB: "#a1a1aa",
+  glowBOpacity: ".06",
+  brand: ["#71717a", "#a1a1aa", "#fafafa"],
+  label: "#fafafa",
+  tileFill: "#141417",
+  tileStroke: "#3f3f46",
+  link: "#52525b",
+  hubRing: "#27272a",
+  hubDot: "#3f3f46",
+  hubSpoke: "#d4d4d8",
+  hubHalo: "#fafafa",
+  hubHaloOpacity: ".10",
+  hubCore: "#fafafa",
+  lastFill: "#141417",
+  lastDot: "#fafafa",
+  lastHeadBar: "#a1a1aa",
+  bars: "#27272a",
+  accentFill: "#1c1c21",
+  accentStroke: "#a1a1aa",
+  accentBar: "#fafafa",
+  cardInset: "#1c1c21",
+};
+
+// Horizontal stages: a tile drawing per node kind, centred on (cx, 290), at most w wide.
+function stage(n, cx, w, last, p = FSW_PALETTE) {
   const top = 177, h = 226;
   if (n.kind === "hub") {
     const r = Math.min(150, w / 2), rand = rng(n.label);
     const dots = Array.from({ length: 48 }, () => {
       const a = rand() * Math.PI * 2, d = Math.sqrt(rand()) * (r - 14);
-      return `<circle cx="${(cx + Math.cos(a) * d).toFixed(0)}" cy="${(290 + Math.sin(a) * d).toFixed(0)}" r="4.5" fill="#475569"/>`;
+      return `<circle cx="${(cx + Math.cos(a) * d).toFixed(0)}" cy="${(290 + Math.sin(a) * d).toFixed(0)}" r="4.5" fill="${p.hubDot}"/>`;
     }).join("");
     const spokes = [0.3, 1.5, 2.4, 3.9, 5.1].map((a) => {
       const sx = (cx + Math.cos(a) * r * 0.45).toFixed(0), sy = (290 + Math.sin(a) * r * 0.45).toFixed(0);
-      return `<path d="M${cx} 290 L${sx} ${sy}" stroke="#c084fc" stroke-width="2"/><circle cx="${sx}" cy="${sy}" r="9" fill="#c084fc"/>`;
+      return `<path d="M${cx} 290 L${sx} ${sy}" stroke="${p.hubSpoke}" stroke-width="2"/><circle cx="${sx}" cy="${sy}" r="9" fill="${p.hubSpoke}"/>`;
     }).join("");
-    return { half: r, svg: `<circle cx="${cx}" cy="290" r="${r}" fill="none" stroke="${last ? "url(#brand)" : "#1e293b"}" stroke-width="${last ? 2.5 : 1.5}"/>${dots}<circle cx="${cx}" cy="290" r="26" fill="#a855f7" fill-opacity=".18"/>${spokes}<circle cx="${cx}" cy="290" r="13" fill="#f8fafc"/>` };
+    return { half: r, svg: `<circle cx="${cx}" cy="290" r="${r}" fill="none" stroke="${last ? "url(#brand)" : p.hubRing}" stroke-width="${last ? 2.5 : 1.5}"/>${dots}<circle cx="${cx}" cy="290" r="26" fill="${p.hubHalo}" fill-opacity="${p.hubHaloOpacity}"/>${spokes}<circle cx="${cx}" cy="290" r="13" fill="${p.hubCore}"/>` };
   }
   const tw = Math.min(200, w), x0 = cx - tw / 2;
   if (last) {
-    return { half: tw / 2, svg: `<rect x="${x0}" y="${top - 18}" width="${tw}" height="${h + 36}" rx="16" fill="#0f172a" stroke="url(#brand)" stroke-width="2.5"/><circle cx="${x0 + 28}" cy="${top + 14}" r="9" fill="#c084fc"/><rect x="${x0 + 46}" y="${top + 10}" width="${tw * 0.48}" height="8" rx="4" fill="#64748b"/>${bars(x0 + 22, top + 44, tw - 44, "#334155", 5)}<rect x="${x0 + 22}" y="${top + 154}" width="${tw - 44}" height="40" rx="10" fill="#0c4a6e" stroke="#38bdf8" stroke-width="1.5"/>${bars(x0 + 38, top + 166, tw * 0.4, "#7dd3fc", 1)}` };
+    return { half: tw / 2, svg: `<rect x="${x0}" y="${top - 18}" width="${tw}" height="${h + 36}" rx="16" fill="${p.lastFill}" stroke="url(#brand)" stroke-width="2.5"/><circle cx="${x0 + 28}" cy="${top + 14}" r="9" fill="${p.lastDot}"/><rect x="${x0 + 46}" y="${top + 10}" width="${tw * 0.48}" height="8" rx="4" fill="${p.lastHeadBar}"/>${bars(x0 + 22, top + 44, tw - 44, p.bars, 5)}<rect x="${x0 + 22}" y="${top + 154}" width="${tw - 44}" height="40" rx="10" fill="${p.accentFill}" stroke="${p.accentStroke}" stroke-width="1.5"/>${bars(x0 + 38, top + 166, tw * 0.4, p.accentBar, 1)}` };
   }
   if (n.kind === "accent") {
     // 2 × 4 grid of small chunk tiles, every other one highlighted (the "Chunks" stage).
@@ -199,26 +258,26 @@ function stage(n, cx, w, last) {
     const cells = [];
     for (let r = 0; r < 4; r++) for (let c = 0; c < 2; c++) {
       const on = (r + c * 3) % 3 === 1, X = gx0 + c * (cw + gx), Y = top - 17 + r * (ch + gy);
-      cells.push(`<rect x="${X}" y="${Y}" width="${cw}" height="${ch}" rx="10" ${on ? 'fill="#0c4a6e" stroke="#38bdf8" stroke-width="2"' : 'class="tile"'}/><rect x="${X + 12}" y="${Y + 16}" width="40" height="6" rx="3" fill="${on ? "#7dd3fc" : "#334155"}"/><rect x="${X + 12}" y="${Y + 32}" width="28" height="6" rx="3" fill="${on ? "#7dd3fc" : "#334155"}"/>`);
+      cells.push(`<rect x="${X}" y="${Y}" width="${cw}" height="${ch}" rx="10" ${on ? `fill="${p.accentFill}" stroke="${p.accentStroke}" stroke-width="2"` : 'class="tile"'}/><rect x="${X + 12}" y="${Y + 16}" width="40" height="6" rx="3" fill="${on ? p.accentBar : p.bars}"/><rect x="${X + 12}" y="${Y + 32}" width="28" height="6" rx="3" fill="${on ? p.accentBar : p.bars}"/>`);
     }
     return { half: cw + gx / 2, svg: cells.join("") };
   }
   // card: stacked document tiles.
   const fw = tw - 44, fx = x0 + 44;
-  return { half: tw / 2, svg: `<rect class="tile" x="${x0}" y="${top + 36}" width="${fw}" height="${h}" rx="14"/><rect class="tile" x="${x0 + 22}" y="${top + 18}" width="${fw}" height="${h}" rx="14"/><rect class="tile" x="${fx}" y="${top}" width="${fw}" height="${h}" rx="14"/>${bars(fx + 22, top + 32, fw - 44, "#334155")}<rect x="${fx + 22}" y="${top + 96}" width="${fw - 44}" height="66" rx="6" fill="#1e293b"/>${bars(fx + 22, top + 178, fw - 44, "#334155")}` };
+  return { half: tw / 2, svg: `<rect class="tile" x="${x0}" y="${top + 36}" width="${fw}" height="${h}" rx="14"/><rect class="tile" x="${x0 + 22}" y="${top + 18}" width="${fw}" height="${h}" rx="14"/><rect class="tile" x="${fx}" y="${top}" width="${fw}" height="${h}" rx="14"/>${bars(fx + 22, top + 32, fw - 44, p.bars)}<rect x="${fx + 22}" y="${top + 96}" width="${fw - 44}" height="66" rx="6" fill="${p.cardInset}"/>${bars(fx + 22, top + 178, fw - 44, p.bars)}` };
 }
 
-function fullstackweb(spec) {
+function diagramHtml(spec, p) {
   // ponytail: this skin draws at most 4 stages (the site's covers never show more); a 5th node and
   // its edges are dropped. Non-adjacent edges are not drawn — the stages read left → right.
   const nodes = spec.diagram.nodes.slice(0, 4);
   const edges = spec.diagram.edges.filter(([a, b]) => b === a + 1 && b < nodes.length);
   const slot = 1080 / nodes.length;
   const centers = nodes.map((_, i) => Math.round(60 + slot * (i + 0.5)));
-  const stages = nodes.map((n, i) => stage(n, centers[i], slot - 90, i === nodes.length - 1));
+  const stages = nodes.map((n, i) => stage(n, centers[i], slot - 90, i === nodes.length - 1, p));
   const arrows = edges.map(([a, b]) => {
     const x1 = centers[a] + stages[a].half + 12, x2 = centers[b] - stages[b].half - 12;
-    return `<path class="link" d="M${x1} 290 H${x2}"/><path d="M${x2} 290l-11-7v14z" fill="#475569"/>`;
+    return `<path class="link" d="M${x1} 290 H${x2}"/><path d="M${x2} 290l-11-7v14z" fill="${p.link}"/>`;
   }).join("");
   const captions = nodes.map((n, i) => `<text class="label" x="${centers[i]}" y="490" font-size="21" ${fit(slot - 20)}>${x(n.label)}</text>`).join("");
   return `<!doctype html>
@@ -226,21 +285,21 @@ function fullstackweb(spec) {
 <meta charset="utf-8" />
 <style>
 @font-face { font-family: 'Inter Variable'; src: url('${INTER}') format('woff2'); font-weight: 100 900; }
-html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: #090d16; }
+html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: ${p.bg}; }
 svg { display: block; font-family: 'Inter Variable', sans-serif; }
-.label { font-weight: 600; fill: #cbd5e1; text-anchor: middle; }
-.tile { fill: #0f172a; stroke: #334155; stroke-width: 1.5; }
-.link { fill: none; stroke: #475569; stroke-width: 2; }
+.label { font-weight: 600; fill: ${p.label}; text-anchor: middle; }
+.tile { fill: ${p.tileFill}; stroke: ${p.tileStroke}; stroke-width: 1.5; }
+.link { fill: none; stroke: ${p.link}; stroke-width: 2; }
 </style>
 <body>
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
 <defs>
-  <radialGradient id="glowA" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#38bdf8" stop-opacity=".30"/><stop offset="1" stop-color="#38bdf8" stop-opacity="0"/></radialGradient>
-  <radialGradient id="glowB" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#a855f7" stop-opacity=".26"/><stop offset="1" stop-color="#a855f7" stop-opacity="0"/></radialGradient>
-  <linearGradient id="brand" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#38bdf8"/><stop offset=".5" stop-color="#818cf8"/><stop offset="1" stop-color="#c084fc"/></linearGradient>
-  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#1e293b" stroke-opacity=".45"/></pattern>
+  <radialGradient id="glowA" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="${p.glowA}" stop-opacity="${p.glowAOpacity}"/><stop offset="1" stop-color="${p.glowA}" stop-opacity="0"/></radialGradient>
+  <radialGradient id="glowB" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="${p.glowB}" stop-opacity="${p.glowBOpacity}"/><stop offset="1" stop-color="${p.glowB}" stop-opacity="0"/></radialGradient>
+  <linearGradient id="brand" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${p.brand[0]}"/><stop offset=".5" stop-color="${p.brand[1]}"/><stop offset="1" stop-color="${p.brand[2]}"/></linearGradient>
+  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="${p.grid}" stroke-opacity="${p.gridOpacity}"/></pattern>
 </defs>
-<rect width="1200" height="630" fill="#090d16"/><rect width="1200" height="630" fill="url(#grid)"/>
+<rect width="1200" height="630" fill="${p.bg}"/><rect width="1200" height="630" fill="url(#grid)"/>
 <ellipse cx="200" cy="300" rx="320" ry="280" fill="url(#glowA)"/><ellipse cx="1000" cy="300" rx="340" ry="300" fill="url(#glowB)"/>
 ${stages.map((s) => s.svg).join("\n")}
 ${arrows}
@@ -252,8 +311,12 @@ ${FIT_SCRIPT.replace("<![CDATA[", "").replace("]]>", "")}
 `;
 }
 
+const fullstackweb = (spec) => diagramHtml(spec, FSW_PALETTE);
+const hendranicholas = (spec) => diagramHtml(spec, HN_PALETTE);
+
 export const TEMPLATES = {
   railsdev: { ext: "svg", width: 1600, height: 900, scale: 1, render: railsdev },
   inasoft: { ext: "svg", width: 1600, height: 900, scale: 1, render: inasoft },
   fullstackweb: { ext: "html", width: 1200, height: 630, scale: 2, render: fullstackweb },
+  hendranicholas: { ext: "html", width: 1200, height: 630, scale: 2, render: hendranicholas },
 };

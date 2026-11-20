@@ -160,6 +160,12 @@ export function servicePathFor(site, article) {
       : article?.service;
     return slug ? `/services/${slug}/` : "/services/full-stack-development/";
   }
+  if (site === "hendranicholas") {
+    const slug = Array.isArray(article?.services)
+      ? article.services[0]
+      : article?.service;
+    return slug ? `/services/${slug}/` : "/services/nodejs-nextjs-development/";
+  }
   if (site === "inasoft") {
     return article?.service
       ? `/layanan/${article.service}`
