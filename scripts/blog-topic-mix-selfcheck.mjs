@@ -76,6 +76,24 @@ assert.equal(
   }),
   "AI Engineering and Integration",
 );
+assert.equal(
+  classifyFullstackwebTopic({
+    slug: "typescript-7-migration-guide",
+    title: "TypeScript 7 Migration Guide: Moving to the Go-Based Compiler",
+    category: "Backend",
+    services: ["nodejs-typescript-development", "react-nextjs-development"],
+  }),
+  "Node",
+);
+assert.equal(
+  classifyFullstackwebTopic({
+    slug: "go-based-build-tools",
+    title: "When to go with fast build tools",
+    category: "Backend",
+    services: [],
+  }),
+  null,
+);
 
 // Review Focus edge cases:
 // 1. "go" substring false-positive guard ("google", "going", "mongodb", "algorithms" -> null; "django" -> Python, not Go).

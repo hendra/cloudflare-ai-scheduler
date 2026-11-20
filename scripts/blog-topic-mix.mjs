@@ -57,33 +57,34 @@ export function classifyFullstackwebTopic(post) {
     Array.isArray(post.services) && post.services.length > 0 && post.services.length <= 4
       ? post.services
       : [];
-  const text = `${String(post.slug || "").replace(/-/g, " ")} ${post.title || ""} ${post.keyword || ""}`;
-
   if (cat === "ai engineering" || narrowServices.some((s) => AI_SERVICES.has(s))) {
     return "AI Engineering and Integration";
   }
-  if (
-    narrowServices.includes("ruby-on-rails-development") ||
-    /\b(rails|ruby on rails|ruby|activerecord|hotwire|turbo|sinatra|sidekiq)\b/i.test(text)
-  ) {
+  if (narrowServices.includes("ruby-on-rails-development")) return "Rails";
+  if (narrowServices.includes("python-fastapi-development")) return "Python";
+  if (narrowServices.includes("nodejs-typescript-development")) return "Node";
+
+  const titleKw = `${post.title || ""} ${post.keyword || ""}`;
+  const slug = String(post.slug || "");
+  const text = `${slug.replace(/-/g, " ")} ${titleKw}`;
+
+  if (/\b(rails|ruby on rails|ruby|activerecord|hotwire|turbo|sinatra|sidekiq)\b/i.test(text)) {
     return "Rails";
   }
-  if (
-    narrowServices.includes("python-fastapi-development") ||
-    /\b(python|fastapi|django|flask|pydantic|pytest|uv)\b/i.test(text)
-  ) {
+  if (/\b(python|fastapi|django|flask|pydantic|pytest|uv)\b/i.test(text)) {
     return "Python";
   }
   if (/\b(rust|cargo|tokio|rustc|axum|actix|crate)\b/i.test(text)) {
     return "Rust";
   }
-  if (/\b(golang|goroutine|gin|fiber|chi)\b/i.test(text) || /\bgo\b/i.test(text)) {
+  if (
+    /\b(golang|goroutine|gin|fiber|chi)\b/i.test(text) ||
+    /\bGo\b/.test(titleKw) ||
+    /\bgo-\d/i.test(slug)
+  ) {
     return "Go";
   }
-  if (
-    narrowServices.includes("nodejs-typescript-development") ||
-    /\b(node\.?js|nodejs|node|typescript|nestjs|fastify|hono|express)\b/i.test(text)
-  ) {
+  if (/\b(node\.?js|nodejs|node|typescript|nestjs|fastify|hono|express)\b/i.test(text)) {
     return "Node";
   }
   return null;
