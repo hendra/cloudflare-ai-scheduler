@@ -5,8 +5,8 @@
 
 export const LIMITS = { eyebrow: 28, title: 30, subtitle: 42, bullet: 34, label: 24, sub: 24, line: 32 };
 export const KINDS = ["card", "accent", "hub"];
-// fullstackweb draws its stages side by side and has room for 4; the vertical skins take 5.
-export const MAX_NODES = { railsdev: 5, inasoft: 5, fullstackweb: 4 };
+// fullstackweb and hendranicholas draw their stages side by side and have room for 4; the vertical skins take 5.
+export const MAX_NODES = { railsdev: 5, inasoft: 5, fullstackweb: 4, hendranicholas: 4 };
 const MAX_SIDE_EDGES = 2; // non-adjacent edges drawn as elbows beside the chain
 
 export const escapeXml = (s) =>
@@ -24,6 +24,7 @@ function clamp(s, max) {
 const SITE_NOTES = {
   railsdev: "Site: railsdev.io (senior Rails consultancy). Write all text in English.",
   fullstackweb: "Site: fullstackweb.dev. Write all text in English. This site's cover draws ONLY the diagram (no title text), so make the diagram nodes carry the story; still fill every field.",
+  hendranicholas: "Site: hendranicholas.com. Write all text in English. This site's cover draws ONLY the diagram (no title text), so make the diagram nodes carry the story; still fill every field.",
   inasoft: "Site: inasoft.id. Write all text in Indonesian (Bahasa Indonesia); code identifiers stay as-is.",
 };
 

@@ -20,6 +20,8 @@
     "grounding:selfcheck": "node scripts/grounding-selfcheck.mjs",
     "blog:grounding:selfcheck": "node scripts/blog-grounding-selfcheck.mjs",
     "published:selfcheck": "node scripts/published-selfcheck.mjs",
+    "topicmix:selfcheck": "node scripts/blog-topic-mix-selfcheck.mjs",
+    "hendranicholas:selfcheck": "node scripts/hendranicholas-blog-selfcheck.mjs",
     "index:selfcheck": "node scripts/site-index-selfcheck.mjs",
     "cover:selfcheck": "node scripts/cover/selfcheck.mjs",
     "setup": "bash scripts/setup.sh"

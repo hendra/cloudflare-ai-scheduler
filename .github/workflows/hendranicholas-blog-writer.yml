@@ -1,0 +1,93 @@
+name: hendranicholas-blog-writer
+
+# hendranicholas.com blog writer
+# Auto-merges its PR once astro build passes.
+# Generates one article per run, opens and auto-merges a PR on hendra/hendranicholas-site,
+# notifies Slack. Merge failure leaves the PR open. Triggered by the Cloudflare Worker
+# scheduler (D1 row) via workflow_dispatch; AI via scripts/ai-providers.mjs
+# (groq → openrouter → gemini → kilo → cloudflare; article bodies try LONGFORM_MODELS first).
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Generate and validate the article but do NOT push a branch or open a PR'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hendranicholas-blog-writer
+  cancel-in-progress: false
+
+jobs:
+  write:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PUBLIC_FORMSPREE_ID: ${{ vars.PUBLIC_FORMSPREE_ID }}
+      AI_PROVIDER: groq
+      AI_FALLBACKS: groq,openrouter,gemini,kilo,cloudflare
+      AI_MODEL: ${{ vars.AI_MODEL }}
+      OPENCODE_MODEL: ${{ vars.OPENCODE_MODEL }}
+      OPENCODE_BASE_URL: ${{ vars.OPENCODE_BASE_URL }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+      SITE_DIR: ../site
+    steps:
+      - name: Checkout scheduler repo
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          path: scheduler
+
+      - name: Checkout hendra/hendranicholas-site
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          repository: hendra/hendranicholas-site
+          token: ${{ secrets.HENDRANICHOLAS_PAT }}
+          fetch-depth: 0
+          path: site
+
+      - name: Set up Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+
+      - name: Install site dependencies
+        working-directory: site
+        run: npm ci --no-audit --no-fund --ignore-scripts
+
+      - name: Check headless Chrome (for cover rendering)
+        run: google-chrome --version
+
+      - name: Run blog writer
+        working-directory: scheduler
+        run: node scripts/hendranicholas-blog-writer.mjs
+        env:
+          SCHEDULER_URL: ${{ vars.SCHEDULER_URL }}
+          MANUAL_RUN_TOKEN: ${{ secrets.MANUAL_RUN_TOKEN }}
+          GSC_SERVICE_ACCOUNT_JSON: ${{ secrets.GSC_SERVICE_ACCOUNT_JSON }} # this step only; stripped from the site build env
+          HENDRANICHOLAS_PAT: ${{ secrets.HENDRANICHOLAS_PAT }}
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          KILO_API_KEY: ${{ secrets.KILO_API_KEY }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_HENDRANICHOLAS_CHANNEL_ID: ${{ secrets.SLACK_HENDRANICHOLAS_CHANNEL_ID }}
+
+      - name: Notify failure to Slack
+        if: (failure() || cancelled()) && env.DRY_RUN != 'true' && !hashFiles('scheduler/failure-posted')
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_HENDRANICHOLAS_CHANNEL_ID: ${{ secrets.SLACK_HENDRANICHOLAS_CHANNEL_ID }}
+        run: |
+          TEXT="⚠️ hendranicholas.com blog writer failed and no note was posted — see https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          curl -sS -X POST https://slack.com/api/chat.postMessage \
+            -H "Authorization: Bearer ${SLACK_BOT_TOKEN}" \
+            -H "Content-Type: application/json; charset=utf-8" \
+            -d "$(jq -n --arg ch "${SLACK_HENDRANICHOLAS_CHANNEL_ID}" --arg text "${TEXT}" '{channel:$ch, text:$text}')"

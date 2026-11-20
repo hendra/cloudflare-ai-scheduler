@@ -15,6 +15,8 @@ Cloudflare Workers + D1 + Queues + Workers AI scheduler. Single Worker, no dashb
 - Manual run: `POST /api/run` with `Authorization: Bearer $MANUAL_RUN_TOKEN` and body `{"schedulerId":"..."}`.
 - Ledger self-check: `npm run published:selfcheck`.
 - AEO/GEO self-check: `npm run aeo:selfcheck`.
+- Topic-mix self-check: `npm run topicmix:selfcheck`.
+- Hendranicholas blog self-check: `npm run hendranicholas:selfcheck`.
 - Grounding self-checks: `npm run grounding:selfcheck`, `npm run blog:grounding:selfcheck`.
 
 ## Architecture
