@@ -334,6 +334,43 @@ function parseFrontmatterField(fm, key) {
   return raw;
 }
 
+function stripYamlQuotes(raw) {
+  const t = String(raw || "").trim();
+  if (
+    t.length >= 2 &&
+    ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'")))
+  ) {
+    return t.slice(1, -1).trim();
+  }
+  return t;
+}
+
+function parseFrontmatterList(fm, key) {
+  const lines = fm.split(/\r?\n/);
+  const keyRe = new RegExp(`^${key}:\\s*(.*)$`);
+  const idx = lines.findIndex((line) => keyRe.test(line));
+  if (idx === -1) return [];
+
+  const rest = lines[idx].match(keyRe)[1].trim();
+  if (rest.startsWith("[") && rest.endsWith("]")) {
+    return rest
+      .slice(1, -1)
+      .split(",")
+      .map(stripYamlQuotes)
+      .filter(Boolean);
+  }
+  if (rest && !rest.startsWith("#")) return [];
+
+  const items = [];
+  for (let i = idx + 1; i < lines.length; i += 1) {
+    const m = lines[i].match(/^\s*-\s+(.+?)\s*$/);
+    if (!m) break;
+    const val = stripYamlQuotes(m[1]);
+    if (val) items.push(val);
+  }
+  return items;
+}
+
 export function loadBlogCorpus(siteDir) {
   const blogDir = join(siteDir, "src/content/blog");
   if (!existsSync(blogDir)) return [];
@@ -356,6 +393,7 @@ export function loadBlogCorpus(siteDir) {
         seoTitle: parseFrontmatterField(fm, "seoTitle"),
         category: parseFrontmatterField(fm, "category"),
         subcategory: parseFrontmatterField(fm, "subcategory"),
+        services: parseFrontmatterList(fm, "services"),
         draft: /^draft:\s*true(?:\s+#.*)?\r?$/im.test(fm),
       });
     }

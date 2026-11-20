@@ -432,25 +432,35 @@ assert.equal(noHit, null);
     mkdirSync(blogDir, { recursive: true });
     writeFileSync(
       join(blogDir, "first-post.md"),
-      `---\ntitle: "First \\"Quoted\\" Post"\nseoTitle: 'First SEO Title'\nkeyword: "Rails Caching"\n---\n\n## Intro\n\ntitle: "Not Frontmatter"\n`,
+      `---\ntitle: "First \\"Quoted\\" Post"\nseoTitle: 'First SEO Title'\nkeyword: "Rails Caching"\nservices: ["python-fastapi-development", 'backend-api-development']\n---\n\n## Intro\n\ntitle: "Not Frontmatter"\n`,
     );
     writeFileSync(
       join(blogDir, "second-post.md"),
       `---\ntitle: Unquoted Second Post\n---\n\nBody text.\n`,
     );
+    writeFileSync(
+      join(blogDir, "third-post.md"),
+      `---\ntitle: Third Post\nservices:\n  - ruby-on-rails-development\n  - backend-api-development\n---\n\nBody text.\n`,
+    );
     writeFileSync(join(blogDir, "notes.txt"), "ignore non-md");
 
     const corpus = loadBlogCorpus(tmpSite);
-    assert.equal(corpus.length, 2);
+    assert.equal(corpus.length, 3);
     const first = corpus.find((c) => c.slug === "first-post");
     assert.equal(first.title, 'First "Quoted" Post');
     assert.equal(first.seoTitle, "First SEO Title");
     assert.equal(first.keyword, "Rails Caching");
+    assert.deepEqual(first.services, ["python-fastapi-development", "backend-api-development"]);
 
     const second = corpus.find((c) => c.slug === "second-post");
     assert.equal(second.title, "Unquoted Second Post");
     assert.equal(second.keyword, "");
     assert.equal(second.seoTitle, "");
+    assert.deepEqual(second.services, []);
+
+    const third = corpus.find((c) => c.slug === "third-post");
+    assert.equal(third.title, "Third Post");
+    assert.deepEqual(third.services, ["ruby-on-rails-development", "backend-api-development"]);
 
     const combined = buildBlogHistory({
       corpus,
