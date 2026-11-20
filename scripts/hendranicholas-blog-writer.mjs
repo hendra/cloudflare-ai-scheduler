@@ -252,7 +252,7 @@ export function normalizeCategory(raw, { title = "", keyword = "", services = []
   if (/\b(next\.?js|nextjs|app router|server actions)\b/i.test(guess)) return "Next.js";
   if (/\b(fastapi|pydantic|uvicorn|python)\b/i.test(guess)) return "FastAPI";
   if (/\brust\b/i.test(guess)) return "Rust";
-  if (/\b(go|golang|goroutine)\b/i.test(guess)) return "Go";
+  if (/\b(?:golang|goroutine)\b|\bGo\b/.test(guess)) return "Go";
   if (/\b(rails|ruby on rails|activerecord|hotwire)\b/i.test(guess)) return "Ruby on Rails";
   if (/\b(ai|llm|rag|agent|tool calling|embedding|claude|gemini|openai)\b/i.test(guess)) return "AI Integration";
   return "Next.js";
@@ -371,7 +371,7 @@ async function main() {
   const topicPrompt = `You pick ONE blog topic for Hendra Nicholas' portfolio (hendranicholas.com). Readers are mid/senior developers and technical founders. Write advanced, practical engineering tutorials ONLY — no beginner intros.
 Category MUST be "${target}".${target === "AI Integration" ? ' ("AI Integration" articles MUST sit inside Next.js, FastAPI, Go, Rust, or Ruby on Rails.)' : ""}
 Signals are optional: pick a matching signal from Signals below, OR set "signalIndex": 0 for an evergreen tutorial topic (no signal source URL).
-Reply with ONLY this JSON (no prose): {"signalIndex":<0..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","description":"120-160 chars","slug":"kebab-case-slug","category":${JSON.stringify(target)},"services":[${JSON.stringify(SERVICE_VALUES)}]}
+Reply with ONLY this JSON (no prose): {"signalIndex":<0..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","description":"120-160 chars","slug":"kebab-case-slug","category":${JSON.stringify(target)},"services":${JSON.stringify(SERVICE_VALUES)}}
 Avoid all of these existing posts: ${avoidPosts.join(" | ")}
 Avoid these existing target keywords: ${existingKeywords.slice(0, 100).join(", ")}
 Signals:

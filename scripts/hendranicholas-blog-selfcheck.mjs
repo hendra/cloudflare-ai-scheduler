@@ -3,6 +3,7 @@ import {
   CATEGORY_VALUES,
   SERVICE_VALUES,
   FABRICATED_EXPERIENCE,
+  normalizeCategory,
   validateArticle,
   stubArticle,
 } from "./hendranicholas-blog-writer.mjs";
@@ -46,5 +47,11 @@ const opinion = {
 };
 const opRes = validateArticle(opinion, []);
 assert.equal(opRes.ok, true, `expected first-person recommendation valid, got: ${opRes.errs.join("; ")}`);
+
+assert.equal(normalizeCategory("Ruby on Rails", { title: "When to go beyond Rails" }), "Ruby on Rails");
+assert.equal(normalizeCategory("", { title: "When to go beyond Rails" }), "Ruby on Rails");
+assert.equal(normalizeCategory("", { title: "When to go beyond" }), "Next.js");
+assert.equal(normalizeCategory("", { title: "Concurrency in Go" }), "Go");
+assert.equal(normalizeCategory("go"), "Go");
 
 console.log("hendranicholas-blog-selfcheck: ok");
