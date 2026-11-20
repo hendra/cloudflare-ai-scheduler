@@ -30,6 +30,9 @@ jobs:
       - name: Published-ledger self-check
         run: npm run published:selfcheck
 
+      - name: Topic-mix self-check
+        run: npm run topicmix:selfcheck
+
       - name: IG Reel self-check
         run: python3 scripts/ig_reel/selfcheck.py
 
