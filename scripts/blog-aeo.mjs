@@ -4,6 +4,7 @@
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
+import { isCitationUrl } from "./grounding.mjs";
 
 export const RAILSDEV_SERVICE_LINKS = {
   "MVP Build": "/services/saas-mvp-development",
@@ -493,7 +494,8 @@ export function validateAeoGeo(article = {}, cfg = {}) {
     ...new Set(
       [...prose.matchAll(/\]\((https?:\/\/[^)\s]+)\)/g)]
         .map((m) => m[1])
-        .filter((u) => !ownDomainRe || !ownDomainRe.test(u)),
+        .filter((u) => !ownDomainRe || !ownDomainRe.test(u))
+        .filter((u) => isCitationUrl(u)),
     ),
   ];
   if (externalLinks.length < 1) {

@@ -170,6 +170,18 @@ function makeIdValidBody({
   assert.ok(resRails.wordCount >= 1500);
   assert.ok(resRails.links.includes("https://nodejs.org/api/stream.html"));
 
+  // An example hostname is not a primary source: the body must fail validation.
+  const exampleCitation = validateAeoGeo(
+    { ...railsArticle, body: makeEnValidBody({ external: "Start it with [the app](http://rails_app)." }) },
+    railsdevCfg,
+  );
+  assert.equal(exampleCitation.ok, false);
+  assert.ok(
+    exampleCitation.bodyErrs.some((e) => e.startsWith("missing external primary-source citation")),
+    exampleCitation.bodyErrs.join("; "),
+  );
+  assert.deepEqual(exampleCitation.links, []);
+
   const fswCfg = {
     lang: "en",
     domain: "fullstackweb.dev",
