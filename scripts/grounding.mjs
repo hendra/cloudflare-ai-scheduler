@@ -85,6 +85,17 @@ const isYear = (n) => /^\d{4}$/.test(n) && Number(n) >= 1990 && Number(n) <= 210
 
 export function riskyNumbers(text) {
   const src = String(text);
+  // A figure that is only ever a port ("listen on :3000", "expose port 80") is not a claim.
+  const portRe = (n) => new RegExp(`(?<![\\d.,])${n.replace(/\./g, "\\.")}(?!\\d|[.,]\\d)`, "g");
+  const portPrefix = /(?::|\bport\s*)$/i;
+  const onlyPort = (n) => {
+    let seen = false;
+    for (const m of src.matchAll(portRe(n))) {
+      seen = true;
+      if (!portPrefix.test(src.slice(0, m.index))) return false;
+    }
+    return seen;
+  };
   const risky = new Set();
   const flagged = new Set();
   // A figure with a money short form ($1.5M) is judged as its full value, not the "1.5" stub.
@@ -99,10 +110,11 @@ export function riskyNumbers(text) {
   for (const n of numbersIn(src, { keepRaw: false })) {
     if (isYear(n)) continue;
     if (moneyStubs.has(n)) continue;
+    if (onlyPort(n)) continue;
     if (/^\d+$/.test(n) && Number(n) < 10 && !flagged.has(n)) continue;
     risky.add(n);
   }
-  for (const n of flagged) risky.add(n);
+  for (const n of flagged) if (!onlyPort(n)) risky.add(n);
   return [...risky].sort();
 }
 
@@ -205,11 +217,10 @@ export function isCitationUrl(url) {
   try { parsed = new URL(String(url ?? "").trim()); } catch { return false; }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
   const host = parsed.hostname.toLowerCase();
-  // No dot: a container name or a shell variable, never a resolvable public host.
-  if (!host.includes(".") && host !== "::1" && !host.startsWith("[")) return false;
+  // No dot: a container name, a shell variable or a bracketed IPv6 literal, never a public host.
+  if (!host.includes(".")) return false;
   if (host.includes("$") || host.includes("_")) return false;
   if (host === "localhost" || host.endsWith(".localhost")) return false;
-  if (host === "::1" || host === "[::1]") return false;
   if (PRIVATE_V4.some((re) => re.test(host))) return false;
   if (EXAMPLE_HOST_SUFFIXES.some((s) => host.endsWith(s))) return false;
   return true;

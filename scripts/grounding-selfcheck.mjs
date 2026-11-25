@@ -232,3 +232,12 @@ for (const u of [
 ]) {
   assert.equal(isCitationUrl(u), true, `${u} must be a citation`);
 }
+
+// --- a number that is only ever a port is not a factual claim ---
+assert.deepEqual(riskyNumbers("It listens on :3000 in development."), []);
+assert.deepEqual(riskyNumbers("Expose port 80 and port 443."), []);
+assert.deepEqual(riskyNumbers("Proxy to localhost:3000."), []);
+assert.deepEqual(riskyNumbers("It handles 3000 requests per second."), ["3000"], "a count is not a port");
+assert.deepEqual(riskyNumbers("It is 80% faster."), ["80"], "a percentage is not a port");
+assert.deepEqual(riskyNumbers("Run on :3000, then load 3000 rows."), ["3000"], "one non-port use keeps it risky");
+assert.deepEqual(riskyNumbers("Open :3000 and :3000 again."), [], "every occurrence a port is exempt");
