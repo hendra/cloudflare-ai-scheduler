@@ -270,3 +270,17 @@ assert.equal(isCitationUrl("http://localhost./x"), false);
 assert.equal(isCitationUrl("http://app.local./x"), false);
 assert.equal(isCitationUrl("https://svc.cluster.local./x"), false);
 assert.equal(isCitationUrl("https://nodejs.org./api"), true, "a real host with a trailing dot is still a citation");
+
+// --- a git clone URL is a command example, never a readable page ---
+for (const u of [
+  "https://github.com/yourorg/ci-reliability.git",
+  "https://github.com/acme/tool.git",
+]) {
+  assert.equal(isCitationUrl(u), false, `${u} is a clone example`);
+}
+assert.equal(isCitationUrl("https://github.com/acme/tool"), true, "a real repo page is still a citation");
+
+// --- an IP address in prose is an address, not a factual claim ---
+assert.deepEqual(riskyNumbers("Rails listens on 127.0.0.1:3000 by default."), []);
+assert.deepEqual(riskyNumbers("Bind to 0.0.0.0 and reach 192.168.1.10."), []);
+assert.deepEqual(riskyNumbers("It serves 1,200 requests from 10.0.0.5."), ["1200"], "a count beside an IP is still a claim");

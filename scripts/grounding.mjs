@@ -84,7 +84,8 @@ const FLAGGED_RE = [
 const isYear = (n) => /^\d{4}$/.test(n) && Number(n) >= 1990 && Number(n) <= 2100;
 
 export function riskyNumbers(text) {
-  const src = String(text);
+  // An IPv4 literal is an address the reader types, not a fact to verify ("127.0.0.1:3000").
+  const src = String(text).replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, " ");
   // A figure that is only ever a port ("listen on :3000", "expose port 80") is not a claim.
   // Occurrences are collected by position and normalised the same way numbersIn does, so
   // "3,000" and "3.000" both count as occurrences of 3000 and cannot hide behind a port.
@@ -230,6 +231,8 @@ export function isCitationUrl(url) {
   let parsed;
   try { parsed = new URL(String(url ?? "").trim()); } catch { return false; }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  // A ".git" URL is a clone command in prose; it never returns a readable page.
+  if (/\.git$/i.test(parsed.pathname)) return false;
   const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
   // No dot: a container name, a shell variable or a bracketed IPv6 literal, never a public host.
   if (!host.includes(".")) return false;
