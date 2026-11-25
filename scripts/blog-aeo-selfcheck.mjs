@@ -12,6 +12,7 @@ const {
   buildAeoGeoBodyRules,
   validateAeoGeo,
   runSitePostCheck,
+  fixVoice,
 } = await import("./blog-aeo.mjs");
 const { loadBlogCorpus } = await import("./published.mjs");
 
@@ -623,6 +624,12 @@ function makeIdValidBody({
     assert.ok(concl.includes(`](${href})`), `${href} not in Conclusion`);
   }
 
+  // The Indonesian site keeps "tim kami": fixVoice must not touch it.
+  const idVoice = "Tim kami membangun aplikasi Rails.";
+  assert.equal(ensureRequiredLinks(idVoice, { ...linkCfg, lang: "id" }).includes("Tim kami membangun"), true);
+  // An English body gets rewritten on the way through.
+  assert.ok(ensureRequiredLinks("Our team builds Rails apps.", linkCfg).includes("I build Rails apps."));
+
   // Missing verification note → a fixed, number-free blockquote is added (site language).
   const noNote = makeEnValidBody({ verification: "" });
   assert.ok(validateAeoGeo({ ...meta, body: noNote }, enCfg).errs.includes("missing verification note blockquote"));
@@ -696,3 +703,29 @@ function makeIdValidBody({
 }
 
 console.log("blog-aeo self-check: ok");
+
+// --- fixVoice: solo sites say "I", and the verb after it agrees ---
+for (const [input, want] of [
+  ["Our team is hiring.", "I am hiring."],
+  ["Our team builds Rails apps.", "I build Rails apps."],
+  ["our team has shipped it.", "I have shipped it."],
+  ["Our team relies on Postgres.", "I rely on Postgres."],
+  ["Our team watches the queue.", "I watch the queue."],
+  ["Our team uses Puma.", "I use Puma."],
+  ["Our team focuses on latency.", "I focus on latency."],
+  ["Our team maintains three gems.", "I maintain three gems."],
+  ["Our team isn't a fan.", "I am not a fan."],
+  ["Our developers are careful.", "I am careful."],
+  ["Our engineers write tests.", "I write tests."],
+  ["That is our team's approach.", "That is my approach."],
+  ["Our team's been busy.", "I've been busy."],
+]) {
+  assert.equal(fixVoice(input), want, input);
+}
+// Fenced code is code, not prose.
+assert.equal(
+  fixVoice("Run it:\n```bash\n# our team runs this\n```\nOur team runs it."),
+  "Run it:\n```bash\n# our team runs this\n```\nI run it.",
+);
+// Nothing to fix stays byte-identical.
+assert.equal(fixVoice("I build Rails apps."), "I build Rails apps.");
