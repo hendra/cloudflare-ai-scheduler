@@ -1,14 +1,18 @@
 // Blog-side grounding gate: fetch every cited page, check the body against them, and give
 // the model one repair call that carries the source texts so it can substitute real figures.
 // A run that cannot be grounded returns ok:false; the caller skips the article (exit 0).
-import { checkGrounding, fetchSourceText as defaultFetch } from "./grounding.mjs";
+import { checkGrounding, fetchSourceText as defaultFetch, isCitationUrl } from "./grounding.mjs";
 
 const REPAIR_SOURCE_CAP = 6000;
+
+// Non-citations (container names, nginx variables, localhost) are examples, not sources:
+// fetching them always fails, and a failed fetch used to discard a grounded article.
+const citationsOnly = (links) => (links || []).filter((u) => isCitationUrl(u));
 
 export async function collectSources(links, fetcher = defaultFetch) {
   const sources = [];
   const deadSources = [];
-  for (const url of links || []) {
+  for (const url of citationsOnly(links)) {
     const res = await fetcher(url);
     if (res && res.ok) sources.push({ url, text: res.text });
     else deadSources.push(url);

@@ -55,3 +55,8 @@ assert.equal(normalizeCategory("", { title: "Concurrency in Go" }), "Go");
 assert.equal(normalizeCategory("go"), "Go");
 
 console.log("hendranicholas-blog-selfcheck: ok");
+
+// hendranicholas.com is one person: "our team" is a validation error.
+const teamVoice = validateArticle({ ...base, body: base.body + "\n\nOur team builds these systems.\n" }, []);
+assert.equal(teamVoice.ok, false);
+assert.ok(teamVoice.errs.some((e) => e.startsWith('banned phrase "Our team"')), teamVoice.errs.join("; "));

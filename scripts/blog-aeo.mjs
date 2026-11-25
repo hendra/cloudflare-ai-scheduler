@@ -4,6 +4,7 @@
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, resolve } from "node:path";
+import { isCitationUrl } from "./grounding.mjs";
 
 export const RAILSDEV_SERVICE_LINKS = {
   "MVP Build": "/services/saas-mvp-development",
@@ -53,6 +54,59 @@ function scanLines(lines, fn) {
   });
 }
 
+// First-person verb forms these writers actually use after "our team". A suffix rule cannot
+// separate "uses"→"use" from "focuses"→"focus", so the ambiguous ones are listed.
+const FIRST_PERSON_VERB = {
+  is: "am", are: "am", was: "was", were: "was", has: "have", had: "had", does: "do", did: "did",
+  "isn't": "am not", "aren't": "am not", "hasn't": "haven't", "haven't": "haven't",
+  "doesn't": "don't", "don't": "don't", "wasn't": "wasn't", "weren't": "wasn't",
+  uses: "use", focuses: "focus", relies: "rely", maintains: "maintain", builds: "build",
+  writes: "write", runs: "run", ships: "ship", works: "work", handles: "handle", keeps: "keep",
+  helps: "help", follows: "follow", prefers: "prefer", recommends: "recommend", deploys: "deploy",
+  needs: "need", wants: "want", knows: "know", gets: "get", makes: "make", takes: "take",
+  gives: "give", spends: "spend", manages: "manage", reviews: "review", tests: "test",
+};
+// shortcut: a noun after "our team" ("our team members", "our team's tooling") is not
+// reworded, and the bannedPatterns entry stays the net for those forms.
+function singularVerb(word) {
+  const low = word.toLowerCase();
+  if (FIRST_PERSON_VERB[low]) return FIRST_PERSON_VERB[low];
+  if (/ies$/.test(low)) return low.slice(0, -3) + "y";
+  if (/es$/.test(low) && /(?:ss|sh|ch|x|z|o)$/.test(low.slice(0, -2))) return low.slice(0, -2);
+  if (/s$/.test(low) && !/ss$/.test(low)) return low.slice(0, -1);
+  return word;
+}
+
+// "our team shipped a Rails upgrade" → "I shipped a …" would trip FABRICATED_EXPERIENCE in the
+// hendranicholas writer. Leave the original alone and let that ban fire on the model's words.
+const PAST_EXPERIENCE_VERB = /^(?:built|migrated|shipped|deployed|worked|scaled|rebuilt)$/i;
+// Rewriting inside inline code, emphasis, tables or a link would corrupt the markdown. Those
+// lines are left untouched so the bannedPatterns net catches them instead.
+const UNSAFE_LINE_RE = /[*`|]|\]\(|^\s{4,}|^\t/;
+const OBJECT_PREPOSITION_RE = /(?:\b(?:by|to|with|for|from|at|of|about|on|in)\s+)$/i;
+
+/** Rewrites "our team/developers/engineers" to first person and fixes the verb that follows. */
+export function fixVoice(body) {
+  const lines = String(body || "").replace(/\r\n/g, "\n").split("\n");
+  scanLines(lines, (line, i, inFence) => {
+    if (inFence || UNSAFE_LINE_RE.test(line)) return;
+    lines[i] = line.replace(/\bour (team|developers|engineers)\b(['’]s)?(?:\s+([A-Za-z']+))?/gi, (m, _noun, poss, next) => {
+      const before = line.slice(0, line.indexOf(m));
+      // Object of a preposition ("built by our team") is "me", never "I".
+      if (!poss && OBJECT_PREPOSITION_RE.test(before)) return "me";
+      const sp = next ? m.slice(m.length - next.length - 1, m.length - next.length) : "";
+      if (poss) {
+        if (/^going$|ing$/i.test(next || "")) return "I'm" + (next ? sp + next : "");
+        return ((next || "").toLowerCase().match(/^(?:been|got)$/) ? "I've" : "my") + (next ? sp + next : "");
+      }
+      if (!next) return "I";
+      if (PAST_EXPERIENCE_VERB.test(next)) return m;
+      return "I" + sp + singularVerb(next);
+    });
+  });
+  return lines.join("\n");
+}
+
 /**
  * Adds the links the site requires but the model forgot, deterministically: service page,
  * contact CTA (with its label), the fetched signal page as primary source, a `text` tag on
@@ -60,6 +114,7 @@ function scanLines(lines, fn) {
  */
 export function ensureRequiredLinks(body, cfg = {}) {
   const isId = cfg.lang === "id";
+  if (cfg.lang === "en") body = fixVoice(body);
   const lines = String(body || "").replace(/\r\n/g, "\n").split("\n");
   const selfRe = cfg.domain
     ? new RegExp(`\\]\\(https?://(?:www\\.)?${escapeRe(cfg.domain)}(?=[/)#?])/?`, "gi")
@@ -80,7 +135,7 @@ export function ensureRequiredLinks(body, cfg = {}) {
   const prose = proseIdx.map((i) => lines[i]).join("\n");
   const internal = [...prose.matchAll(/\]\((\/[^)\s]*)\)/g)].map((m) => m[1]);
   const ownRe = cfg.domain ? new RegExp(`^https?://(?:www\\.)?${escapeRe(cfg.domain)}`, "i") : null;
-  const external = [...prose.matchAll(/\]\((https?:\/\/[^)\s]+)\)/g)].filter((m) => !ownRe || !ownRe.test(m[1]));
+  const external = [...prose.matchAll(/\]\((https?:\/\/[^)\s]+)\)/g)].filter((m) => (!ownRe || !ownRe.test(m[1])) && isCitationUrl(m[1]));
   const servicePrefix = String(cfg.serviceHref || "").match(/^\/[^/]+\//)?.[0];
 
   const parts = [];
@@ -493,7 +548,8 @@ export function validateAeoGeo(article = {}, cfg = {}) {
     ...new Set(
       [...prose.matchAll(/\]\((https?:\/\/[^)\s]+)\)/g)]
         .map((m) => m[1])
-        .filter((u) => !ownDomainRe || !ownDomainRe.test(u)),
+        .filter((u) => !ownDomainRe || !ownDomainRe.test(u))
+        .filter((u) => isCitationUrl(u)),
     ),
   ];
   if (externalLinks.length < 1) {

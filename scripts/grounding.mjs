@@ -84,7 +84,33 @@ const FLAGGED_RE = [
 const isYear = (n) => /^\d{4}$/.test(n) && Number(n) >= 1990 && Number(n) <= 2100;
 
 export function riskyNumbers(text) {
-  const src = String(text);
+  // An IPv4 literal is an address the reader types, not a fact to verify ("127.0.0.1:3000").
+  const src = String(text).replace(/\b\d{1,3}(?:\.\d{1,3}){3}\b/g, " ");
+  // A figure that is only ever a port ("listen on :3000", "expose port 80") is not a claim.
+  // Occurrences are collected by position and normalised the same way numbersIn does, so
+  // "3,000" and "3.000" both count as occurrences of 3000 and cannot hide behind a port.
+  const occurrencesOf = (n) => {
+    const hits = [];
+    for (const m of src.matchAll(NUM_RE)) {
+      if (!numbersIn(m[0], { keepRaw: false }).has(n)) continue;
+      hits.push({ before: src.slice(0, m.index), after: src.slice(m.index + m[0].length) });
+    }
+    return hits;
+  };
+  // A port is "port 3000", a bare ":3000", or "host:3000" — never "word:3000" (a label) and
+  // never followed by a unit, so "Timeout:3000 ms" and "Ratio 1:3000" stay claims.
+  const isPort = ({ before }) => {
+    if (/(?:\bport\s*)$/i.test(before)) return true;
+    if (!/:$/.test(before)) return false;
+    const label = before.slice(0, -1).match(/([^\s:/]*)$/)?.[1] ?? "";
+    // "on :3000" (bare colon) or "host:3000" is a port; "Timeout:3000" and "1:3000" are claims.
+    if (label === "") return true;
+    return /[._]/.test(label) || label === "localhost";
+  };
+  const onlyPort = (n) => {
+    const hits = occurrencesOf(n);
+    return hits.length > 0 && hits.every(isPort);
+  };
   const risky = new Set();
   const flagged = new Set();
   // A figure with a money short form ($1.5M) is judged as its full value, not the "1.5" stub.
@@ -99,10 +125,11 @@ export function riskyNumbers(text) {
   for (const n of numbersIn(src, { keepRaw: false })) {
     if (isYear(n)) continue;
     if (moneyStubs.has(n)) continue;
+    if (onlyPort(n)) continue;
     if (/^\d+$/.test(n) && Number(n) < 10 && !flagged.has(n)) continue;
     risky.add(n);
   }
-  for (const n of flagged) risky.add(n);
+  for (const n of flagged) if (!onlyPort(n)) risky.add(n);
   return [...risky].sort();
 }
 
@@ -187,6 +214,34 @@ export function extractPageText(html, cap = 200_000) {
 const UA = "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124.0";
 const MAX_BYTES = 2_000_000;
 const MIN_SOURCE_CHARS = 200;
+
+// A URL is a citation only when its host is a public DNS name. A model writing a docs
+// example links "http://rails_app" or "https://$host$request_uri"; fetching those fails and
+// the gate used to throw away a fully-grounded article over it.
+const EXAMPLE_HOST_SUFFIXES = [".svc", ".local", ".internal", ".cluster.local"];
+const PRIVATE_V4 = [
+  /^10\./,
+  /^127\./,
+  /^192\.168\./,
+  /^172\.(?:1[6-9]|2\d|3[01])\./,
+  /^169\.254\./,
+  /^0\./,
+];
+export function isCitationUrl(url) {
+  let parsed;
+  try { parsed = new URL(String(url ?? "").trim()); } catch { return false; }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  // A ".git" URL is a clone command in prose; it never returns a readable page.
+  if (/\.git$/i.test(parsed.pathname)) return false;
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
+  // No dot: a container name, a shell variable or a bracketed IPv6 literal, never a public host.
+  if (!host.includes(".")) return false;
+  if (host.includes("$") || host.includes("_")) return false;
+  if (host === "localhost" || host.endsWith(".localhost")) return false;
+  if (PRIVATE_V4.some((re) => re.test(host))) return false;
+  if (EXAMPLE_HOST_SUFFIXES.some((s) => host.endsWith(s))) return false;
+  return true;
+}
 
 // A citation only grounds claims when it returns real page text: 2xx alone is not enough.
 export async function fetchSourceText(url, { timeout = 25_000 } = {}) {

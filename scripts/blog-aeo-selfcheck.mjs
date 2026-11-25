@@ -12,6 +12,7 @@ const {
   buildAeoGeoBodyRules,
   validateAeoGeo,
   runSitePostCheck,
+  fixVoice,
 } = await import("./blog-aeo.mjs");
 const { loadBlogCorpus } = await import("./published.mjs");
 
@@ -169,6 +170,18 @@ function makeIdValidBody({
   assert.equal(resRails.bodyErrs.length, 0);
   assert.ok(resRails.wordCount >= 1500);
   assert.ok(resRails.links.includes("https://nodejs.org/api/stream.html"));
+
+  // An example hostname is not a primary source: the body must fail validation.
+  const exampleCitation = validateAeoGeo(
+    { ...railsArticle, body: makeEnValidBody({ external: "Start it with [the app](http://rails_app)." }) },
+    railsdevCfg,
+  );
+  assert.equal(exampleCitation.ok, false);
+  assert.ok(
+    exampleCitation.bodyErrs.some((e) => e.startsWith("missing external primary-source citation")),
+    exampleCitation.bodyErrs.join("; "),
+  );
+  assert.deepEqual(exampleCitation.links, []);
 
   const fswCfg = {
     lang: "en",
@@ -611,6 +624,17 @@ function makeIdValidBody({
     assert.ok(concl.includes(`](${href})`), `${href} not in Conclusion`);
   }
 
+  // The Indonesian site keeps "tim kami": fixVoice must not touch it.
+  const idVoice = "Tim kami membangun aplikasi Rails.";
+  assert.equal(ensureRequiredLinks(idVoice, { ...linkCfg, lang: "id" }).includes("Tim kami membangun"), true);
+  // An English body gets rewritten on the way through.
+  assert.ok(ensureRequiredLinks("Our team builds Rails apps.", linkCfg).includes("I build Rails apps."));
+
+  // A body whose only external link is an example host still gets the primary-source line,
+  // so the deterministic repair works instead of burning a body-regeneration retry.
+  const exampleOnly = ensureRequiredLinks("Body text with [the app](http://rails_app).", linkCfg);
+  assert.ok(exampleOnly.includes("(https://github.com/acme/tool)"), "primary source must still be inserted");
+
   // Missing verification note → a fixed, number-free blockquote is added (site language).
   const noNote = makeEnValidBody({ verification: "" });
   assert.ok(validateAeoGeo({ ...meta, body: noNote }, enCfg).errs.includes("missing verification note blockquote"));
@@ -684,3 +708,54 @@ function makeIdValidBody({
 }
 
 console.log("blog-aeo self-check: ok");
+
+// --- fixVoice: solo sites say "I", and the verb after it agrees ---
+for (const [input, want] of [
+  ["Our team is hiring.", "I am hiring."],
+  ["Our team builds Rails apps.", "I build Rails apps."],
+  ["our team has shipped it.", "I have shipped it."],
+  ["Our team relies on Postgres.", "I rely on Postgres."],
+  ["Our team watches the queue.", "I watch the queue."],
+  ["Our team uses Puma.", "I use Puma."],
+  ["Our team focuses on latency.", "I focus on latency."],
+  ["Our team maintains three gems.", "I maintain three gems."],
+  ["Our team isn't a fan.", "I am not a fan."],
+  ["Our developers are careful.", "I am careful."],
+  ["Our engineers write tests.", "I write tests."],
+  ["That is our team's approach.", "That is my approach."],
+  ["Our team's been busy.", "I've been busy."],
+]) {
+  assert.equal(fixVoice(input), want, input);
+}
+// Fenced code is code, not prose.
+assert.equal(
+  fixVoice("Run it:\n```bash\n# our team runs this\n```\nOur team runs it."),
+  "Run it:\n```bash\n# our team runs this\n```\nI run it.",
+);
+// Nothing to fix stays byte-identical.
+assert.equal(fixVoice("I build Rails apps."), "I build Rails apps.");
+
+// --- fixVoice: object position, markdown structures, uncovered verbs, fabricated experience ---
+for (const [input, want] of [
+  ["Built by our team.", "Built by me."],
+  ["Reach out to our team.", "Reach out to me."],
+  ["Our team goes further.", "I go further."],
+  ["Our team echoes the request.", "I echo the request."],
+  ["Our team assesses the risk.", "I assess the risk."],
+  ["Our team's going to ship.", "I'm going to ship."],
+  ["Our team, a small studio, ships weekly.", "I, a small studio, ships weekly."],
+]) {
+  assert.equal(fixVoice(input), want, input);
+}
+// Markdown it cannot rewrite safely is left alone for the ban to catch, never mangled.
+for (const untouched of [
+  "You can reach our team [through the contact form](/contact/).",
+  "Our team **ships** weekly.",
+  "Our team *ships* weekly.",
+  "| Our team | ships |",
+  "Run `our team deploy` first.",
+  "    our team indented code",
+  "Our team shipped a Rails upgrade last spring.",
+]) {
+  assert.equal(fixVoice(untouched), untouched, untouched);
+}

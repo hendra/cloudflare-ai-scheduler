@@ -2,7 +2,7 @@
 // Run: node scripts/grounding-selfcheck.mjs
 import assert from "node:assert/strict";
 
-const { numbersIn, riskyNumbers, proseOnly, extractPageText, fetchSourceText, checkGrounding } =
+const { numbersIn, riskyNumbers, proseOnly, extractPageText, fetchSourceText, checkGrounding, isCitationUrl } =
   await import("./grounding.mjs");
 
 // --- numbersIn: Indonesian vs English scale words, thousands vs decimal ---
@@ -199,3 +199,88 @@ for (const body of [
 assert.deepEqual(checkGrounding({ body: "Node 20 is current. Built on Node 20.", sources: vSrc }).unverified, [], "two version mentions stay grounded");
 
 console.log("grounding-selfcheck: ok");
+
+// --- isCitationUrl: example hostnames are not citations, public hosts are ---
+for (const u of [
+  "http://rails_app",
+  "http://rails_backend",
+  "http://fastapi_backend",
+  "http://$upstream",
+  "http://$upstream/health",
+  "https://$host$request_uri",
+  "http://localhost/health",
+  "http://localhost:3000/profile",
+  "http://unix:/var/www/myapp/shared/tmp/sockets/puma.sock",
+  "http://127.0.0.1:8000",
+  "https://kubernetes.default.svc",
+  "https://svc.cluster.local/x",
+  "http://api.local/x",
+  "http://intranet.internal/x",
+  "ftp://example.com/x",
+  "not a url",
+  "",
+  null,
+]) {
+  assert.equal(isCitationUrl(u), false, `${u} must not be a citation`);
+}
+for (const u of [
+  "https://install.opensre.com",
+  "https://download.pytorch.org/whl/cu122",
+  "https://nodejs.org/api/stream.html",
+  "https://a.test/doc",
+  "http://example.com/x",
+]) {
+  assert.equal(isCitationUrl(u), true, `${u} must be a citation`);
+}
+
+// --- a number that is only ever a port is not a factual claim ---
+assert.deepEqual(riskyNumbers("It listens on :3000 in development."), []);
+assert.deepEqual(riskyNumbers("Expose port 80 and port 443."), []);
+assert.deepEqual(riskyNumbers("Proxy to localhost:3000."), []);
+assert.deepEqual(riskyNumbers("It handles 3000 requests per second."), ["3000"], "a count is not a port");
+assert.deepEqual(riskyNumbers("It is 80% faster."), ["80"], "a percentage is not a port");
+assert.deepEqual(riskyNumbers("Run on :3000, then load 3000 rows."), ["3000"], "one non-port use keeps it risky");
+assert.deepEqual(riskyNumbers("Open :3000 and :3000 again."), [], "every occurrence a port is exempt");
+
+// --- a port must not swallow a real figure that normalises to the same digits ---
+assert.deepEqual(riskyNumbers("It serves 3,000 users and listens on :3000."), ["3000"]);
+assert.deepEqual(riskyNumbers("It is 3,000% faster. It listens on :3000."), ["3000"]);
+assert.deepEqual(riskyNumbers("It costs $3,000 a month. It listens on :3000."), ["3000"]);
+assert.deepEqual(riskyNumbers("The migration took 3.000 hours. It listens on :3000."), ["3000"]);
+assert.deepEqual(riskyNumbers("It handled 3,000 requests per second. Bind port 3000."), ["3000"]);
+assert.equal(
+  checkGrounding({
+    body: "It handled 3,000 requests per second. It listens on port 3000.",
+    sources: [{ url: "https://a.test/doc", text: "Filler text here. ".repeat(20) }],
+  }).ok,
+  false,
+  "a real count must not be excused by a port of the same digits",
+);
+
+// --- a "label:value" without a unit is a port; with a unit it is a claim ---
+assert.deepEqual(riskyNumbers("Timeout:3000 ms."), ["3000"]);
+assert.deepEqual(riskyNumbers("Set timeout:3000 and move on."), ["3000"]);
+assert.deepEqual(riskyNumbers("Ratio 1:3000."), ["3000"]);
+assert.deepEqual(riskyNumbers("Step 3: 3000 requests."), ["3000"]);
+assert.deepEqual(riskyNumbers("It listens on :3000."), [], "a bare port in a list is still a port");
+assert.deepEqual(riskyNumbers("Proxy to rails_app:3000/health."), [], "a hostname port is still a port");
+
+// --- a trailing dot must not smuggle an example host past the predicate ---
+assert.equal(isCitationUrl("http://localhost./x"), false);
+assert.equal(isCitationUrl("http://app.local./x"), false);
+assert.equal(isCitationUrl("https://svc.cluster.local./x"), false);
+assert.equal(isCitationUrl("https://nodejs.org./api"), true, "a real host with a trailing dot is still a citation");
+
+// --- a git clone URL is a command example, never a readable page ---
+for (const u of [
+  "https://github.com/yourorg/ci-reliability.git",
+  "https://github.com/acme/tool.git",
+]) {
+  assert.equal(isCitationUrl(u), false, `${u} is a clone example`);
+}
+assert.equal(isCitationUrl("https://github.com/acme/tool"), true, "a real repo page is still a citation");
+
+// --- an IP address in prose is an address, not a factual claim ---
+assert.deepEqual(riskyNumbers("Rails listens on 127.0.0.1:3000 by default."), []);
+assert.deepEqual(riskyNumbers("Bind to 0.0.0.0 and reach 192.168.1.10."), []);
+assert.deepEqual(riskyNumbers("It serves 1,200 requests from 10.0.0.5."), ["1200"], "a count beside an IP is still a claim");
