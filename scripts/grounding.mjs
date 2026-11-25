@@ -86,15 +86,29 @@ const isYear = (n) => /^\d{4}$/.test(n) && Number(n) >= 1990 && Number(n) <= 210
 export function riskyNumbers(text) {
   const src = String(text);
   // A figure that is only ever a port ("listen on :3000", "expose port 80") is not a claim.
-  const portRe = (n) => new RegExp(`(?<![\\d.,])${n.replace(/\./g, "\\.")}(?!\\d|[.,]\\d)`, "g");
-  const portPrefix = /(?::|\bport\s*)$/i;
-  const onlyPort = (n) => {
-    let seen = false;
-    for (const m of src.matchAll(portRe(n))) {
-      seen = true;
-      if (!portPrefix.test(src.slice(0, m.index))) return false;
+  // Occurrences are collected by position and normalised the same way numbersIn does, so
+  // "3,000" and "3.000" both count as occurrences of 3000 and cannot hide behind a port.
+  const occurrencesOf = (n) => {
+    const hits = [];
+    for (const m of src.matchAll(NUM_RE)) {
+      if (!numbersIn(m[0], { keepRaw: false }).has(n)) continue;
+      hits.push({ before: src.slice(0, m.index), after: src.slice(m.index + m[0].length) });
     }
-    return seen;
+    return hits;
+  };
+  // A port is "port 3000", a bare ":3000", or "host:3000" — never "word:3000" (a label) and
+  // never followed by a unit, so "Timeout:3000 ms" and "Ratio 1:3000" stay claims.
+  const isPort = ({ before }) => {
+    if (/(?:\bport\s*)$/i.test(before)) return true;
+    if (!/:$/.test(before)) return false;
+    const label = before.slice(0, -1).match(/([^\s:/]*)$/)?.[1] ?? "";
+    // "on :3000" (bare colon) or "host:3000" is a port; "Timeout:3000" and "1:3000" are claims.
+    if (label === "") return true;
+    return /[._]/.test(label) || label === "localhost";
+  };
+  const onlyPort = (n) => {
+    const hits = occurrencesOf(n);
+    return hits.length > 0 && hits.every(isPort);
   };
   const risky = new Set();
   const flagged = new Set();
@@ -216,7 +230,7 @@ export function isCitationUrl(url) {
   let parsed;
   try { parsed = new URL(String(url ?? "").trim()); } catch { return false; }
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
-  const host = parsed.hostname.toLowerCase();
+  const host = parsed.hostname.toLowerCase().replace(/\.$/, "");
   // No dot: a container name, a shell variable or a bracketed IPv6 literal, never a public host.
   if (!host.includes(".")) return false;
   if (host.includes("$") || host.includes("_")) return false;

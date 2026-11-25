@@ -630,6 +630,11 @@ function makeIdValidBody({
   // An English body gets rewritten on the way through.
   assert.ok(ensureRequiredLinks("Our team builds Rails apps.", linkCfg).includes("I build Rails apps."));
 
+  // A body whose only external link is an example host still gets the primary-source line,
+  // so the deterministic repair works instead of burning a body-regeneration retry.
+  const exampleOnly = ensureRequiredLinks("Body text with [the app](http://rails_app).", linkCfg);
+  assert.ok(exampleOnly.includes("(https://github.com/acme/tool)"), "primary source must still be inserted");
+
   // Missing verification note → a fixed, number-free blockquote is added (site language).
   const noNote = makeEnValidBody({ verification: "" });
   assert.ok(validateAeoGeo({ ...meta, body: noNote }, enCfg).errs.includes("missing verification note blockquote"));
@@ -729,3 +734,28 @@ assert.equal(
 );
 // Nothing to fix stays byte-identical.
 assert.equal(fixVoice("I build Rails apps."), "I build Rails apps.");
+
+// --- fixVoice: object position, markdown structures, uncovered verbs, fabricated experience ---
+for (const [input, want] of [
+  ["Built by our team.", "Built by me."],
+  ["Reach out to our team.", "Reach out to me."],
+  ["Our team goes further.", "I go further."],
+  ["Our team echoes the request.", "I echo the request."],
+  ["Our team assesses the risk.", "I assess the risk."],
+  ["Our team's going to ship.", "I'm going to ship."],
+  ["Our team, a small studio, ships weekly.", "I, a small studio, ships weekly."],
+]) {
+  assert.equal(fixVoice(input), want, input);
+}
+// Markdown it cannot rewrite safely is left alone for the ban to catch, never mangled.
+for (const untouched of [
+  "You can reach our team [through the contact form](/contact/).",
+  "Our team **ships** weekly.",
+  "Our team *ships* weekly.",
+  "| Our team | ships |",
+  "Run `our team deploy` first.",
+  "    our team indented code",
+  "Our team shipped a Rails upgrade last spring.",
+]) {
+  assert.equal(fixVoice(untouched), untouched, untouched);
+}

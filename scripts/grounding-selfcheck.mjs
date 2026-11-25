@@ -241,3 +241,32 @@ assert.deepEqual(riskyNumbers("It handles 3000 requests per second."), ["3000"],
 assert.deepEqual(riskyNumbers("It is 80% faster."), ["80"], "a percentage is not a port");
 assert.deepEqual(riskyNumbers("Run on :3000, then load 3000 rows."), ["3000"], "one non-port use keeps it risky");
 assert.deepEqual(riskyNumbers("Open :3000 and :3000 again."), [], "every occurrence a port is exempt");
+
+// --- a port must not swallow a real figure that normalises to the same digits ---
+assert.deepEqual(riskyNumbers("It serves 3,000 users and listens on :3000."), ["3000"]);
+assert.deepEqual(riskyNumbers("It is 3,000% faster. It listens on :3000."), ["3000"]);
+assert.deepEqual(riskyNumbers("It costs $3,000 a month. It listens on :3000."), ["3000"]);
+assert.deepEqual(riskyNumbers("The migration took 3.000 hours. It listens on :3000."), ["3000"]);
+assert.deepEqual(riskyNumbers("It handled 3,000 requests per second. Bind port 3000."), ["3000"]);
+assert.equal(
+  checkGrounding({
+    body: "It handled 3,000 requests per second. It listens on port 3000.",
+    sources: [{ url: "https://a.test/doc", text: "Filler text here. ".repeat(20) }],
+  }).ok,
+  false,
+  "a real count must not be excused by a port of the same digits",
+);
+
+// --- a "label:value" without a unit is a port; with a unit it is a claim ---
+assert.deepEqual(riskyNumbers("Timeout:3000 ms."), ["3000"]);
+assert.deepEqual(riskyNumbers("Set timeout:3000 and move on."), ["3000"]);
+assert.deepEqual(riskyNumbers("Ratio 1:3000."), ["3000"]);
+assert.deepEqual(riskyNumbers("Step 3: 3000 requests."), ["3000"]);
+assert.deepEqual(riskyNumbers("It listens on :3000."), [], "a bare port in a list is still a port");
+assert.deepEqual(riskyNumbers("Proxy to rails_app:3000/health."), [], "a hostname port is still a port");
+
+// --- a trailing dot must not smuggle an example host past the predicate ---
+assert.equal(isCitationUrl("http://localhost./x"), false);
+assert.equal(isCitationUrl("http://app.local./x"), false);
+assert.equal(isCitationUrl("https://svc.cluster.local./x"), false);
+assert.equal(isCitationUrl("https://nodejs.org./api"), true, "a real host with a trailing dot is still a citation");
