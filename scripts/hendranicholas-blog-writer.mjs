@@ -303,6 +303,7 @@ export function validateArticle(a, corpusSlugs, extraCfg = {}) {
     bannedPatterns: [
       ...FABRICATED_EXPERIENCE,
       [/number one|no\. ?1\b|#1\b|world-class|best-in-class/i, "unverifiable superlative"],
+      [/\b(our team|our developers|our engineers)\b/i, 'hendranicholas.com is one developer: write "I"'],
       [/\$ ?\d[\d,.]*\s*(\/ ?h(ou)?r|per hour|an hour)/i, "rates are never published"],
     ],
     ...extraCfg,
