@@ -188,6 +188,33 @@ const UA = "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/124
 const MAX_BYTES = 2_000_000;
 const MIN_SOURCE_CHARS = 200;
 
+// A URL is a citation only when its host is a public DNS name. A model writing a docs
+// example links "http://rails_app" or "https://$host$request_uri"; fetching those fails and
+// the gate used to throw away a fully-grounded article over it.
+const EXAMPLE_HOST_SUFFIXES = [".svc", ".local", ".internal", ".cluster.local"];
+const PRIVATE_V4 = [
+  /^10\./,
+  /^127\./,
+  /^192\.168\./,
+  /^172\.(?:1[6-9]|2\d|3[01])\./,
+  /^169\.254\./,
+  /^0\./,
+];
+export function isCitationUrl(url) {
+  let parsed;
+  try { parsed = new URL(String(url ?? "").trim()); } catch { return false; }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return false;
+  const host = parsed.hostname.toLowerCase();
+  // No dot: a container name or a shell variable, never a resolvable public host.
+  if (!host.includes(".") && host !== "::1" && !host.startsWith("[")) return false;
+  if (host.includes("$") || host.includes("_")) return false;
+  if (host === "localhost" || host.endsWith(".localhost")) return false;
+  if (host === "::1" || host === "[::1]") return false;
+  if (PRIVATE_V4.some((re) => re.test(host))) return false;
+  if (EXAMPLE_HOST_SUFFIXES.some((s) => host.endsWith(s))) return false;
+  return true;
+}
+
 // A citation only grounds claims when it returns real page text: 2xx alone is not enough.
 export async function fetchSourceText(url, { timeout = 25_000 } = {}) {
   const target = String(url || "").trim();

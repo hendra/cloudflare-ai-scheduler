@@ -2,7 +2,7 @@
 // Run: node scripts/grounding-selfcheck.mjs
 import assert from "node:assert/strict";
 
-const { numbersIn, riskyNumbers, proseOnly, extractPageText, fetchSourceText, checkGrounding } =
+const { numbersIn, riskyNumbers, proseOnly, extractPageText, fetchSourceText, checkGrounding, isCitationUrl } =
   await import("./grounding.mjs");
 
 // --- numbersIn: Indonesian vs English scale words, thousands vs decimal ---
@@ -199,3 +199,36 @@ for (const body of [
 assert.deepEqual(checkGrounding({ body: "Node 20 is current. Built on Node 20.", sources: vSrc }).unverified, [], "two version mentions stay grounded");
 
 console.log("grounding-selfcheck: ok");
+
+// --- isCitationUrl: example hostnames are not citations, public hosts are ---
+for (const u of [
+  "http://rails_app",
+  "http://rails_backend",
+  "http://fastapi_backend",
+  "http://$upstream",
+  "http://$upstream/health",
+  "https://$host$request_uri",
+  "http://localhost/health",
+  "http://localhost:3000/profile",
+  "http://unix:/var/www/myapp/shared/tmp/sockets/puma.sock",
+  "http://127.0.0.1:8000",
+  "https://kubernetes.default.svc",
+  "https://svc.cluster.local/x",
+  "http://api.local/x",
+  "http://intranet.internal/x",
+  "ftp://example.com/x",
+  "not a url",
+  "",
+  null,
+]) {
+  assert.equal(isCitationUrl(u), false, `${u} must not be a citation`);
+}
+for (const u of [
+  "https://install.opensre.com",
+  "https://download.pytorch.org/whl/cu122",
+  "https://nodejs.org/api/stream.html",
+  "https://a.test/doc",
+  "http://example.com/x",
+]) {
+  assert.equal(isCitationUrl(u), true, `${u} must be a citation`);
+}
