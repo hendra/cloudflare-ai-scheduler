@@ -138,3 +138,27 @@ const barePunct = await groundArticle({
 assert.equal(barePunct.ok, true);
 
 console.log("blog-grounding-selfcheck: ok");
+
+// An example hostname is not a citation: never fetched, never reported dead.
+const seen = [];
+const exampleOnly = await groundArticle({
+  article: article("Limit is 512 MB."),
+  links: ["https://a.test/doc", "http://rails_app", "http://$upstream/health"],
+  signalUrl: null,
+  callModel: async () => "",
+  fetchSourceText: async (url) => { seen.push(url); return fakeFetch(url); },
+});
+assert.equal(exampleOnly.ok, true);
+assert.deepEqual(seen, ["https://a.test/doc"], "non-citations must not be fetched");
+
+// A repair that introduces an example hostname does not make it dead.
+const repairSeen = [];
+const repairExample = await groundArticle({
+  article: article("Limit is 999 MB."),
+  links: ["https://a.test/doc"],
+  signalUrl: null,
+  callModel: async () => "Limit is 512 MB. Start it with `docker compose up` and hit [the app](http://rails_app).",
+  fetchSourceText: async (url) => { repairSeen.push(url); return fakeFetch(url); },
+});
+assert.equal(repairExample.ok, true);
+assert.deepEqual(repairSeen, ["https://a.test/doc"], "the repair's example hostname must not be fetched");
