@@ -97,10 +97,23 @@ export function riskyNumbers(text) {
     }
     return hits;
   };
-  // A port is "port 3000", a bare ":3000", or "host:3000" — never "word:3000" (a label) and
-  // never followed by a unit, so "Timeout:3000 ms" and "Ratio 1:3000" stay claims.
-  const isPort = ({ before }) => {
-    if (/(?:\bport\s*)$/i.test(before)) return true;
+  // A port is "port 80", "ports 80 dan 443", "EXPOSE 80", "port: 80", or "host:3000" — never
+  // "word:3000" (a label) and never a number followed by a word, so "Timeout:3000 ms",
+  // "port 3000 and 5000 requests" and "Ratio 1:3000" stay claims.
+  const PORT_LEAD_RE = /(?:\bports?\s*:?\s*|\bEXPOSE\s+)$/i;
+  // What may follow a port in a list: nothing, punctuation, a conjunction, a protocol suffix.
+  const PORT_TAIL_RE = /^\s*(?:$|[,.;:)]|\b(?:dan|and|atau|or)\b)/i;
+  // A number that continues a list is one whose lead-in is a separator after another figure.
+  const PORT_LIST_RE = /(?:\d|[,;])\s*(?:(?:dan|and|atau|or)\s+)?$/i;
+  const isPort = ({ before, after }) => {
+    // "80/tcp" names a port outright, whatever precedes it.
+    if (/^\s*\/(?:tcp|udp|sctp)\b/i.test(after)) return true;
+    // "port 80", "ports 80", "port: 80", "EXPOSE 80": the author named it a port. Same trust
+    // today's single `port 80` already got, so no tail check here.
+    if (PORT_LEAD_RE.test(before)) return true;
+    // A number continuing a list is the ambiguous case, so there it must also end the list:
+    // "ports 80 dan 443" is a port, "port 3000 and 5000 requests" keeps 5000 a claim.
+    if (PORT_LIST_RE.test(before)) return PORT_TAIL_RE.test(after);
     if (!/:$/.test(before)) return false;
     const label = before.slice(0, -1).match(/([^\s:/]*)$/)?.[1] ?? "";
     // "on :3000" (bare colon) or "host:3000" is a port; "Timeout:3000" and "1:3000" are claims.

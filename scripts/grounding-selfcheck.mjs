@@ -284,6 +284,15 @@ assert.deepEqual(riskyNumbers("Step 3: 3000 requests."), ["3000"]);
 assert.deepEqual(riskyNumbers("It listens on :3000."), [], "a bare port in a list is still a port");
 assert.deepEqual(riskyNumbers("Proxy to rails_app:3000/health."), [], "a hostname port is still a port");
 
+// --- a port list is a list of ports, not a set of claims ---
+assert.deepEqual(riskyNumbers("Expose ports 80 dan 443."), [], "a port list is not a claim");
+assert.deepEqual(riskyNumbers("EXPOSE 80 in the Dockerfile."), [], "EXPOSE is a port lead-in");
+assert.deepEqual(riskyNumbers("Bind port: 80 on the host."), [], "port: is a port lead-in");
+assert.deepEqual(riskyNumbers("Map port 8080 dan 80."), [], "the tail of a port list is a port");
+assert.deepEqual(riskyNumbers("It handles port 3000 and 5000 requests."), ["5000"], "a word after it makes it a claim");
+assert.deepEqual(riskyNumbers("It handled 3,000 requests."), ["3000"], "a count with no port lead-in stays a claim");
+assert.deepEqual(riskyNumbers("40% faster on port 80."), ["40"], "a percentage beside a port stays a claim");
+
 // --- a trailing dot must not smuggle an example host past the predicate ---
 assert.equal(isCitationUrl("http://localhost./x"), false);
 assert.equal(isCitationUrl("http://app.local./x"), false);
