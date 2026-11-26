@@ -50,10 +50,29 @@ globalThis.fetch = stubFetch(longHtml);
 assert.equal((await fetchSourceText("https://a.test/doc")).ok, true);
 globalThis.fetch = stubFetch("<p>short</p>");
 assert.equal((await fetchSourceText("https://a.test/doc")).ok, false, "200 with no body text is dead");
-globalThis.fetch = stubFetch(JSON.stringify({ ok: 1 }), "application/json");
-assert.equal((await fetchSourceText("https://a.test/api")).ok, false, "non-HTML is refused");
 globalThis.fetch = stubFetch(longHtml, "text/html", 404);
 assert.equal((await fetchSourceText("https://a.test/missing")).ok, false, "non-2xx is dead");
+globalThis.fetch = realFetch;
+
+// --- fetchSourceText: text-bearing non-HTML is readable, and every failure says why ---
+globalThis.fetch = stubFetch("#!/bin/sh\n" + "# installer steps. ".repeat(20), "application/x-sh");
+const sh = await fetchSourceText("https://a.test/install.sh");
+assert.equal(sh.ok, true, "a shell installer is a readable source");
+assert.ok(sh.text.startsWith("#!/bin/sh"), "non-HTML is kept verbatim, not tag-stripped");
+globalThis.fetch = stubFetch("Plain text docs. ".repeat(20), "text/plain");
+assert.equal((await fetchSourceText("https://a.test/readme")).ok, true, "text/plain is readable");
+globalThis.fetch = stubFetch(JSON.stringify({ ok: 1 }), "application/json");
+assert.equal((await fetchSourceText("https://a.test/api")).reason, "empty", "a short JSON body is empty");
+globalThis.fetch = stubFetch(longHtml, "text/html", 404);
+assert.equal((await fetchSourceText("https://a.test/missing")).reason, "status");
+globalThis.fetch = stubFetch(longHtml, "text/html", 403);
+assert.equal((await fetchSourceText("https://a.test/private")).reason, "blocked");
+globalThis.fetch = stubFetch(longHtml, "text/html", 503);
+assert.equal((await fetchSourceText("https://a.test/down")).reason, "blocked", "a transient 5xx is not a bad citation");
+globalThis.fetch = stubFetch("%PDF-1.7 binary", "application/pdf");
+assert.equal((await fetchSourceText("https://a.test/paper.pdf")).reason, "type");
+globalThis.fetch = stubFetch(longHtml);
+assert.equal((await fetchSourceText("https://a.test/doc")).reason, null, "success has no reason");
 globalThis.fetch = realFetch;
 
 // --- checkGrounding: invented numbers and dead sources both fail ---
@@ -264,6 +283,28 @@ assert.deepEqual(riskyNumbers("Ratio 1:3000."), ["3000"]);
 assert.deepEqual(riskyNumbers("Step 3: 3000 requests."), ["3000"]);
 assert.deepEqual(riskyNumbers("It listens on :3000."), [], "a bare port in a list is still a port");
 assert.deepEqual(riskyNumbers("Proxy to rails_app:3000/health."), [], "a hostname port is still a port");
+
+// --- a port list is a list of ports, not a set of claims ---
+assert.deepEqual(riskyNumbers("Expose ports 80 dan 443."), [], "a port list is not a claim");
+assert.deepEqual(riskyNumbers("EXPOSE 80 in the Dockerfile."), [], "EXPOSE is a port lead-in");
+assert.deepEqual(riskyNumbers("Bind port: 80 on the host."), [], "port: is a port lead-in");
+assert.deepEqual(riskyNumbers("Map port 8080 dan 80."), [], "the tail of a port list is a port");
+assert.deepEqual(riskyNumbers("It handles port 3000 and 5000 requests."), ["5000"], "a word after it makes it a claim");
+assert.deepEqual(riskyNumbers("It handled 3,000 requests."), ["3000"], "a count with no port lead-in stays a claim");
+assert.deepEqual(riskyNumbers("40% faster on port 80."), ["40"], "a percentage beside a port stays a claim");
+
+// --- a list continuation must prove its head was a port, or every comma list leaks ---
+assert.deepEqual(riskyNumbers("The list: 10, 20, 30."), ["10", "20", "30"], "a plain comma list is still claims");
+assert.deepEqual(riskyNumbers("Batches of 128, 256, 512 MB."), ["128", "256", "512"], "a size list is still claims");
+assert.deepEqual(riskyNumbers("It took 2024; 512."), ["512"], "a semicolon does not make a claim a port");
+assert.equal(
+  checkGrounding({
+    body: "The endpoint returns 200, 404, and 500 codes.",
+    sources: [{ url: "https://a.test/x", text: "Returns 200 and 500. " + "Filler text here. ".repeat(20) }],
+  }).ok,
+  false,
+  "an invented code in a comma list must not pass the gate",
+);
 
 // --- a trailing dot must not smuggle an example host past the predicate ---
 assert.equal(isCitationUrl("http://localhost./x"), false);

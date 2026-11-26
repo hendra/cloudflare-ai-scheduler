@@ -97,10 +97,30 @@ export function riskyNumbers(text) {
     }
     return hits;
   };
-  // A port is "port 3000", a bare ":3000", or "host:3000" — never "word:3000" (a label) and
-  // never followed by a unit, so "Timeout:3000 ms" and "Ratio 1:3000" stay claims.
-  const isPort = ({ before }) => {
-    if (/(?:\bport\s*)$/i.test(before)) return true;
+  // A port is "port 80", "ports 80 dan 443", "EXPOSE 80", "port: 80", or "host:3000" — never
+  // "word:3000" (a label) and never a number followed by a word, so "Timeout:3000 ms",
+  // "port 3000 and 5000 requests" and "Ratio 1:3000" stay claims.
+  const PORT_LEAD_RE = /(?:\bports?\s*:?\s*|\bEXPOSE\s+)$/i;
+  // What may follow a port in a list: nothing, punctuation, a conjunction, a protocol suffix.
+  const PORT_TAIL_RE = /^\s*(?:$|[,.;:)]|\b(?:dan|and|atau|or)\b)/i;
+  // A figure that continues a list. Its head must itself be a port, so a plain comma list
+  // ("10, 20, 30") stays claims.
+  const PORT_LIST_RE = /(\d[\d.,]*)\s*(?:[,;]|\b(?:dan|and|atau|or)\b)\s*$/i;
+  const isPort = ({ before, after }, depth = 0) => {
+    // "80/tcp" names a port outright, whatever precedes it.
+    if (/^\s*\/(?:tcp|udp|sctp)\b/i.test(after)) return true;
+    // "port 80", "ports 80", "port: 80", "EXPOSE 80": the author named it a port. Same trust
+    // today's single `port 80` already got, so no tail check here.
+    if (PORT_LEAD_RE.test(before)) return true;
+    // A number continuing a list is the ambiguous case, so there it must also end the list:
+    // "ports 80 dan 443" is a port, "port 3000 and 5000 requests" keeps 5000 a claim.
+    if (depth < 8) {
+      const head = before.match(PORT_LIST_RE);
+      if (head) {
+        return PORT_TAIL_RE.test(after)
+          && isPort({ before: before.slice(0, head.index), after: before.slice(head.index + head[0].length) }, depth + 1);
+      }
+    }
     if (!/:$/.test(before)) return false;
     const label = before.slice(0, -1).match(/([^\s:/]*)$/)?.[1] ?? "";
     // "on :3000" (bare colon) or "host:3000" is a port; "Timeout:3000" and "1:3000" are claims.
@@ -244,21 +264,30 @@ export function isCitationUrl(url) {
 }
 
 // A citation only grounds claims when it returns real page text: 2xx alone is not enough.
+// Text-bearing non-HTML (a shell installer, a JSON/XML document) is readable too, but it is
+// kept verbatim: tag-stripping it would corrupt it. Both paths share the same text cap.
+const TEXT_TYPES = /^(?:text\/|application\/(?:x-sh|json|xml|javascript|xhtml\+xml|ld\+json))/i;
+// 401/403/429 and any 5xx mean "this client cannot read it now", not "the page is not there".
+const BLOCKED_STATUS = new Set([401, 403, 429]);
+
 export async function fetchSourceText(url, { timeout = 25_000 } = {}) {
   const target = String(url || "").trim();
-  const fail = (status = 0) => ({ ok: false, status, text: "" });
+  const fail = (reason, status = 0) => ({ ok: false, status, text: "", reason });
   let parsed;
-  try { parsed = new URL(target); } catch { return fail(); }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return fail();
+  try { parsed = new URL(target); } catch { return fail("network"); }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return fail("network");
   try {
     const res = await fetch(target, {
       headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml" },
       redirect: "follow",
       signal: AbortSignal.timeout(timeout),
     });
-    if (res.status < 200 || res.status >= 300) return fail(res.status);
+    if (res.status < 200 || res.status >= 300) {
+      return fail(BLOCKED_STATUS.has(res.status) || res.status >= 500 ? "blocked" : "status", res.status);
+    }
     const ctype = res.headers.get("content-type") || "";
-    if (!ctype.toLowerCase().includes("html")) return fail(res.status);
+    const isHtml = ctype.toLowerCase().includes("html");
+    if (!isHtml && !TEXT_TYPES.test(ctype.trim())) return fail("type", res.status);
     // Stop reading at the cap instead of downloading a 50 MB page to then slice it.
     const chunks = [];
     let total = 0;
@@ -273,13 +302,14 @@ export async function fetchSourceText(url, { timeout = 25_000 } = {}) {
       reader.cancel().catch(() => {});
     }
     const buf = Buffer.concat(chunks.map((c) => Buffer.from(c))).subarray(0, MAX_BYTES);
-    const text = extractPageText(buf.toString("utf-8"));
-    if (text.length < MIN_SOURCE_CHARS) return fail(res.status);
+    const raw = buf.toString("utf-8");
+    const text = isHtml ? extractPageText(raw) : raw.slice(0, 200_000);
+    if (text.length < MIN_SOURCE_CHARS) return fail("empty", res.status);
     // Full page text: the gate must see numbers that sit deep in a long doc. Only the prompt
     // block is capped (blog-grounding.mjs REPAIR_SOURCE_CAP, writers' signal block).
-    return { ok: true, status: res.status, text };
+    return { ok: true, status: res.status, text, reason: null };
   } catch {
-    return fail();
+    return fail("network");
   }
 }
 
