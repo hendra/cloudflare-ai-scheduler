@@ -431,7 +431,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   if (!AI_STUB) {
     const g = await groundArticle({ article, links: v.links, signalUrl: chosenSignal?.url || null, signalText: signalSource, callModel: (prompt) => callModel(prompt, { maxTokens: 8000, expectJSON: false }) });
     if (!g.ok) {
-      const note = `⚠️ _RailsDev article skipped — unverifiable facts:_ *${article.title}*\nNumbers not found in any cited source: ${g.unverified.join(", ") || "(none)"}\nUnreadable citations: ${g.deadSources.join(", ") || "(none)"}\nNothing was published.`;
+      const note = `⚠️ _RailsDev article skipped — unverifiable facts:_ *${article.title}*\nNumbers not found in any cited source: ${g.unverified.join(", ") || "(none)"}\nCitations that could not be fetched (404 / network): ${g.deadSources.join(", ") || "(none)"}\nUnreadable citations: ${g.unreadable.join(", ") || "(none)"}\nNothing was published.`;
       try { await postToSlack([note]); } catch (e) { console.error("skip note failed:", e.message); }
       console.log(`skipping: ${note}`);
       process.exit(0);
@@ -443,6 +443,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     }
     groundedLinks = v.links.length;
     console.log(`grounding ok — ${g.sources.length} source(s) read`);
+    if (g.unreadable.length) console.log(`::warning title=Unreadable citations::${g.unreadable.join(" | ")}`);
   }
 
   // 5) cover

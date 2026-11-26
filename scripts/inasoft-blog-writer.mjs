@@ -540,7 +540,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   if (!AI_STUB) {
     const g = await groundArticle({ article, links: v.links, signalUrl: chosenSignal?.url || null, signalText: signalSource, callModel: (prompt) => callModel(prompt, { maxTokens: 8000, expectJSON: false }) });
     if (!g.ok) {
-      const note = `⚠️ _Artikel blog INASOFT dilewati — fakta tidak terverifikasi:_ *${article.title}*\nAngka yang tidak ada di sumber mana pun: ${g.unverified.join(", ") || "(tidak ada)"}\nSitasi yang tidak bisa dibaca: ${g.deadSources.join(", ") || "(tidak ada)"}\nTidak ada yang dipublikasikan.`;
+      const note = `⚠️ _Artikel blog INASOFT dilewati — fakta tidak terverifikasi:_ *${article.title}*\nAngka yang tidak ada di sumber mana pun: ${g.unverified.join(", ") || "(tidak ada)"}\nSitasi yang gagal diambil (404 / jaringan): ${g.deadSources.join(", ") || "(tidak ada)"}\nSitasi yang tidak bisa dibaca: ${g.unreadable.join(", ") || "(tidak ada)"}\nTidak ada yang dipublikasikan.`;
       try { await postToSlack([note]); } catch (e) { console.error("skip note failed:", e.message); }
       console.log(`skipping: ${note}`);
       process.exit(0);
@@ -552,6 +552,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     }
     groundedLinks = v.links.length;
     console.log(`grounding ok — ${g.sources.length} source(s) read`);
+    if (g.unreadable.length) console.log(`::warning title=Unreadable citations::${g.unreadable.join(" | ")}`);
   }
 
   // 5) cover
