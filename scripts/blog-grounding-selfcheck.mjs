@@ -52,7 +52,7 @@ const newLink = await groundArticle({
   links: ["https://a.test/doc"],
   signalUrl: null,
   callModel: async () => "Limit is 512 MB. See [the spec](https://dead.test/x) for details.",
-  fetchSourceText: async (url) => (url.includes("dead.test") ? { ok: false, status: 404, url, text: "" } : fakeFetch(url)),
+  fetchSourceText: async (url) => (url.includes("dead.test") ? { ok: false, status: 404, url, text: "", reason: "status" } : fakeFetch(url)),
 });
 assert.equal(newLink.ok, false);
 assert.deepEqual(newLink.deadSources, ["https://dead.test/x"]);
@@ -98,7 +98,7 @@ const replacedLink = await groundArticle({
   links: ["https://a.test/doc", "https://dead.test/x"],
   signalUrl: null,
   callModel: async () => "Limit is 512 MB. See [docs](https://a.test/doc).",
-  fetchSourceText: async (url) => (url.includes("dead.test") ? { ok: false, status: 404, url, text: "" } : fakeFetch(url)),
+  fetchSourceText: async (url) => (url.includes("dead.test") ? { ok: false, status: 404, url, text: "", reason: "status" } : fakeFetch(url)),
 });
 assert.equal(replacedLink.ok, true, "a dead citation the repair dropped must not block");
 
@@ -108,7 +108,7 @@ const httpLink = await groundArticle({
   links: ["https://a.test/doc"],
   signalUrl: null,
   callModel: async () => "Limit is 512 MB. See [spec](http://dead.test/x).",
-  fetchSourceText: async (url) => (url.includes("dead.test") ? { ok: false, status: 404, url, text: "" } : fakeFetch(url)),
+  fetchSourceText: async (url) => (url.includes("dead.test") ? { ok: false, status: 404, url, text: "", reason: "status" } : fakeFetch(url)),
 });
 assert.equal(httpLink.ok, false);
 assert.deepEqual(httpLink.deadSources, ["http://dead.test/x"]);
@@ -119,7 +119,7 @@ const bareUrl = await groundArticle({
   links: ["https://a.test/doc"],
   signalUrl: null,
   callModel: async () => "Limit is 512 MB. Source: https://dead.test/x",
-  fetchSourceText: async (url) => (url.includes("dead.test") ? { ok: false, status: 404, url, text: "" } : fakeFetch(url)),
+  fetchSourceText: async (url) => (url.includes("dead.test") ? { ok: false, status: 404, url, text: "", reason: "status" } : fakeFetch(url)),
 });
 assert.equal(bareUrl.ok, false);
 assert.deepEqual(bareUrl.deadSources, ["https://dead.test/x"]);
@@ -162,3 +162,48 @@ const repairExample = await groundArticle({
 });
 assert.equal(repairExample.ok, true);
 assert.deepEqual(repairSeen, ["https://a.test/doc"], "the repair's example hostname must not be fetched");
+
+// A 403 is unreadable, not fatal: the grounded article ships and the link is reported.
+const blockedFetch = (url) => (url.includes("blocked.test")
+  ? { ok: false, status: 403, text: "", reason: "blocked" }
+  : fakeFetch(url));
+const blockedOnly = await groundArticle({
+  article: article("Limit is 512 MB."),
+  links: ["https://a.test/doc", "https://blocked.test/x"],
+  signalUrl: null, callModel: async () => "", fetchSourceText: blockedFetch,
+});
+assert.equal(blockedOnly.ok, true, "one unreadable citation must not discard a grounded article");
+assert.deepEqual(blockedOnly.unreadable, ["https://blocked.test/x"]);
+
+// ...but it still cannot ground the number it is cited for.
+const blockedGround = await groundArticle({
+  article: article("Limit is 999 MB."),
+  links: ["https://a.test/doc", "https://blocked.test/x"],
+  signalUrl: null, callModel: async () => "Limit is 999 MB.", fetchSourceText: blockedFetch,
+});
+assert.equal(blockedGround.ok, false);
+assert.deepEqual(blockedGround.unverified, ["999"]);
+
+// Nothing readable at all is not a pass, even with no risky number in the prose.
+const nothingRead = await groundArticle({
+  article: article("It shipped in 2026."),
+  links: ["https://blocked.test/x"],
+  signalUrl: null, callModel: async () => "",
+  fetchSourceText: async () => ({ ok: false, status: 403, text: "", reason: "blocked" }),
+});
+assert.equal(nothingRead.ok, false, "no readable source means nothing was verified");
+assert.deepEqual(nothingRead.unreadable, ["https://blocked.test/x"]);
+
+// A 404 the model invented still blocks.
+const invented = await groundArticle({
+  article: article("Limit is 512 MB."),
+  links: ["https://a.test/doc", "https://gone.test/x"],
+  signalUrl: null, callModel: async () => "",
+  fetchSourceText: async (url) => (url.includes("gone.test")
+    ? { ok: false, status: 404, text: "", reason: "status" }
+    : fakeFetch(url)),
+});
+assert.equal(invented.ok, false);
+assert.deepEqual(invented.deadSources, ["https://gone.test/x"]);
+
+console.log("blog-grounding-selfcheck: unreadable citations ok");
