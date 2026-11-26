@@ -207,3 +207,14 @@ assert.equal(invented.ok, false);
 assert.deepEqual(invented.deadSources, ["https://gone.test/x"]);
 
 console.log("blog-grounding-selfcheck: unreadable citations ok");
+
+// A signal page that cannot be read is why nothing was verified: report it, never a mute note.
+const signalMute = await groundArticle({
+  article: article("It shipped in 2026."),
+  links: [],
+  signalUrl: "https://signal.test/blocked",
+  callModel: async () => "",
+  fetchSourceText: async () => ({ ok: false, status: 403, text: "", reason: "blocked" }),
+});
+assert.equal(signalMute.ok, false, "an unreadable signal page means nothing was verified");
+assert.deepEqual(signalMute.unreadable, ["https://signal.test/blocked"], "the skip note must name the source");

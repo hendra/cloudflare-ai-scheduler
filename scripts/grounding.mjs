@@ -103,9 +103,10 @@ export function riskyNumbers(text) {
   const PORT_LEAD_RE = /(?:\bports?\s*:?\s*|\bEXPOSE\s+)$/i;
   // What may follow a port in a list: nothing, punctuation, a conjunction, a protocol suffix.
   const PORT_TAIL_RE = /^\s*(?:$|[,.;:)]|\b(?:dan|and|atau|or)\b)/i;
-  // A number that continues a list is one whose lead-in is a separator after another figure.
-  const PORT_LIST_RE = /(?:\d|[,;])\s*(?:(?:dan|and|atau|or)\s+)?$/i;
-  const isPort = ({ before, after }) => {
+  // A figure that continues a list. Its head must itself be a port, so a plain comma list
+  // ("10, 20, 30") stays claims.
+  const PORT_LIST_RE = /(\d[\d.,]*)\s*(?:[,;]|\b(?:dan|and|atau|or)\b)\s*$/i;
+  const isPort = ({ before, after }, depth = 0) => {
     // "80/tcp" names a port outright, whatever precedes it.
     if (/^\s*\/(?:tcp|udp|sctp)\b/i.test(after)) return true;
     // "port 80", "ports 80", "port: 80", "EXPOSE 80": the author named it a port. Same trust
@@ -113,7 +114,13 @@ export function riskyNumbers(text) {
     if (PORT_LEAD_RE.test(before)) return true;
     // A number continuing a list is the ambiguous case, so there it must also end the list:
     // "ports 80 dan 443" is a port, "port 3000 and 5000 requests" keeps 5000 a claim.
-    if (PORT_LIST_RE.test(before)) return PORT_TAIL_RE.test(after);
+    if (depth < 8) {
+      const head = before.match(PORT_LIST_RE);
+      if (head) {
+        return PORT_TAIL_RE.test(after)
+          && isPort({ before: before.slice(0, head.index), after: before.slice(head.index + head[0].length) }, depth + 1);
+      }
+    }
     if (!/:$/.test(before)) return false;
     const label = before.slice(0, -1).match(/([^\s:/]*)$/)?.[1] ?? "";
     // "on :3000" (bare colon) or "host:3000" is a port; "Timeout:3000" and "1:3000" are claims.

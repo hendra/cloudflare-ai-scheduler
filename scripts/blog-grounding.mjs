@@ -62,6 +62,9 @@ export async function groundArticle({
   } else if (signalUrl) {
     const res = await fetchSourceText(signalUrl);
     if (res && res.ok) sources.push({ url: signalUrl, text: res.text });
+    // A signal page this run could not read is why nothing was verified: say so, or the
+    // skip note reports an empty list and the failure looks like a bug.
+    else unreadable.push(signalUrl);
   }
 
   // "Nothing was verified" is a failure too: an article whose only citation could not be read

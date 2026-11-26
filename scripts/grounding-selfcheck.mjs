@@ -293,6 +293,19 @@ assert.deepEqual(riskyNumbers("It handles port 3000 and 5000 requests."), ["5000
 assert.deepEqual(riskyNumbers("It handled 3,000 requests."), ["3000"], "a count with no port lead-in stays a claim");
 assert.deepEqual(riskyNumbers("40% faster on port 80."), ["40"], "a percentage beside a port stays a claim");
 
+// --- a list continuation must prove its head was a port, or every comma list leaks ---
+assert.deepEqual(riskyNumbers("The list: 10, 20, 30."), ["10", "20", "30"], "a plain comma list is still claims");
+assert.deepEqual(riskyNumbers("Batches of 128, 256, 512 MB."), ["128", "256", "512"], "a size list is still claims");
+assert.deepEqual(riskyNumbers("It took 2024; 512."), ["512"], "a semicolon does not make a claim a port");
+assert.equal(
+  checkGrounding({
+    body: "The endpoint returns 200, 404, and 500 codes.",
+    sources: [{ url: "https://a.test/x", text: "Returns 200 and 500. " + "Filler text here. ".repeat(20) }],
+  }).ok,
+  false,
+  "an invented code in a comma list must not pass the gate",
+);
+
 // --- a trailing dot must not smuggle an example host past the predicate ---
 assert.equal(isCitationUrl("http://localhost./x"), false);
 assert.equal(isCitationUrl("http://app.local./x"), false);
