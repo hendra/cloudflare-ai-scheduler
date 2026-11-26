@@ -293,6 +293,28 @@ assert.deepEqual(riskyNumbers("It handles port 3000 and 5000 requests."), ["5000
 assert.deepEqual(riskyNumbers("It handled 3,000 requests."), ["3000"], "a count with no port lead-in stays a claim");
 assert.deepEqual(riskyNumbers("40% faster on port 80."), ["40"], "a percentage beside a port stays a claim");
 
+// --- a list whose only "port" signal is a trailing noun stays claims (rejected exemption) ---
+// "80, 443, 8080 ports" reads as a port list, but the same shape covers "10, 20, 30 ports"
+// (port scans) and "500, 1000, 2000 port connections". No unit list can tell them apart, so
+// the exemption was rejected: over-flagging costs a repair round, under-flagging ships a
+// number nobody checked. These assertions stop a future "fix" from reopening it quietly.
+assert.deepEqual(riskyNumbers("Runs on 80, 443, 8080 ports."), ["443", "80", "8080"], "a trailing 'ports' is not proof");
+assert.deepEqual(riskyNumbers("It handled 10, 20, 30 ports."), ["10", "20", "30"], "a port-scan count stays claims");
+assert.deepEqual(riskyNumbers("It listens on 8080, 443, 80."), ["443", "80", "8080"], "an unnamed list stays claims");
+
+// --- a "not found" page grounds nothing, so the numeric gate already covers a soft 404 ---
+// A text heuristic for soft 404s was tried and rejected: MDN's own "404 Not Found is an HTTP
+// status code" page matched it, and marking a real source dead skips a whole article. The
+// number gate below is what actually stops an invented figure, and it holds.
+assert.deepEqual(
+  checkGrounding({
+    body: "The limit is 999 MB.",
+    sources: [{ url: "https://a.test/gone", text: "Page not found. Try the docs index. " + "Filler text here. ".repeat(20) }],
+  }).unverified,
+  ["999"],
+  "a soft-404 page must not ground an invented number",
+);
+
 // --- a list continuation must prove its head was a port, or every comma list leaks ---
 assert.deepEqual(riskyNumbers("The list: 10, 20, 30."), ["10", "20", "30"], "a plain comma list is still claims");
 assert.deepEqual(riskyNumbers("Batches of 128, 256, 512 MB."), ["128", "256", "512"], "a size list is still claims");
