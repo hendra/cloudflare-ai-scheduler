@@ -244,21 +244,30 @@ export function isCitationUrl(url) {
 }
 
 // A citation only grounds claims when it returns real page text: 2xx alone is not enough.
+// Text-bearing non-HTML (a shell installer, a JSON/XML document) is readable too, but it is
+// kept verbatim: tag-stripping it would corrupt it. Both paths share the same text cap.
+const TEXT_TYPES = /^(?:text\/|application\/(?:x-sh|json|xml|javascript|xhtml\+xml|ld\+json))/i;
+// 401/403/429 and any 5xx mean "this client cannot read it now", not "the page is not there".
+const BLOCKED_STATUS = new Set([401, 403, 429]);
+
 export async function fetchSourceText(url, { timeout = 25_000 } = {}) {
   const target = String(url || "").trim();
-  const fail = (status = 0) => ({ ok: false, status, text: "" });
+  const fail = (reason, status = 0) => ({ ok: false, status, text: "", reason });
   let parsed;
-  try { parsed = new URL(target); } catch { return fail(); }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return fail();
+  try { parsed = new URL(target); } catch { return fail("network"); }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return fail("network");
   try {
     const res = await fetch(target, {
       headers: { "User-Agent": UA, Accept: "text/html,application/xhtml+xml" },
       redirect: "follow",
       signal: AbortSignal.timeout(timeout),
     });
-    if (res.status < 200 || res.status >= 300) return fail(res.status);
+    if (res.status < 200 || res.status >= 300) {
+      return fail(BLOCKED_STATUS.has(res.status) || res.status >= 500 ? "blocked" : "status", res.status);
+    }
     const ctype = res.headers.get("content-type") || "";
-    if (!ctype.toLowerCase().includes("html")) return fail(res.status);
+    const isHtml = ctype.toLowerCase().includes("html");
+    if (!isHtml && !TEXT_TYPES.test(ctype.trim())) return fail("type", res.status);
     // Stop reading at the cap instead of downloading a 50 MB page to then slice it.
     const chunks = [];
     let total = 0;
@@ -273,13 +282,14 @@ export async function fetchSourceText(url, { timeout = 25_000 } = {}) {
       reader.cancel().catch(() => {});
     }
     const buf = Buffer.concat(chunks.map((c) => Buffer.from(c))).subarray(0, MAX_BYTES);
-    const text = extractPageText(buf.toString("utf-8"));
-    if (text.length < MIN_SOURCE_CHARS) return fail(res.status);
+    const raw = buf.toString("utf-8");
+    const text = isHtml ? extractPageText(raw) : raw.slice(0, 200_000);
+    if (text.length < MIN_SOURCE_CHARS) return fail("empty", res.status);
     // Full page text: the gate must see numbers that sit deep in a long doc. Only the prompt
     // block is capped (blog-grounding.mjs REPAIR_SOURCE_CAP, writers' signal block).
-    return { ok: true, status: res.status, text };
+    return { ok: true, status: res.status, text, reason: null };
   } catch {
-    return fail();
+    return fail("network");
   }
 }
 

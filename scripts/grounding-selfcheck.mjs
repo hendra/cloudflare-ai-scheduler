@@ -50,10 +50,29 @@ globalThis.fetch = stubFetch(longHtml);
 assert.equal((await fetchSourceText("https://a.test/doc")).ok, true);
 globalThis.fetch = stubFetch("<p>short</p>");
 assert.equal((await fetchSourceText("https://a.test/doc")).ok, false, "200 with no body text is dead");
-globalThis.fetch = stubFetch(JSON.stringify({ ok: 1 }), "application/json");
-assert.equal((await fetchSourceText("https://a.test/api")).ok, false, "non-HTML is refused");
 globalThis.fetch = stubFetch(longHtml, "text/html", 404);
 assert.equal((await fetchSourceText("https://a.test/missing")).ok, false, "non-2xx is dead");
+globalThis.fetch = realFetch;
+
+// --- fetchSourceText: text-bearing non-HTML is readable, and every failure says why ---
+globalThis.fetch = stubFetch("#!/bin/sh\n" + "# installer steps. ".repeat(20), "application/x-sh");
+const sh = await fetchSourceText("https://a.test/install.sh");
+assert.equal(sh.ok, true, "a shell installer is a readable source");
+assert.ok(sh.text.startsWith("#!/bin/sh"), "non-HTML is kept verbatim, not tag-stripped");
+globalThis.fetch = stubFetch("Plain text docs. ".repeat(20), "text/plain");
+assert.equal((await fetchSourceText("https://a.test/readme")).ok, true, "text/plain is readable");
+globalThis.fetch = stubFetch(JSON.stringify({ ok: 1 }), "application/json");
+assert.equal((await fetchSourceText("https://a.test/api")).reason, "empty", "a short JSON body is empty");
+globalThis.fetch = stubFetch(longHtml, "text/html", 404);
+assert.equal((await fetchSourceText("https://a.test/missing")).reason, "status");
+globalThis.fetch = stubFetch(longHtml, "text/html", 403);
+assert.equal((await fetchSourceText("https://a.test/private")).reason, "blocked");
+globalThis.fetch = stubFetch(longHtml, "text/html", 503);
+assert.equal((await fetchSourceText("https://a.test/down")).reason, "blocked", "a transient 5xx is not a bad citation");
+globalThis.fetch = stubFetch("%PDF-1.7 binary", "application/pdf");
+assert.equal((await fetchSourceText("https://a.test/paper.pdf")).reason, "type");
+globalThis.fetch = stubFetch(longHtml);
+assert.equal((await fetchSourceText("https://a.test/doc")).reason, null, "success has no reason");
 globalThis.fetch = realFetch;
 
 // --- checkGrounding: invented numbers and dead sources both fail ---
