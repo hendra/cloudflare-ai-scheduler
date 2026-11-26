@@ -564,6 +564,19 @@ function makeIdValidBody({
   assert.match(promptBlock, /## Frequently asked questions/);
   assert.match(promptBlock, /Verification note/);
   assert.match(promptBlock, /Keep examples practical/);
+  // Owner rule: the Indonesian style block reaches lang:"id" prompts only.
+  assert.doesNotMatch(promptBlock, /Bahasa & gaya penulisan/);
+  const idPromptBlock = buildAeoGeoBodyRules({
+    siteName: "INASOFT",
+    lang: "id",
+    domain: "inasoft.id",
+    keyword: "ai agent",
+    serviceHref: "/layanan/jasa-pembuatan-ai-agent",
+    contactHref: "/#contact",
+  });
+  assert.match(idPromptBlock, /Bahasa & gaya penulisan/);
+  assert.match(idPromptBlock, /Hindari gaya penulisan yang terasa seperti terjemahan mesin/);
+  assert.match(idPromptBlock, /## Pertanyaan yang sering diajukan/);
 
   const tmpSite = mkdtempSync(join(tmpdir(), "postcheck-test-"));
   try {

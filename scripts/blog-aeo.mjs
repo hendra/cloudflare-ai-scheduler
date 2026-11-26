@@ -229,6 +229,19 @@ export function servicePathFor(site, article) {
   return "";
 }
 
+// Owner rule (2026-11-26) for Indonesian articles only: Indonesian prose, English technical terms.
+const ID_STYLE_RULES = [
+  "Bahasa & gaya penulisan (wajib):",
+  "- Tulis seluruh artikel dalam Bahasa Indonesia profesional yang natural, jelas, dan mudah dipahami developer.",
+  "- Prinsip: Bahasa Indonesia untuk menjelaskan konsep, Bahasa Inggris untuk nama teknologi dan terminologi teknis.",
+  "- Jangan terjemahkan nama framework, library, atau produk (LangGraph, LlamaIndex, FastAPI, Pydantic AI, Next.js, PostgreSQL, Redis, Langfuse, Ragas, Hugging Face) maupun technical keyword yang sudah umum dipakai developer.",
+  "- Contoh technical keyword yang tetap bahasa Inggris: AI Engineering Stack, Large Language Model (LLM), Retrieval-Augmented Generation (RAG), AI Agent, Agentic Workflow, Vector Database, Vector Search, Embedding Generation, Model Inference, Prompt Engineering, Context Window, Semantic Search, Hybrid Search, Reranking, Fine-tuning, Observability, Deployment, Scalability, Background Processing, Human-in-the-Loop, Token Usage, Model Evaluation, Inference Pipeline.",
+  "- Pakai istilah teknis bahasa Inggris secara natural di paragraf, heading, tabel, dan code example; jelaskan artinya dalam Bahasa Indonesia saat pertama kali diperkenalkan.",
+  "- Pakai technical keyword di `##`/`###` heading bila relevan untuk SEO, tanpa keyword stuffing.",
+  "- Hindari gaya penulisan yang terasa seperti terjemahan mesin. Tulis seperti engineering blog profesional: informatif, praktis, analitis, berbasis pengalaman teknis.",
+  "- Sertakan contoh implementasi nyata supaya pembaca paham bagaimana teknologi itu dipakai di production environment.",
+];
+
 export function buildAeoGeoBodyRules(cfg = {}) {
   const isId = cfg.lang === "id";
   const conclusionHeading = cfg.conclusionHeading || (isId ? "Kesimpulan" : "Conclusion");
@@ -250,6 +263,7 @@ export function buildAeoGeoBodyRules(cfg = {}) {
   const lines = [
     `Site: ${cfg.siteName || cfg.domain || "Blog"} (${cfg.domain || ""})`,
     `Language: ${isId ? "Bahasa Indonesia (KBBI, natural and clear)" : "English"}`,
+    ...(isId ? ID_STYLE_RULES : []),
     cfg.voiceRule ? `Voice: ${cfg.voiceRule}` : "",
     "Requirements:",
     "- 1800-2400 words (hard minimum 1500 words). Use `##` and `###` headings only — NEVER emit a `# ` H1 line, and NEVER skip heading levels (no `##` straight to `####`).",
