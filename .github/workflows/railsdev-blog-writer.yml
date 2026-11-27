@@ -27,6 +27,7 @@ jobs:
   write:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment: blog-railsdev
     env:
       PUBLIC_FORMSPREE_FORM_ID: ${{ vars.PUBLIC_FORMSPREE_FORM_ID }}
       AI_PROVIDER: groq

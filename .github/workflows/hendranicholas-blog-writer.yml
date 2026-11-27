@@ -27,6 +27,7 @@ jobs:
   write:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment: blog-hendranicholas
     env:
       PUBLIC_FORMSPREE_ID: ${{ vars.PUBLIC_FORMSPREE_ID }}
       AI_PROVIDER: groq
