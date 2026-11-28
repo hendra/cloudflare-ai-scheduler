@@ -19,6 +19,7 @@ import {
   servicePathFor,
   runSitePostCheck,
   isMetaErr,
+  repairMetadata,
 } from "./blog-aeo.mjs";
 import {
   fetchPublished,
@@ -152,7 +153,7 @@ const loadCorpus = loadBlogCorpus;
 const STUB_SPECS = {
   Node: {
     title: "Migrating a Large Editor to TypeScript: A Practical Guide",
-    description: "Practical guide to migrating large JavaScript codebases to TypeScript without a big-bang rewrite: tsconfig strategy, incremental adoption, and CI gating that keeps the build green.",
+    description: "Practical guide to TypeScript migration in large JavaScript codebases: tsconfig strategy, incremental adoption, and CI gating that keeps builds green.",
     keyword: "typescript migration",
     slug: "typescript-migration-large-codebase-guide",
     services: ["nodejs-typescript-development", "full-stack-development"],
@@ -284,8 +285,11 @@ Yes, keeping strict interfaces at boundaries lets migrated and legacy modules in
 ## Conclusion
 
 Start with one bounded service boundary, enforce automated checks in CI, and expand coverage module by module. If you need architecture support, [get in touch](/contact/). ${"Wrap-up and next steps for your engineering workflow. ".repeat(65)}`;
+  const rawSeoTitle = spec.seoTitle || spec.title;
+  const seoTitle = rawSeoTitle.length < 50 ? `${rawSeoTitle} (2026)` : rawSeoTitle.slice(0, 60);
   return {
     title: spec.title,
+    seoTitle,
     description: spec.description,
     keyword: spec.keyword,
     slug: spec.slug,
@@ -297,18 +301,8 @@ Start with one bounded service boundary, enforce automated checks in CI, and exp
 }
 
 // ---------- metadata helpers ----------
-const DESC_MAX_CHARS = 180; // validation limit for description (prompt targets 120-160)
 const MIN_BODY_WORDS = 1500; // hard body-length gate, shared by generation and validation
-// Clamp to max chars at a word boundary; hard cut if there is no decent boundary.
-function clampAtWord(s, max) {
-  const t = String(s || "").trim();
-  if (t.length <= max) return t;
-  const cut = t.slice(0, max + 1);
-  const at = cut.lastIndexOf(" ");
-  const base = at >= 40 ? cut.slice(0, at) : t.slice(0, max);
-  return base.trim().replace(/[\s.,;:!?—–-]+$/u, "");
-}
-const META_KEYS = ["title", "description", "keyword", "slug", "category"];
+const META_KEYS = ["title", "seoTitle", "description", "keyword", "slug", "category"];
 
 export function targetCategoryForTopic(topic) {
   return topic === "AI Engineering and Integration" ? "AI Engineering" : "Backend";
@@ -394,8 +388,6 @@ export function validateArticle(a, corpusSlugs, extraCfg = {}) {
   return validateAeoGeo(a, {
     lang: "en",
     domain: "fullstackweb.dev",
-    descMin: 100,
-    descMax: DESC_MAX_CHARS,
     minWords: MIN_BODY_WORDS,
     trailingSlash: true,
     servicePrefix: "/services/",
@@ -421,7 +413,7 @@ function frontmatter(a) {
   const svcLine = svcLines.trim() ? svcLines : "";
   const cat = a.category ? `category: ${JSON.stringify(a.category)}\n` : "";
   const kwLine = a.keyword ? `keyword: ${JSON.stringify(a.keyword)}\n` : "";
-  return `---\ntitle: ${JSON.stringify(a.title)}\ndescription: ${JSON.stringify(a.description)}\n${kwLine}${cat}pubDate: ${pub}\n${svcLine}cover: "../../assets/blog/${a.slug}.png"\ncoverAlt: ${JSON.stringify(a.coverAlt)}\ndraft: false\n---\n\n${a.body.trim()}\n`;
+  return `---\ntitle: ${JSON.stringify(a.title)}\nseoTitle: ${JSON.stringify(a.seoTitle)}\ndescription: ${JSON.stringify(a.description)}\n${kwLine}${cat}pubDate: ${pub}\n${svcLine}cover: "../../assets/blog/${a.slug}.png"\ncoverAlt: ${JSON.stringify(a.coverAlt)}\ndraft: false\n---\n\n${a.body.trim()}\n`;
 }
 
 // ---------- main ----------
@@ -479,7 +471,7 @@ async function main() {
 Target stack: "${targetTopic}". Category MUST be ${JSON.stringify(targetCategory)}.
 Explicitly name the stack/framework (${targetTopic}) in "title", "slug", and "keyword", and include 1-3 matching service slug(s) in "services" from ${JSON.stringify(SERVICE_VALUES)}.${targetTopic === "AI Engineering and Integration" ? ' ("AI Engineering" articles should sit inside a concrete backend/fullstack stack like Python, Rust, Node.js, Go, or Rails.)' : ""}
 Signals are optional: pick a signal from Signals below ONLY if it directly fits "${targetTopic}", OR set "signalIndex": 0 for an evergreen topic in "${targetTopic}" (no signal source URL).
-Reply with ONLY this JSON (no prose): {"signalIndex":<0..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","description":"120-160 chars","slug":"kebab-case-slug","category":${JSON.stringify(targetCategory)},"services":${JSON.stringify(SERVICE_VALUES)}}
+Reply with ONLY this JSON (no prose): {"signalIndex":<0..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"50-60 chars","description":"120-160 chars","slug":"kebab-case-slug","category":${JSON.stringify(targetCategory)},"services":${JSON.stringify(SERVICE_VALUES)}}
 Avoid all of these existing posts: ${avoidPosts.join(" | ")}
 Avoid these existing target keywords: ${existingKeywords.slice(0, 100).join(", ")}
 Signals:
@@ -492,6 +484,7 @@ ${signalListText}`;
     angle: "practical guide",
     rationale: "stub",
     title: stub.title,
+    seoTitle: stub.seoTitle,
     description: stub.description,
     slug: stub.slug,
     category: stub.category,
@@ -617,12 +610,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   if (!draft.body) await skipShort(draft.words);
   const body = withLinks(meta, draft.body);
   const article = { ...meta, body };
-  if (article.description && article.description.length > DESC_MAX_CHARS) {
-    const clamped = clampAtWord(article.description, DESC_MAX_CHARS);
-    console.log(`description clamped: ${article.description.length}c -> ${clamped.length}c`);
-    article.description = clamped;
-  }
-  console.log(`article: ${article.title} | ${article.slug}`);
+  console.log(`article: ${article.title} | ${article.slug} | seoTitle ${String(article.seoTitle || "").length}c`);
 
   // 4) validation (with one self-correction retry)
   const runValidate = (a) => validateArticle(a, corpusSlugs, { existingKeywords, validBlogPaths });
@@ -630,17 +618,20 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   // 4a) metadata self-correction — the body-only retry below cannot fix these
   if (!v.ok && v.errs.some(isMetaErr)) {
     console.error("metadata validation failed, requesting metadata fix:", v.errs.join("; "));
-    try {
-      const metaNow = Object.fromEntries(META_KEYS.map((k) => [k, article[k]]));
-      const fixPrompt = `You previously produced this blog metadata JSON for fullstackweb.dev:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars\n- description: 120-160 chars (hard max 180) and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- category: must stay ${JSON.stringify(targetCategory)}\nOutput ONLY the JSON object, no prose.`;
-      const fixed = parseJSONObject(await callModel(fixPrompt, { maxTokens: 2048 }));
-      if (fixed && typeof fixed === "object") {
-        for (const k of META_KEYS) if (k !== "category" && typeof fixed[k] === "string" && fixed[k].trim()) article[k] = fixed[k].trim();
-        if (article.description && article.description.length > DESC_MAX_CHARS) article.description = clampAtWord(article.description, DESC_MAX_CHARS);
-        v = runValidate(article);
-        console.log(v.ok ? "validation ok after metadata fix" : `still failing after metadata fix: ${v.errs.join("; ")}`);
-      }
-    } catch (e) { console.error("metadata fix call failed:", e.message); }
+    v = await repairMetadata({
+      article,
+      metaKeys: META_KEYS,
+      immutableKeys: ["category"],
+      initialValidation: v,
+      validate: runValidate,
+      callModel: (prompt) => callModel(prompt, { maxTokens: 2048 }),
+      buildPrompt: (metaNow, metaErrs) =>
+        `You previously produced this blog metadata JSON for fullstackweb.dev:\n${JSON.stringify(metaNow)}\nIt failed validation: ${metaErrs.join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars\n- seoTitle: 50-60 chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- category: must stay ${JSON.stringify(targetCategory)}\nOutput ONLY the JSON object, no prose.`,
+    });
+  }
+  if (!v.ok && v.errs.every(isMetaErr)) {
+    await fail(`article validation failed: ${v.errs.join("; ")}`);
+    return;
   }
   if (!v.ok) {
     console.error("validation failed, retrying body with feedback:", v.errs.join("; "));

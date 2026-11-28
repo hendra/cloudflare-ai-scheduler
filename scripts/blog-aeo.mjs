@@ -311,11 +311,13 @@ export function validateAeoGeo(article = {}, cfg = {}) {
     metaErrs.push("title length");
   }
 
-  if (cfg.seoTitleMax != null) {
+  if (cfg.seoTitle !== false) {
+    const seoTitleMin = cfg.seoTitleMin ?? 50;
+    const seoTitleMax = cfg.seoTitleMax ?? 60;
     const seoTitle = String(article.seoTitle || "");
     if (!seoTitle) metaErrs.push("missing seoTitle");
-    else if (seoTitle.length > cfg.seoTitleMax) {
-      metaErrs.push(`seoTitle ${seoTitle.length} > ${cfg.seoTitleMax}`);
+    else if (seoTitle.length < seoTitleMin || seoTitle.length > seoTitleMax) {
+      metaErrs.push(`seoTitle ${seoTitle.length} not in ${seoTitleMin}-${seoTitleMax}`);
     }
   }
 
@@ -620,4 +622,43 @@ export function runSitePostCheck({ siteDir, relMdPath }) {
       `site post check (${checkScript}) failed:\n${out.slice(-800) || e.message}`,
     );
   }
+}
+
+export async function repairMetadata({
+  article,
+  metaKeys,
+  immutableKeys = [],
+  initialValidation,
+  buildPrompt,
+  validate,
+  callModel,
+  maxAttempts = 3,
+}) {
+  let v = initialValidation;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const metaErrs = v.errs.filter(isMetaErr);
+    if (metaErrs.length === 0) break;
+    const metaNow = Object.fromEntries(metaKeys.map((k) => [k, article[k] ?? ""]));
+    try {
+      const raw = await callModel(buildPrompt(metaNow, metaErrs));
+      const m = String(raw || "").match(/\{[\s\S]*\}/);
+      const fixed = m ? JSON.parse(m[0]) : null;
+      if (fixed && typeof fixed === "object") {
+        for (const k of metaKeys) {
+          if (!immutableKeys.includes(k) && typeof fixed[k] === "string" && fixed[k].trim()) {
+            article[k] = fixed[k].trim();
+          }
+        }
+        v = validate(article);
+        console.log(
+          v.ok
+            ? `validation ok after metadata fix (attempt ${attempt})`
+            : `metadata fix attempt ${attempt} still failing: ${v.errs.join("; ")}`,
+        );
+      }
+    } catch (e) {
+      console.error(`metadata fix attempt ${attempt} failed:`, e.message);
+    }
+  }
+  return v;
 }
