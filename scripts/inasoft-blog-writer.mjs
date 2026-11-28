@@ -82,7 +82,6 @@ const SUBCATEGORIES_BY_CATEGORY = {
 const CATEGORY_VALUES = Object.keys(SUBCATEGORIES_BY_CATEGORY);
 const SUBCATEGORY_VALUES = Object.values(SUBCATEGORIES_BY_CATEGORY).flat();
 const categoryOf = (sub) => CATEGORY_VALUES.find((c) => SUBCATEGORIES_BY_CATEGORY[c].includes(sub));
-const SEO_TITLE_MAX = 50; // inasoft-site schema: seoTitle.max(50)
 const PILLAR_VALUES = ["software-bisnis", "ai-untuk-bisnis", "pengembangan-software", "tutorial-teknis"];
 const strip = (s) => String(s || "").replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#x27;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
 
@@ -199,22 +198,12 @@ Ya, kami terbiasa berkolaborasi dengan tim teknis internal klien dan menyesuaika
 Langkah pertama yang terbaik adalah memahami masalah bisnis yang ingin diselesaikan, lalu jadwalkan [Konsultasi Gratis](/#contact) untuk memetakan solusi yang aman dan sesuai prioritas operasional Anda.
 
 ${"Diskusi awal biasanya dimulai dari pertanyaan paling dasar: apa yang bisa ditingkatkan, apa yang paling penting, dan berapa sumber daya yang tersedia. Dari sana kami merancang rencana yang realistis. ".repeat(20)}`;
-  return { topic: "Stub topik AI untuk INASOFT", keyword: "AI untuk bisnis", angle: "playbook praktis", rationale: "stub", title: "Stub Panduan AI untuk Bisnis di Indonesia", seoTitle: "Stub Panduan AI Bisnis", description: "Stub deskripsi untuk testing pipeline INASOFT: memvalidasi syarat SEO, kata kunci, dan kualitas draf sebelum artikel masuk ke proses tinjauan editorial.", slug: "stub-panduan-ai-untuk-bisnis", lang: "id", service: "jasa-pembuatan-ai-agent", category: "ai-engineering", subcategory: "ai-automation", pillar: "ai-untuk-bisnis", coverAlt: "Diagram ilustrasi stub", body };
+  return { topic: "Stub topik AI untuk INASOFT", keyword: "AI untuk bisnis", angle: "playbook praktis", rationale: "stub", title: "Stub Panduan AI untuk Bisnis di Indonesia", seoTitle: "Panduan Praktis Implementasi AI untuk Bisnis di Indonesia", description: "Stub deskripsi untuk testing pipeline INASOFT: memvalidasi syarat SEO, kata kunci, dan kualitas draf sebelum artikel masuk ke proses tinjauan editorial.", slug: "stub-panduan-ai-untuk-bisnis", lang: "id", service: "jasa-pembuatan-ai-agent", category: "ai-engineering", subcategory: "ai-automation", pillar: "ai-untuk-bisnis", coverAlt: "Diagram ilustrasi stub", body };
 }
 
 
 // ---------- metadata helpers ----------
-const DESC_MAX_CHARS = 160; // inasoft-site astro schema: description.max(160) — must match the site, not the old script limit
 const MIN_BODY_WORDS = 1500; // hard body-length gate, shared by generation and validation
-// Clamp to max chars at a word boundary; hard cut if there is no decent boundary.
-function clampAtWord(s, max) {
-  const t = String(s || "").trim();
-  if (t.length <= max) return t;
-  const cut = t.slice(0, max + 1);
-  const at = cut.lastIndexOf(" ");
-  const base = at >= 40 ? cut.slice(0, at) : t.slice(0, max);
-  return base.trim().replace(/[\s.,;:!?—–-]+$/u, "");
-}
 const META_KEYS = ["title", "seoTitle", "description", "keyword", "slug"];
 
 function normalizeMetadataEnums(a) {
@@ -244,12 +233,6 @@ function normalizeMetadataEnums(a) {
     a.pillar = "pengembangan-software";
     console.warn("pillar: fallback applied ->", a.pillar);
   }
-  if (!a.seoTitle) a.seoTitle = clampAtWord(a.title, SEO_TITLE_MAX);
-  else if (a.seoTitle.length > SEO_TITLE_MAX) {
-    const clamped = clampAtWord(a.seoTitle, SEO_TITLE_MAX);
-    console.warn(`seoTitle clamped: ${a.seoTitle.length}c -> ${clamped.length}c`);
-    a.seoTitle = clamped;
-  }
   if (!a.lang) a.lang = "id";
 }
 
@@ -259,9 +242,6 @@ function validateArticle(a, corpusSlugs, extraCfg = {}) {
   return validateAeoGeo(a, {
     lang: "id",
     domain: "inasoft.id",
-    seoTitleMax: SEO_TITLE_MAX,
-    descMin: 100,
-    descMax: DESC_MAX_CHARS,
     minWords: MIN_BODY_WORDS,
     trailingSlash: false,
     servicePrefix: "/layanan/",
@@ -290,7 +270,7 @@ function frontmatter(a) {
   const pilLine = a.pillar ? `pillar: ${a.pillar}\n` : "";
   const langLine = a.lang ? `lang: ${a.lang}\n` : 'lang: id\n';
   const catLine = a.category ? `category: ${a.category}\n` : "";
-  return `---\ntitle: ${JSON.stringify(a.title)}\nseoTitle: ${JSON.stringify(a.seoTitle || String(a.title || "").slice(0, 50))}\ndescription: ${JSON.stringify(a.description)}\nkeyword: ${JSON.stringify(a.keyword)}\n${catLine}${subLine}${pilLine}${langLine}pubDate: ${pub}\n${svcLine}cover: "../../assets/blog/${a.slug}.png"\ncoverAlt: ${JSON.stringify(a.coverAlt)}\ndraft: false\n---\n\n${a.body.trim()}\n`;
+  return `---\ntitle: ${JSON.stringify(a.title)}\nseoTitle: ${JSON.stringify(a.seoTitle)}\ndescription: ${JSON.stringify(a.description)}\nkeyword: ${JSON.stringify(a.keyword)}\n${catLine}${subLine}${pilLine}${langLine}pubDate: ${pub}\n${svcLine}cover: "../../assets/blog/${a.slug}.png"\ncoverAlt: ${JSON.stringify(a.coverAlt)}\ndraft: false\n---\n\n${a.body.trim()}\n`;
 }
 
 // ---------- main ----------
@@ -349,7 +329,7 @@ function frontmatter(a) {
   ]);
   const topicPrompt = `You pick ONE blog topic for INASOFT (inasoft.id) — Indonesian IT company for software development, AI engineering, and digital transformation; readers: business owners and tech managers in Indonesia; pillars: AI engineering, modern software development, business software, cloud & DevOps. Pick the signal with the strongest, most durable angle for that audience.
 Reply with ONLY this JSON (no prose):
-{"signalIndex":<1..${signals.length}>,"topic":"short topic (Bahasa Indonesia)","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"<= 50 chars","description":"120-160 chars","slug":"kebab-case-slug","lang":"id","service":"one of: ${SERVICE_VALUES.join("|")}","category":"one of: ${CATEGORY_VALUES.join("|")}","subcategory":"must belong to the chosen category — ${Object.entries(SUBCATEGORIES_BY_CATEGORY).map(([c, subs]) => `${c}: ${subs.join("|")}`).join("; ")}","pillar":"one of: ${PILLAR_VALUES.join("|")}"}
+{"signalIndex":<1..${signals.length}>,"topic":"short topic (Bahasa Indonesia)","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"50-60 chars","description":"120-160 chars","slug":"kebab-case-slug","lang":"id","service":"one of: ${SERVICE_VALUES.join("|")}","category":"one of: ${CATEGORY_VALUES.join("|")}","subcategory":"must belong to the chosen category — ${Object.entries(SUBCATEGORIES_BY_CATEGORY).map(([c, subs]) => `${c}: ${subs.join("|")}`).join("; ")}","pillar":"one of: ${PILLAR_VALUES.join("|")}"}
 Avoid all of these existing posts: ${avoidPosts.join(" | ")}
 Avoid these existing target keywords: ${existingKeywords.slice(0, 100).join(", ")}
 Signals:
@@ -361,7 +341,7 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
     angle: "practical guide",
     rationale: "stub",
     title: "Stub Panduan AI untuk Bisnis di Indonesia",
-    seoTitle: "Stub Panduan AI Bisnis",
+    seoTitle: "Panduan Praktis Implementasi AI untuk Bisnis di Indonesia",
     description: "Stub deskripsi untuk testing pipeline INASOFT: memvalidasi syarat SEO, kata kunci, dan kualitas draf artikel sebelum masuk ke proses tinjaun editorial INASOFT.",
     slug: "stub-panduan-ai-untuk-bisnis",
     lang: "id",
@@ -479,12 +459,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   if (!draft.body) await skipShort(draft.words);
   const body = withLinks(meta, draft.body);
   const article = { ...meta, body };
-  if (article.description && article.description.length > DESC_MAX_CHARS) {
-    const clamped = clampAtWord(article.description, DESC_MAX_CHARS);
-    console.log(`description clamped: ${article.description.length}c -> ${clamped.length}c`);
-    article.description = clamped;
-  }
-  console.log(`article: ${article.title} | ${article.slug}`);
+  console.log(`article: ${article.title} | ${article.slug} | seoTitle ${String(article.seoTitle || "").length}c`);
 
   // 4) validation (with one self-correction retry)
   const runValidate = (a) => validateArticle(a, corpusSlugs, { existingKeywords, validBlogPaths });
@@ -494,11 +469,10 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     console.error("metadata validation failed, requesting metadata fix:", v.errs.join("; "));
     try {
       const metaNow = Object.fromEntries(META_KEYS.map((k) => [k, article[k]]));
-      const fixPrompt = `You previously produced this blog metadata JSON for inasoft.id:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style (Bahasa Indonesia)\n- seoTitle: at most 50 chars\n- description: 120-160 chars (hard max 160, inasoft-site schema) and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\nOutput ONLY the JSON object, no prose.`;
+      const fixPrompt = `You previously produced this blog metadata JSON for inasoft.id:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style (Bahasa Indonesia)\n- seoTitle: 50-60 chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\nOutput ONLY the JSON object, no prose.`;
       const fixed = parseJSONObject(await callModel(fixPrompt, { maxTokens: 2048 }));
       if (fixed && typeof fixed === "object") {
         for (const k of META_KEYS) if (typeof fixed[k] === "string" && fixed[k].trim()) article[k] = fixed[k].trim();
-        if (article.description && article.description.length > DESC_MAX_CHARS) article.description = clampAtWord(article.description, DESC_MAX_CHARS);
         v = runValidate(article);
         console.log(v.ok ? "validation ok after metadata fix" : `still failing after metadata fix: ${v.errs.join("; ")}`);
       }
