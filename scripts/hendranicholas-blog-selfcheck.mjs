@@ -21,8 +21,12 @@ assert.equal(SERVICE_VALUES.length, 9);
 assert.ok(Array.isArray(FABRICATED_EXPERIENCE) && FABRICATED_EXPERIENCE.length >= 5);
 
 const base = stubArticle();
+assert.ok(base.seoTitle.length >= 50 && base.seoTitle.length <= 60, `expected stub seoTitle 50-60c, got ${base.seoTitle?.length}`);
+assert.ok(base.description.length >= 120 && base.description.length <= 160, `expected stub description 120-160c, got ${base.description.length}`);
 const okRes = validateArticle({ ...base }, []);
 assert.equal(okRes.ok, true, `expected stub article valid, got: ${okRes.errs.join("; ")}`);
+assert.equal(validateArticle({ ...base, seoTitle: "Too short" }, []).ok, false);
+assert.equal(validateArticle({ ...base, description: "Too short description under 120 chars." }, []).ok, false);
 
 const fabricated = {
   ...base,

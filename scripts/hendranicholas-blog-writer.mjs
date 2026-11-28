@@ -217,6 +217,7 @@ Yes, wrapping shared parameters in a dependency function that instantiates a Pyd
 Keep dependency functions small, scope stateful resources with \`yield\`, and validate boundaries with Pydantic v2 models. If you want architecture help on a Python API, [get in touch](/#contact). ${"Wrap-up and next steps for structuring maintainable FastAPI services. ".repeat(65)}`;
   return {
     title: "Structuring FastAPI Dependency Injection and Pydantic v2 Validation",
+    seoTitle: "Structuring FastAPI Dependency Injection & Pydantic v2",
     description: "Practical guide to structuring fastapi dependency injection and Pydantic v2 validation in Python APIs without tangled router state.",
     keyword: "fastapi dependency injection",
     slug: "fastapi-dependency-injection-pydantic-v2-guide",
@@ -228,18 +229,8 @@ Keep dependency functions small, scope stateful resources with \`yield\`, and va
 }
 
 // ---------- metadata helpers ----------
-const DESC_MAX_CHARS = 180;
 const MIN_BODY_WORDS = 1500;
-
-function clampAtWord(s, max) {
-  const t = String(s || "").trim();
-  if (t.length <= max) return t;
-  const cut = t.slice(0, max + 1);
-  const at = cut.lastIndexOf(" ");
-  const base = at >= 40 ? cut.slice(0, at) : t.slice(0, max);
-  return base.trim().replace(/[\s.,;:!?—–-]+$/u, "");
-}
-const META_KEYS = ["title", "description", "keyword", "slug", "category"];
+const META_KEYS = ["title", "seoTitle", "description", "keyword", "slug", "category"];
 
 export function normalizeCategory(raw, { title = "", keyword = "", services = [] } = {}) {
   const clean = String(raw || "").replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
@@ -290,8 +281,6 @@ export function validateArticle(a, corpusSlugs, extraCfg = {}) {
   return validateAeoGeo(a, {
     lang: "en",
     domain: "hendranicholas.com",
-    descMin: 100,
-    descMax: DESC_MAX_CHARS,
     minWords: MIN_BODY_WORDS,
     trailingSlash: true,
     servicePrefix: "/services/",
@@ -318,7 +307,7 @@ function frontmatter(a) {
   const svcLine = svcLines.trim() ? svcLines : "";
   const cat = a.category ? `category: ${JSON.stringify(a.category)}\n` : "";
   const kwLine = a.keyword ? `keyword: ${JSON.stringify(a.keyword)}\n` : "";
-  return `---\ntitle: ${JSON.stringify(a.title)}\ndescription: ${JSON.stringify(a.description)}\n${kwLine}${cat}pubDate: ${pub}\n${svcLine}cover: "../../assets/blog/${a.slug}.png"\ncoverAlt: ${JSON.stringify(a.coverAlt)}\ndraft: false\n---\n\n${a.body.trim()}\n`;
+  return `---\ntitle: ${JSON.stringify(a.title)}\nseoTitle: ${JSON.stringify(a.seoTitle)}\ndescription: ${JSON.stringify(a.description)}\n${kwLine}${cat}pubDate: ${pub}\n${svcLine}cover: "../../assets/blog/${a.slug}.png"\ncoverAlt: ${JSON.stringify(a.coverAlt)}\ndraft: false\n---\n\n${a.body.trim()}\n`;
 }
 
 // ---------- main ----------
@@ -372,7 +361,7 @@ async function main() {
   const topicPrompt = `You pick ONE blog topic for Hendra Nicholas' portfolio (hendranicholas.com). Readers are mid/senior developers and technical founders. Write advanced, practical engineering tutorials ONLY — no beginner intros.
 Category MUST be "${target}".${target === "AI Integration" ? ' ("AI Integration" articles MUST sit inside Next.js, FastAPI, Go, Rust, or Ruby on Rails.)' : ""}
 Signals are optional: pick a matching signal from Signals below, OR set "signalIndex": 0 for an evergreen tutorial topic (no signal source URL).
-Reply with ONLY this JSON (no prose): {"signalIndex":<0..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","description":"120-160 chars","slug":"kebab-case-slug","category":${JSON.stringify(target)},"services":${JSON.stringify(SERVICE_VALUES)}}
+Reply with ONLY this JSON (no prose): {"signalIndex":<0..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"50-60 chars","description":"120-160 chars","slug":"kebab-case-slug","category":${JSON.stringify(target)},"services":${JSON.stringify(SERVICE_VALUES)}}
 Avoid all of these existing posts: ${avoidPosts.join(" | ")}
 Avoid these existing target keywords: ${existingKeywords.slice(0, 100).join(", ")}
 Signals:
@@ -386,6 +375,7 @@ ${signalListText}`;
     angle: "practical guide",
     rationale: "stub",
     title: stub.title,
+    seoTitle: stub.seoTitle,
     description: stub.description,
     slug: stub.slug,
     category: stub.category,
@@ -515,12 +505,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   if (!draft.body) await skipShort(draft.words);
   const body = withLinks(meta, draft.body);
   const article = { ...meta, body };
-  if (article.description && article.description.length > DESC_MAX_CHARS) {
-    const clamped = clampAtWord(article.description, DESC_MAX_CHARS);
-    console.log(`description clamped: ${article.description.length}c -> ${clamped.length}c`);
-    article.description = clamped;
-  }
-  console.log(`article: ${article.title} | ${article.slug}`);
+  console.log(`article: ${article.title} | ${article.slug} | seoTitle ${String(article.seoTitle || "").length}c`);
 
   // 4) validation (with one self-correction retry)
   const runValidate = (a) => validateArticle(a, corpusSlugs, { existingKeywords, validBlogPaths });
@@ -530,11 +515,10 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
     console.error("metadata validation failed, requesting metadata fix:", v.errs.join("; "));
     try {
       const metaNow = Object.fromEntries(META_KEYS.map((k) => [k, article[k]]));
-      const fixPrompt = `You previously produced this blog metadata JSON for hendranicholas.com:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars\n- description: 120-160 chars (hard max 180) and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- category: must stay ${JSON.stringify(target)}\nOutput ONLY the JSON object, no prose.`;
+      const fixPrompt = `You previously produced this blog metadata JSON for hendranicholas.com:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars\n- seoTitle: 50-60 chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- category: must stay ${JSON.stringify(target)}\nOutput ONLY the JSON object, no prose.`;
       const fixed = parseJSONObject(await callModel(fixPrompt, { maxTokens: 2048 }));
       if (fixed && typeof fixed === "object") {
         for (const k of META_KEYS) if (k !== "category" && typeof fixed[k] === "string" && fixed[k].trim()) article[k] = fixed[k].trim();
-        if (article.description && article.description.length > DESC_MAX_CHARS) article.description = clampAtWord(article.description, DESC_MAX_CHARS);
         v = runValidate(article);
         console.log(v.ok ? "validation ok after metadata fix" : `still failing after metadata fix: ${v.errs.join("; ")}`);
       }
