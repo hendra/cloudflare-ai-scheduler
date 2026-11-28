@@ -19,6 +19,7 @@ import {
   servicePathFor,
   runSitePostCheck,
   isMetaErr,
+  repairMetadata,
 } from "./blog-aeo.mjs";
 import {
   fetchPublished,
@@ -617,16 +618,20 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
   // 4a) metadata self-correction — the body-only retry below cannot fix these
   if (!v.ok && v.errs.some(isMetaErr)) {
     console.error("metadata validation failed, requesting metadata fix:", v.errs.join("; "));
-    try {
-      const metaNow = Object.fromEntries(META_KEYS.map((k) => [k, article[k]]));
-      const fixPrompt = `You previously produced this blog metadata JSON for fullstackweb.dev:\n${JSON.stringify(metaNow)}\nIt failed validation: ${v.errs.filter(isMetaErr).join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars\n- seoTitle: 50-60 chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- category: must stay ${JSON.stringify(targetCategory)}\nOutput ONLY the JSON object, no prose.`;
-      const fixed = parseJSONObject(await callModel(fixPrompt, { maxTokens: 2048 }));
-      if (fixed && typeof fixed === "object") {
-        for (const k of META_KEYS) if (k !== "category" && typeof fixed[k] === "string" && fixed[k].trim()) article[k] = fixed[k].trim();
-        v = runValidate(article);
-        console.log(v.ok ? "validation ok after metadata fix" : `still failing after metadata fix: ${v.errs.join("; ")}`);
-      }
-    } catch (e) { console.error("metadata fix call failed:", e.message); }
+    v = await repairMetadata({
+      article,
+      metaKeys: META_KEYS,
+      immutableKeys: ["category"],
+      initialValidation: v,
+      validate: runValidate,
+      callModel: (prompt) => callModel(prompt, { maxTokens: 2048 }),
+      buildPrompt: (metaNow, metaErrs) =>
+        `You previously produced this blog metadata JSON for fullstackweb.dev:\n${JSON.stringify(metaNow)}\nIt failed validation: ${metaErrs.join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars\n- seoTitle: 50-60 chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- category: must stay ${JSON.stringify(targetCategory)}\nOutput ONLY the JSON object, no prose.`,
+    });
+  }
+  if (!v.ok && v.errs.every(isMetaErr)) {
+    await fail(`article validation failed: ${v.errs.join("; ")}`);
+    return;
   }
   if (!v.ok) {
     console.error("validation failed, retrying body with feedback:", v.errs.join("; "));

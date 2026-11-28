@@ -765,3 +765,41 @@ for (const untouched of [
 ]) {
   assert.equal(fixVoice(untouched), untouched, untouched);
 }
+
+// ---------- repairMetadata ----------
+{
+  const { repairMetadata } = await import("./blog-aeo.mjs");
+  const enCfg = {
+    lang: "en", domain: "railsdev.io", trailingSlash: false, servicePrefix: "/services/",
+    contactHref: "/#contact", conclusionHeading: "Conclusion", faqHeading: "Frequently asked questions",
+  };
+  const article = {
+    title: "Node.js Streams in Production: Reliable Backends",
+    seoTitle: undefined,
+    description: "d".repeat(130),
+    slug: "nodejs-streams-repair",
+    keyword: "Node.js streams",
+    body: makeEnValidBody(),
+  };
+  const seenPrompts = [];
+  const replies = [
+    JSON.stringify({ ...article, seoTitle: "Too short (48c)" }),
+    JSON.stringify({ ...article, seoTitle: "Node.js Streams in Production: Reliable Backend Guide" }),
+  ];
+  const initialV = validateAeoGeo(article, enCfg);
+  const resV = await repairMetadata({
+    article,
+    metaKeys: ["title", "seoTitle", "description", "keyword", "slug"],
+    initialValidation: initialV,
+    buildPrompt: (metaNow, metaErrs) => {
+      const p = JSON.stringify({ metaNow, metaErrs });
+      seenPrompts.push(p);
+      return p;
+    },
+    validate: (a) => validateAeoGeo(a, enCfg),
+    callModel: async () => replies.shift(),
+  });
+  assert.equal(resV.ok, true, `expected repairMetadata to succeed on attempt 2, got: ${resV.errs.join("; ")}`);
+  assert.equal(seenPrompts.length, 2);
+  assert.ok(JSON.parse(seenPrompts[0]).metaNow.seoTitle === "", "missing seoTitle must serialize as empty string");
+}
