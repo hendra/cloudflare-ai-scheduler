@@ -199,12 +199,14 @@ Ya, kami terbiasa berkolaborasi dengan tim teknis internal klien dan menyesuaika
 Langkah pertama yang terbaik adalah memahami masalah bisnis yang ingin diselesaikan, lalu jadwalkan [Konsultasi Gratis](/#contact) untuk memetakan solusi yang aman dan sesuai prioritas operasional Anda.
 
 ${"Diskusi awal biasanya dimulai dari pertanyaan paling dasar: apa yang bisa ditingkatkan, apa yang paling penting, dan berapa sumber daya yang tersedia. Dari sana kami merancang rencana yang realistis. ".repeat(20)}`;
-  return { topic: "Stub topik AI untuk INASOFT", keyword: "AI untuk bisnis", angle: "playbook praktis", rationale: "stub", title: "Stub Panduan AI untuk Bisnis di Indonesia", seoTitle: "Panduan Praktis Implementasi AI untuk Bisnis di Indonesia", description: "Stub deskripsi untuk testing pipeline INASOFT: memvalidasi syarat SEO, kata kunci, dan kualitas draf sebelum artikel masuk ke proses tinjauan editorial.", slug: "stub-panduan-ai-untuk-bisnis", lang: "id", service: "jasa-pembuatan-ai-agent", category: "ai-engineering", subcategory: "ai-automation", pillar: "ai-untuk-bisnis", coverAlt: "Diagram ilustrasi stub", body };
+  return { topic: "Stub topik AI untuk INASOFT", keyword: "AI untuk bisnis", angle: "playbook praktis", rationale: "stub", title: "Stub Panduan AI untuk Bisnis di Indonesia", seoTitle: "Panduan Praktis AI untuk Bisnis di Indonesia", description: "Stub deskripsi untuk testing pipeline INASOFT: memvalidasi syarat SEO, kata kunci, dan kualitas draf sebelum artikel masuk ke proses tinjauan editorial.", slug: "stub-panduan-ai-untuk-bisnis", lang: "id", service: "jasa-pembuatan-ai-agent", category: "ai-engineering", subcategory: "ai-automation", pillar: "ai-untuk-bisnis", coverAlt: "Diagram ilustrasi stub", body };
 }
 
 
 // ---------- metadata helpers ----------
 const MIN_BODY_WORDS = 1500; // hard body-length gate, shared by generation and validation
+const SEO_TITLE_MIN = 40; // " | INASOFT" (10 chars) is appended -> 50-60 total <title>
+const SEO_TITLE_MAX = 50;
 const META_KEYS = ["title", "seoTitle", "description", "keyword", "slug"];
 
 function normalizeMetadataEnums(a) {
@@ -243,6 +245,8 @@ function validateArticle(a, corpusSlugs, extraCfg = {}) {
   return validateAeoGeo(a, {
     lang: "id",
     domain: "inasoft.id",
+    seoTitleMin: SEO_TITLE_MIN,
+    seoTitleMax: SEO_TITLE_MAX,
     minWords: MIN_BODY_WORDS,
     trailingSlash: false,
     servicePrefix: "/layanan/",
@@ -330,7 +334,7 @@ function frontmatter(a) {
   ]);
   const topicPrompt = `You pick ONE blog topic for INASOFT (inasoft.id) — Indonesian IT company for software development, AI engineering, and digital transformation; readers: business owners and tech managers in Indonesia; pillars: AI engineering, modern software development, business software, cloud & DevOps. Pick the signal with the strongest, most durable angle for that audience.
 Reply with ONLY this JSON (no prose):
-{"signalIndex":<1..${signals.length}>,"topic":"short topic (Bahasa Indonesia)","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"50-60 chars","description":"120-160 chars","slug":"kebab-case-slug","lang":"id","service":"one of: ${SERVICE_VALUES.join("|")}","category":"one of: ${CATEGORY_VALUES.join("|")}","subcategory":"must belong to the chosen category — ${Object.entries(SUBCATEGORIES_BY_CATEGORY).map(([c, subs]) => `${c}: ${subs.join("|")}`).join("; ")}","pillar":"one of: ${PILLAR_VALUES.join("|")}"}
+{"signalIndex":<1..${signals.length}>,"topic":"short topic (Bahasa Indonesia)","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"${SEO_TITLE_MIN}-${SEO_TITLE_MAX} chars","description":"120-160 chars","slug":"kebab-case-slug","lang":"id","service":"one of: ${SERVICE_VALUES.join("|")}","category":"one of: ${CATEGORY_VALUES.join("|")}","subcategory":"must belong to the chosen category — ${Object.entries(SUBCATEGORIES_BY_CATEGORY).map(([c, subs]) => `${c}: ${subs.join("|")}`).join("; ")}","pillar":"one of: ${PILLAR_VALUES.join("|")}"}
 Avoid all of these existing posts: ${avoidPosts.join(" | ")}
 Avoid these existing target keywords: ${existingKeywords.slice(0, 100).join(", ")}
 Signals:
@@ -342,7 +346,7 @@ ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.
     angle: "practical guide",
     rationale: "stub",
     title: "Stub Panduan AI untuk Bisnis di Indonesia",
-    seoTitle: "Panduan Praktis Implementasi AI untuk Bisnis di Indonesia",
+    seoTitle: "Panduan Praktis AI untuk Bisnis di Indonesia",
     description: "Stub deskripsi untuk testing pipeline INASOFT: memvalidasi syarat SEO, kata kunci, dan kualitas draf artikel sebelum masuk ke proses tinjaun editorial INASOFT.",
     slug: "stub-panduan-ai-untuk-bisnis",
     lang: "id",
@@ -475,7 +479,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
       validate: runValidate,
       callModel: (prompt) => callModel(prompt, { maxTokens: 2048 }),
       buildPrompt: (metaNow, metaErrs) =>
-        `You previously produced this blog metadata JSON for inasoft.id:\n${JSON.stringify(metaNow)}\nIt failed validation: ${metaErrs.join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style (Bahasa Indonesia)\n- seoTitle: 50-60 chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\nOutput ONLY the JSON object, no prose.`,
+        `You previously produced this blog metadata JSON for inasoft.id:\n${JSON.stringify(metaNow)}\nIt failed validation: ${metaErrs.join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style (Bahasa Indonesia)\n- seoTitle: ${SEO_TITLE_MIN}-${SEO_TITLE_MAX} chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\nOutput ONLY the JSON object, no prose.`,
     });
   }
   if (!v.ok && v.errs.every(isMetaErr)) {

@@ -163,11 +163,13 @@ Run large backfills in an idempotent background job after the schema deploy so t
 ## Conclusion
 
 Test every migration locally and in CI before it touches production. If you need help planning a zero-downtime upgrade, [book a discovery call](/#contact). ${"Wrap-up and next steps for your engineering workflow. ".repeat(65)}`;
-  return { title: "Rails Migration Testing: A Practical Guide", seoTitle: "Rails Migration Testing: A Practical Zero-Downtime Guide", description: "Practical guide to writing and verifying Rails migrations in large apps: PostgreSQL pitfalls, Active Record internals and zero-downtime deploy testing.", keyword: "rails migration testing", slug: "rails-migration-testing-guide", service: "Rails Upgrade", coverAlt: "Diagram of a Rails migration being tested against a PostgreSQL database, with rollback steps", body };
+  return { title: "Rails Migration Testing: A Practical Guide", seoTitle: "Rails Migration Testing: A Practical Guide", description: "Practical guide to writing and verifying Rails migrations in large apps: PostgreSQL pitfalls, Active Record internals and zero-downtime deploy testing.", keyword: "rails migration testing", slug: "rails-migration-testing-guide", service: "Rails Upgrade", coverAlt: "Diagram of a Rails migration being tested against a PostgreSQL database, with rollback steps", body };
 }
 
 // ---------- metadata helpers ----------
 const MIN_BODY_WORDS = 1500; // hard body-length gate, shared by generation and validation
+const SEO_TITLE_MIN = 39; // " | RailsDev" (11 chars) is appended -> 50-60 total <title>
+const SEO_TITLE_MAX = 49;
 const META_KEYS = ["title", "seoTitle", "description", "keyword", "slug", "service"];
 
 // ---------- validation ----------
@@ -175,6 +177,8 @@ function validateArticle(a, corpusSlugs, extraCfg = {}) {
   return validateAeoGeo(a, {
     lang: "en",
     domain: "railsdev.io",
+    seoTitleMin: SEO_TITLE_MIN,
+    seoTitleMax: SEO_TITLE_MAX,
     minWords: MIN_BODY_WORDS,
     trailingSlash: false,
     servicePrefix: "/services/",
@@ -249,12 +253,12 @@ function frontmatter(a) {
   const existingKeywords = [...new Set([...corpus.map((c) => c.keyword).filter(Boolean), ...history.keywords])];
   const validBlogPaths = new Set(corpus.filter((c) => !c.draft).map((c) => `/blog/${c.slug}`));
   const topicPrompt = `You pick ONE blog topic for RailsDev.io (railsdev.io) — senior Rails consultancy in Indonesia/English; readers: business owners and senior developers; pillars: rails, ai-engineering, modern full-stack, devtools, open source. Pick the signal with the strongest, most durable angle for that audience.
-Reply with ONLY this JSON (no prose): {"signalIndex":<1..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"50-60 chars","description":"120-160 chars","slug":"kebab-case-slug","service":"${SERVICE_VALUES.join("|")}"}
+Reply with ONLY this JSON (no prose): {"signalIndex":<1..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"${SEO_TITLE_MIN}-${SEO_TITLE_MAX} chars","description":"120-160 chars","slug":"kebab-case-slug","service":"${SERVICE_VALUES.join("|")}"}
 Avoid all of these existing posts: ${avoidPosts.join(" | ")}
 Avoid these existing target keywords: ${existingKeywords.slice(0, 100).join(", ")}
 Signals:
 ${signals.map((s, i) => `${i + 1}. [${s.source}] ${s.title} — ${s.description.slice(0, 160)} (${s.signals})`).join("\n")}`;
-  let topic = AI_STUB ? { signalIndex: 1, topic: "Rails migration testing strategy", keyword: "rails migration testing", angle: "practical guide", rationale: "stub", title: "Rails Migration Testing: A Practical Guide", seoTitle: "Rails Migration Testing: A Practical Zero-Downtime Guide", description: "Practical guide to writing and verifying Rails migrations in large apps: PostgreSQL pitfalls, Active Record internals and zero-downtime deploy testing.", slug: "rails-migration-testing-guide", service: "Rails Upgrade", coverAlt: "Diagram of a Rails migration being tested against a PostgreSQL database" } : null;
+  let topic = AI_STUB ? { signalIndex: 1, topic: "Rails migration testing strategy", keyword: "rails migration testing", angle: "practical guide", rationale: "stub", title: "Rails Migration Testing: A Practical Guide", seoTitle: "Rails Migration Testing: A Practical Guide", description: "Practical guide to writing and verifying Rails migrations in large apps: PostgreSQL pitfalls, Active Record internals and zero-downtime deploy testing.", slug: "rails-migration-testing-guide", service: "Rails Upgrade", coverAlt: "Diagram of a Rails migration being tested against a PostgreSQL database" } : null;
   let chosenSignal = topic ? (signals[(topic.signalIndex || 1) - 1] || null) : null;
   if (!topic) {
     let feedback = "";
@@ -373,7 +377,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
       validate: runValidate,
       callModel: (prompt) => callModel(prompt, { maxTokens: 2048 }),
       buildPrompt: (metaNow, metaErrs) =>
-        `You previously produced this blog metadata JSON for railsdev.io:\n${JSON.stringify(metaNow)}\nIt failed validation: ${metaErrs.join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style\n- seoTitle: 50-60 chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- service: one of ${SERVICE_VALUES.join(" | ")}\nOutput ONLY the JSON object, no prose.`,
+        `You previously produced this blog metadata JSON for railsdev.io:\n${JSON.stringify(metaNow)}\nIt failed validation: ${metaErrs.join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars, H1-style\n- seoTitle: ${SEO_TITLE_MIN}-${SEO_TITLE_MAX} chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- service: one of ${SERVICE_VALUES.join(" | ")}\nOutput ONLY the JSON object, no prose.`,
     });
   }
   if (!v.ok && v.errs.every(isMetaErr)) {

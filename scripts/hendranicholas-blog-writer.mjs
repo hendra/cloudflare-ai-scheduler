@@ -218,7 +218,7 @@ Yes, wrapping shared parameters in a dependency function that instantiates a Pyd
 Keep dependency functions small, scope stateful resources with \`yield\`, and validate boundaries with Pydantic v2 models. If you want architecture help on a Python API, [get in touch](/#contact). ${"Wrap-up and next steps for structuring maintainable FastAPI services. ".repeat(65)}`;
   return {
     title: "Structuring FastAPI Dependency Injection and Pydantic v2 Validation",
-    seoTitle: "Structuring FastAPI Dependency Injection & Pydantic v2",
+    seoTitle: "FastAPI Dependency Injection & Pydantic v2",
     description: "Practical guide to structuring fastapi dependency injection and Pydantic v2 validation in Python APIs without tangled router state.",
     keyword: "fastapi dependency injection",
     slug: "fastapi-dependency-injection-pydantic-v2-guide",
@@ -231,6 +231,8 @@ Keep dependency functions small, scope stateful resources with \`yield\`, and va
 
 // ---------- metadata helpers ----------
 const MIN_BODY_WORDS = 1500;
+const SEO_TITLE_MIN = 32; // " | Hendra Nicholas" (18 chars) is appended -> 50-60 total <title>
+const SEO_TITLE_MAX = 42;
 const META_KEYS = ["title", "seoTitle", "description", "keyword", "slug", "category"];
 
 export function normalizeCategory(raw, { title = "", keyword = "", services = [] } = {}) {
@@ -282,6 +284,8 @@ export function validateArticle(a, corpusSlugs, extraCfg = {}) {
   return validateAeoGeo(a, {
     lang: "en",
     domain: "hendranicholas.com",
+    seoTitleMin: SEO_TITLE_MIN,
+    seoTitleMax: SEO_TITLE_MAX,
     minWords: MIN_BODY_WORDS,
     trailingSlash: true,
     servicePrefix: "/services/",
@@ -362,7 +366,7 @@ async function main() {
   const topicPrompt = `You pick ONE blog topic for Hendra Nicholas' portfolio (hendranicholas.com). Readers are mid/senior developers and technical founders. Write advanced, practical engineering tutorials ONLY — no beginner intros.
 Category MUST be "${target}".${target === "AI Integration" ? ' ("AI Integration" articles MUST sit inside Next.js, FastAPI, Go, Rust, or Ruby on Rails.)' : ""}
 Signals are optional: pick a matching signal from Signals below, OR set "signalIndex": 0 for an evergreen tutorial topic (no signal source URL).
-Reply with ONLY this JSON (no prose): {"signalIndex":<0..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"50-60 chars","description":"120-160 chars","slug":"kebab-case-slug","category":${JSON.stringify(target)},"services":${JSON.stringify(SERVICE_VALUES)}}
+Reply with ONLY this JSON (no prose): {"signalIndex":<0..${signals.length}>,"topic":"short topic","keyword":"primary keyword","angle":"one-line angle","rationale":"why this wins","title":"article H1, 20-120 chars","seoTitle":"${SEO_TITLE_MIN}-${SEO_TITLE_MAX} chars","description":"120-160 chars","slug":"kebab-case-slug","category":${JSON.stringify(target)},"services":${JSON.stringify(SERVICE_VALUES)}}
 Avoid all of these existing posts: ${avoidPosts.join(" | ")}
 Avoid these existing target keywords: ${existingKeywords.slice(0, 100).join(", ")}
 Signals:
@@ -522,7 +526,7 @@ Return ONLY the article body as markdown: the opening paragraph and "##" section
       validate: runValidate,
       callModel: (prompt) => callModel(prompt, { maxTokens: 2048 }),
       buildPrompt: (metaNow, metaErrs) =>
-        `You previously produced this blog metadata JSON for hendranicholas.com:\n${JSON.stringify(metaNow)}\nIt failed validation: ${metaErrs.join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars\n- seoTitle: 50-60 chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- category: must stay ${JSON.stringify(target)}\nOutput ONLY the JSON object, no prose.`,
+        `You previously produced this blog metadata JSON for hendranicholas.com:\n${JSON.stringify(metaNow)}\nIt failed validation: ${metaErrs.join("; ")}.\nReturn ONLY a corrected JSON object with exactly the same keys. Hard constraints:\n- title: 20-120 chars\n- seoTitle: ${SEO_TITLE_MIN}-${SEO_TITLE_MAX} chars\n- description: 120-160 chars and MUST contain "${article.keyword}"\n- keyword: keep "${article.keyword}" unless it cannot fit; primary keyword only; NOT any existing target keyword\n- slug: kebab-case (a-z0-9 and hyphens), NOT any of: ${corpusSlugs.slice(0, 60).join(", ")}\n- category: must stay ${JSON.stringify(target)}\nOutput ONLY the JSON object, no prose.`,
     });
   }
   if (!v.ok && v.errs.every(isMetaErr)) {
