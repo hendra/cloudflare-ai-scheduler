@@ -174,6 +174,9 @@ function makeIdValidBody({
   assert.ok(validateAeoGeo({ ...railsArticle, seoTitle: "x".repeat(61) }, railsdevCfg).metaErrs.some((e) => /seoTitle 61 not in 50-60/.test(e)));
   assert.equal(validateAeoGeo({ ...railsArticle, seoTitle: "x".repeat(50) }, railsdevCfg).ok, true);
   assert.equal(validateAeoGeo({ ...railsArticle, seoTitle: "x".repeat(60) }, railsdevCfg).ok, true);
+  assert.equal(validateAeoGeo({ ...railsArticle, seoTitle: "x".repeat(40) }, { ...railsdevCfg, seoTitleMin: 40, seoTitleMax: 50 }).ok, true);
+  assert.equal(validateAeoGeo({ ...railsArticle, seoTitle: "x".repeat(50) }, { ...railsdevCfg, seoTitleMin: 40, seoTitleMax: 50 }).ok, true);
+  assert.ok(validateAeoGeo({ ...railsArticle, seoTitle: "x".repeat(51) }, { ...railsdevCfg, seoTitleMin: 40, seoTitleMax: 50 }).metaErrs.some((e) => /seoTitle 51 not in 40-50/.test(e)));
   assert.ok(validateAeoGeo({ ...railsArticle, description: "x".repeat(119) }, railsdevCfg).metaErrs.some((e) => /description 119 not in 120-160/.test(e)));
   assert.ok(validateAeoGeo({ ...railsArticle, description: "x".repeat(161) }, railsdevCfg).metaErrs.some((e) => /description 161 not in 120-160/.test(e)));
   assert.equal(validateAeoGeo({ ...railsArticle, description: "x".repeat(120) }, railsdevCfg).ok, true);
