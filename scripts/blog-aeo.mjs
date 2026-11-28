@@ -311,11 +311,13 @@ export function validateAeoGeo(article = {}, cfg = {}) {
     metaErrs.push("title length");
   }
 
-  if (cfg.seoTitleMax != null) {
+  if (cfg.seoTitle !== false) {
+    const seoTitleMin = cfg.seoTitleMin ?? 50;
+    const seoTitleMax = cfg.seoTitleMax ?? 60;
     const seoTitle = String(article.seoTitle || "");
     if (!seoTitle) metaErrs.push("missing seoTitle");
-    else if (seoTitle.length > cfg.seoTitleMax) {
-      metaErrs.push(`seoTitle ${seoTitle.length} > ${cfg.seoTitleMax}`);
+    else if (seoTitle.length < seoTitleMin || seoTitle.length > seoTitleMax) {
+      metaErrs.push(`seoTitle ${seoTitle.length} not in ${seoTitleMin}-${seoTitleMax}`);
     }
   }
 

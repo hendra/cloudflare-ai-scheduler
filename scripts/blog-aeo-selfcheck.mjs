@@ -138,9 +138,6 @@ function makeIdValidBody({
   const railsdevCfg = {
     lang: "en",
     domain: "railsdev.io",
-    seoTitleMax: 49,
-    descMin: 120,
-    descMax: 160,
     servicePrefix: "/services/",
     contactHref: "/#contact",
     conclusionHeading: "Conclusion",
@@ -156,7 +153,7 @@ function makeIdValidBody({
 
   const railsArticle = {
     title: "Node.js Streams in Production: Patterns for Reliable Backends",
-    seoTitle: "Node.js Streams in Production Guide",
+    seoTitle: "Node.js Streams in Production: Reliable Backend Guide",
     description: "Practical guide to Node.js streams in production: backpressure, async iterators, error handling, and memory-safe pipelines for backend services.",
     keyword: "node.js streams",
     slug: "nodejs-streams-production-guide",
@@ -170,6 +167,17 @@ function makeIdValidBody({
   assert.equal(resRails.bodyErrs.length, 0);
   assert.ok(resRails.wordCount >= 1500);
   assert.ok(resRails.links.includes("https://nodejs.org/api/stream.html"));
+
+  // Uniform seoTitle (50-60) and description (120-160) boundaries
+  assert.ok(validateAeoGeo({ ...railsArticle, seoTitle: "" }, railsdevCfg).metaErrs.includes("missing seoTitle"));
+  assert.ok(validateAeoGeo({ ...railsArticle, seoTitle: "x".repeat(49) }, railsdevCfg).metaErrs.some((e) => /seoTitle 49 not in 50-60/.test(e)));
+  assert.ok(validateAeoGeo({ ...railsArticle, seoTitle: "x".repeat(61) }, railsdevCfg).metaErrs.some((e) => /seoTitle 61 not in 50-60/.test(e)));
+  assert.equal(validateAeoGeo({ ...railsArticle, seoTitle: "x".repeat(50) }, railsdevCfg).ok, true);
+  assert.equal(validateAeoGeo({ ...railsArticle, seoTitle: "x".repeat(60) }, railsdevCfg).ok, true);
+  assert.ok(validateAeoGeo({ ...railsArticle, description: "x".repeat(119) }, railsdevCfg).metaErrs.some((e) => /description 119 not in 120-160/.test(e)));
+  assert.ok(validateAeoGeo({ ...railsArticle, description: "x".repeat(161) }, railsdevCfg).metaErrs.some((e) => /description 161 not in 120-160/.test(e)));
+  assert.equal(validateAeoGeo({ ...railsArticle, description: "x".repeat(120) }, railsdevCfg).ok, true);
+  assert.equal(validateAeoGeo({ ...railsArticle, description: "x".repeat(160) }, railsdevCfg).ok, true);
 
   // An example hostname is not a primary source: the body must fail validation.
   const exampleCitation = validateAeoGeo(
@@ -186,8 +194,6 @@ function makeIdValidBody({
   const fswCfg = {
     lang: "en",
     domain: "fullstackweb.dev",
-    descMin: 100,
-    descMax: 180,
     servicePrefix: "/services/",
     contactHref: "/contact/",
     trailingSlash: true,
@@ -204,6 +210,7 @@ function makeIdValidBody({
 
   const fswArticle = {
     title: "Node.js Streams in Production: TypeScript Pipeline Patterns",
+    seoTitle: "Node.js Streams in Production: TypeScript Guide 2026",
     description: "Practical guide to Node.js streams in TypeScript backends: backpressure, error propagation, and clean resource cleanup without memory spikes.",
     keyword: "node.js streams",
     slug: "nodejs-streams-typescript-guide",
@@ -220,9 +227,6 @@ function makeIdValidBody({
   const inasoftCfg = {
     lang: "id",
     domain: "inasoft.id",
-    seoTitleMax: 50,
-    descMin: 100,
-    descMax: 160,
     servicePrefix: "/layanan/",
     contactHref: "/#contact",
     trailingSlash: false,
@@ -241,7 +245,7 @@ function makeIdValidBody({
 
   const inasoftArticle = {
     title: "Arsitektur RAG untuk Aplikasi Perusahaan di Indonesia",
-    seoTitle: "Arsitektur RAG untuk Aplikasi Perusahaan",
+    seoTitle: "Arsitektur RAG untuk Aplikasi Perusahaan di Indonesia",
     description: "Panduan praktis membangun arsitektur RAG yang aman untuk dokumen perusahaan: kontrol akses, evaluasi retrieval, dan integrasi API.",
     keyword: "arsitektur RAG",
     slug: "arsitektur-rag-aplikasi-perusahaan",
@@ -261,7 +265,6 @@ function makeIdValidBody({
   const cfg = {
     lang: "en",
     domain: "railsdev.io",
-    seoTitleMax: 49,
     servicePrefix: "/services/",
     contactHref: "/#contact",
     conclusionHeading: "Conclusion",
@@ -272,7 +275,7 @@ function makeIdValidBody({
   const hyphenPass = validateAeoGeo(
     {
       title: "Next-js Caching Strategies for Dynamic Apps",
-      seoTitle: "Next.js Caching Strategies Guide",
+      seoTitle: "Next.js Caching Strategies for Production Web Apps",
       description: "Practical guide to Next.js caching layers in production web applications: request memoization, data cache layers, and safe revalidation.",
       keyword: "next-js caching",
       slug: "nextjs-caching-guide",
@@ -287,7 +290,7 @@ function makeIdValidBody({
   const missingLeadKw = validateAeoGeo(
     {
       title: "Node.js Streams in Production Backends",
-      seoTitle: "Node.js Streams Guide",
+      seoTitle: "Node.js Streams in Production: Reliable Backend Guide",
       description: "Practical guide to Node.js streams in production backends: backpressure, async iteration, error handling, and predictable memory usage.",
       keyword: "node.js streams",
       slug: "nodejs-streams-missing-kw",
@@ -304,7 +307,7 @@ function makeIdValidBody({
   const noOpeningPara = validateAeoGeo(
     {
       title: "Node.js Streams in Production Backends",
-      seoTitle: "Node.js Streams Guide",
+      seoTitle: "Node.js Streams in Production: Reliable Backend Guide",
       description: "Practical guide to Node.js streams in production backends: backpressure, async iteration, error handling, and predictable memory usage.",
       keyword: "node.js streams",
       slug: "nodejs-streams-no-lead",
@@ -321,7 +324,6 @@ function makeIdValidBody({
   const cfg = {
     lang: "en",
     domain: "railsdev.io",
-    seoTitleMax: 49,
     servicePrefix: "/services/",
     contactHref: "/#contact",
     conclusionHeading: "Conclusion",
@@ -333,7 +335,7 @@ function makeIdValidBody({
   const fencedFaqValid = validateAeoGeo(
     {
       title: "Node.js Streams in Production Backends",
-      seoTitle: "Node.js Streams Guide",
+      seoTitle: "Node.js Streams in Production: Reliable Backend Guide",
       description: "Practical guide to Node.js streams in production backends: backpressure, async iteration, error handling, and predictable memory usage.",
       keyword: "node.js streams",
       slug: "nodejs-streams-fenced-faq",
@@ -355,7 +357,7 @@ function makeIdValidBody({
   const twoFaqRes = validateAeoGeo(
     {
       title: "Node.js Streams in Production Backends",
-      seoTitle: "Node.js Streams Guide",
+      seoTitle: "Node.js Streams in Production: Reliable Backend Guide",
       description: "Practical guide to Node.js streams in production backends: backpressure, async iteration, error handling, and predictable memory usage.",
       keyword: "node.js streams",
       slug: "nodejs-streams-two-faq",
@@ -374,7 +376,7 @@ function makeIdValidBody({
   const emptyAnswerRes = validateAeoGeo(
     {
       title: "Node.js Streams in Production Backends",
-      seoTitle: "Node.js Streams Guide",
+      seoTitle: "Node.js Streams in Production: Reliable Backend Guide",
       description: "Practical guide to Node.js streams in production backends: backpressure, async iteration, error handling, and predictable memory usage.",
       keyword: "node.js streams",
       slug: "nodejs-streams-empty-faq",
@@ -391,9 +393,6 @@ function makeIdValidBody({
   const inasoftCfg = {
     lang: "id",
     domain: "inasoft.id",
-    seoTitleMax: 50,
-    descMin: 100,
-    descMax: 160,
     servicePrefix: "/layanan/",
     contactHref: "/#contact",
     conclusionHeading: "Kesimpulan",
@@ -405,7 +404,7 @@ function makeIdValidBody({
   const selfDomainRes = validateAeoGeo(
     {
       title: "Arsitektur RAG untuk Aplikasi Perusahaan di Indonesia",
-      seoTitle: "Arsitektur RAG untuk Aplikasi Perusahaan",
+      seoTitle: "Arsitektur RAG untuk Aplikasi Perusahaan di Indonesia",
       description: "Panduan praktis membangun arsitektur RAG yang aman untuk dokumen perusahaan: kontrol akses, evaluasi retrieval, dan integrasi API.",
       keyword: "arsitektur RAG",
       slug: "arsitektur-rag-self-domain",
@@ -421,7 +420,7 @@ function makeIdValidBody({
   const legacyFlatRes = validateAeoGeo(
     {
       title: "Arsitektur RAG untuk Aplikasi Perusahaan di Indonesia",
-      seoTitle: "Arsitektur RAG untuk Aplikasi Perusahaan",
+      seoTitle: "Arsitektur RAG untuk Aplikasi Perusahaan di Indonesia",
       description: "Panduan praktis membangun arsitektur RAG yang aman untuk dokumen perusahaan: kontrol akses, evaluasi retrieval, dan integrasi API.",
       keyword: "arsitektur RAG",
       slug: "arsitektur-rag-flat-link",
@@ -466,9 +465,6 @@ function makeIdValidBody({
   const soloCfg = {
     lang: "en",
     domain: "railsdev.io",
-    seoTitleMax: 49,
-    descMin: 120,
-    descMax: 160,
     servicePrefix: "/services/",
     contactHref: "/#contact",
     conclusionHeading: "Conclusion",
@@ -484,7 +480,7 @@ function makeIdValidBody({
   const multiErrRes = validateAeoGeo(
     {
       title: "Node.js Streams in Production Backends",
-      seoTitle: "Node.js Streams Guide",
+      seoTitle: "Node.js Streams in Production: Reliable Backend Guide",
       description: "Practical guide to Node.js streams in production backends: backpressure, async iteration, error handling, and predictable memory usage.",
       keyword: "Node.js Streams",
       slug: "nodejs-streams-dup-and-body-errs",
@@ -509,7 +505,7 @@ function makeIdValidBody({
   const idBannedRes = validateAeoGeo(
     {
       title: "Arsitektur RAG untuk Aplikasi Perusahaan di Indonesia",
-      seoTitle: "Arsitektur RAG untuk Aplikasi Perusahaan",
+      seoTitle: "Arsitektur RAG untuk Aplikasi Perusahaan di Indonesia",
       description: "Panduan praktis membangun arsitektur RAG yang aman untuk dokumen perusahaan: kontrol akses, evaluasi retrieval, dan integrasi API.",
       keyword: "arsitektur RAG",
       slug: "arsitektur-rag-banned",
@@ -520,9 +516,6 @@ function makeIdValidBody({
     {
       lang: "id",
       domain: "inasoft.id",
-      seoTitleMax: 50,
-      descMin: 100,
-      descMax: 160,
       servicePrefix: "/layanan/",
       contactHref: "/#contact",
       conclusionHeading: "Kesimpulan",
@@ -619,7 +612,7 @@ function makeIdValidBody({
     contactHref: "/#contact", conclusionHeading: "Conclusion", faqHeading: "Frequently asked questions",
   };
   const linkCfg = { domain: "railsdev.io", lang: "en", serviceHref: "/services/ai-software-development", contactHref: "/#contact", sourceUrl: "https://github.com/acme/tool", conclusionHeading: "Conclusion" };
-  const meta = { title: "A valid article title here", description: "d".repeat(130), slug: "fresh-slug", keyword: "Node.js streams" };
+  const meta = { title: "A valid article title here", seoTitle: "s".repeat(55), description: "d".repeat(130), slug: "fresh-slug", keyword: "Node.js streams" };
 
   // Missing all links + untagged fence + absolute self link → fixed in place, closing fence stays bare.
   const bare = makeEnValidBody({ links: "See [an old post](https://railsdev.io/blog/x).", external: "", cta: "Ready to ship?" })
